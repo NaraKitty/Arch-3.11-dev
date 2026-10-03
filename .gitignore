@@ -1,0 +1,20 @@
+# NEVER commit user-supplied or Microsoft/Netscape-derived material (see docs/LEGAL.md)
+build/
+media/
+*.IMG
+*.img
+*.iso
+*.ISO
+*.exe
+*.EXE
+*.dll
+*.DLL
+*.drv
+*.DRV
+*.fon
+*.FON
+*.hlp
+*.HLP
+out/
+work/
+__pycache__/
