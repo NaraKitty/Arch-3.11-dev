@@ -62,3 +62,12 @@ operating system needs one screen shared by every program, ported or native.
    MS-DOS Prompt item starting the built-in DOSBox and Terminal as the Linux terminal (ADR-006).
 5. GTK and Qt styles.
 6. Switching themes at run time.
+
+## Real Linux applications as acceptance tests (owner, October 2026)
+Every milestone is also checked with real Linux programs, not only xterm: Krita (Qt, a large art
+program with docks, menus, scroll bars, canvas and dialogs) is the first named by the owner; with it a
+GTK program (e.g. GIMP or a GTK text editor) and a CEF/Chromium window. For each: it starts framed by
+arch311-wm with the 3.11 frame and caption, moves/sizes/minimises to a desktop icon/maximises/closes
+(system menu, double click, Alt+F4) as 3.11 does, keeps working normally (drawing in Krita, saving a
+file), and with the Qt style / GTK theme its menus, buttons and scroll bars take the theme's look.
+Screenshots of each step are kept as test evidence; anything not run is marked UNTESTED.

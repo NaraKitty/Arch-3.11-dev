@@ -52,6 +52,7 @@ NOTHING BOOTS YET.
 | T-BR-01 | QtWebEngine browser with IE5 chrome; T-BR-02 Netscape chrome | ADR-003 |
 | T-APP-nn | Optional clean-room native ports (Notepad, Calc, Clock, Winmine, Sol) | Respect `docs/LEGAL.md` |
 | T-DOS-01 | MS-DOS Prompt starts the built-in DOSBox (C: = arch311's C: drive, 3.11's prompt banner) | ADR-006; needs DOSBox installed |
+| T-WM-APPS | Test real Linux apps under arch311-wm + Qt/GTK styles: Krita first (owner), a GTK app, a CEF window | docs/WM.md; needs an X server (Xvfb) and the apps installed |
 | T-TERM-01 | Port TERMINAL.EXE with a pseudo-terminal back end: the Linux terminal in 3.11's Terminal look | ADR-006 |
 
 ## Known quirks and findings
