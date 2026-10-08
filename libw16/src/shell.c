@@ -1,5 +1,6 @@
 /* SHELL.DLL: ShellAbout, using dialog 100 and the strings of the user's ripped SHELL.DLL.
- * UNVERIFIED against real 3.11: which text goes in 101/112/115 (compare with DOSBox-X). */
+ * Checked against real 3.11 (Calculator's About box): 101, 112, 115 and 110; the user name,
+ * memory and resources lines show this machine's values. */
 #include "w16int.h"
 #include "commdlg.h"
 #include <pwd.h>
@@ -66,7 +67,12 @@ static BOOL AboutDlgProc(HWND dlg, UINT m, WPARAM wp, LPARAM lp)
             snprintf(t, sizeof t, fmt, "3.11", "");
             SetDlgItemText(dlg, IDD_VERSION, t);
         }
-        SetDlgItemText(dlg, IDD_OTHER, a->other ? a->other : "");
+        /* measured on real 3.11 (Calculator's About box): the caller's text goes under the
+         * copyright (115), and the box below the first line (110) holds the serial number note,
+         * string 517 of USER.EXE, where setup stamps the registration */
+        SetDlgItemText(dlg, IDD_EXTRA, a->other ? a->other : "");
+        HINSTANCE umod = w16_system_module("USER.EXE");
+        if (umod && LoadString(umod, 517, t, sizeof t)) SetDlgItemText(dlg, IDD_OTHER, t);
         SendDlgItemMessage(dlg, IDD_ICON, STM_SETICON, (WPARAM)(a->icon ? a->icon : LoadIcon(NULL, IDI_APPLICATION)), 0);
 
         /* licensed to: the Linux account's full name; organisation from WIN.INI if set */

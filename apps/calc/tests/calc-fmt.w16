@@ -1,0 +1,206 @@
+# Calculator, standard view: how numbers are shown (gcvt with 13 digits and CALC's own rewrites),
+# typed fractions and their zeros, Back, +/-, errors
+# Generated from calc-fmt.scn by tools/ref311/scenario.py w16; reference frames: arch311-ref/shots/calc-fmt,
+# recorded with dosbox-x_MinGWx64_SDL2.exe (its FPU computes with the host x87, as a real 387 would).
+# regress: ARCH311_APP=apps/build/calc sh tools/run-cp-test.sh "$TEST" "$OUT"
+# compare: calc-fmt/01.png 01.png active ignore 320 240 332 260
+# compare: calc-fmt/02.png 02.png active ignore 320 240 332 260
+# compare: calc-fmt/03.png 03.png active ignore 320 240 332 260
+# compare: calc-fmt/04.png 04.png active ignore 320 240 332 260
+# compare: calc-fmt/05.png 05.png active ignore 320 240 332 260
+# compare: calc-fmt/06.png 06.png active ignore 320 240 332 260
+# compare: calc-fmt/07.png 07.png active ignore 320 240 332 260
+# compare: calc-fmt/08.png 08.png active ignore 320 240 332 260
+# compare: calc-fmt/09.png 09.png active ignore 320 240 332 260
+# compare: calc-fmt/10.png 10.png active ignore 320 240 332 260
+# compare: calc-fmt/11.png 11.png active ignore 320 240 332 260
+# compare: calc-fmt/12.png 12.png active ignore 320 240 332 260
+# compare: calc-fmt/13.png 13.png active ignore 320 240 332 260
+# compare: calc-fmt/14.png 14.png active ignore 320 240 332 260
+# compare: calc-fmt/15.png 15.png active ignore 320 240 332 260
+# compare: calc-fmt/16.png 16.png active ignore 320 240 332 260
+# compare: calc-fmt/17.png 17.png active ignore 320 240 332 260
+# compare: calc-fmt/18.png 18.png active ignore 320 240 332 260
+# compare: calc-fmt/19.png 19.png active ignore 320 240 332 260
+# compare: calc-fmt/20.png 20.png active ignore 320 240 332 260
+# compare: calc-fmt/21.png 21.png active ignore 320 240 332 260
+# ini: WIN.INI SciCalc layout=
+sleep 400
+sleep 400
+shot shots/01.png
+key 0
+key period
+key 0
+key 0
+key 1
+key 2
+key 3
+key 4
+sleep 400
+shot shots/02.png
+key esc
+key 1
+key 2
+key 3
+key 4
+key 5
+key 6
+key 7
+key 8
+key 9
+key 0
+key 1
+key 2
+key 3
+key 4
+key 5
+sleep 400
+shot shots/03.png
+key esc
+key 2
+key slash
+key 3
+key equals
+sleep 400
+shot shots/04.png
+key esc
+key 1
+key 0
+key slash
+key 3
+key equals
+sleep 400
+shot shots/05.png
+key esc
+key 1
+key slash
+key 7
+key equals
+sleep 400
+shot shots/06.png
+key esc
+key 0
+key period
+key 1
+key kp_plus
+key 0
+key period
+key 2
+key equals
+sleep 400
+shot shots/07.png
+key esc
+key 1
+key minus
+key 0
+key period
+key 9
+key equals
+sleep 400
+shot shots/08.png
+key esc
+key 2
+key period
+key 1
+key 1
+key minus
+key 2
+key period
+key 1
+key equals
+sleep 400
+shot shots/09.png
+key esc
+key 0
+key period
+key 0
+key 0
+key 0
+key 0
+key 0
+key 0
+key 1
+sleep 400
+shot shots/10.png
+key esc
+key 9
+key 9
+key 9
+key 9
+key 9
+key 9
+key 9
+key 9
+key kp_multiply
+key 9
+key 9
+key 9
+key 9
+key 9
+key 9
+key 9
+key 9
+key equals
+sleep 400
+shot shots/11.png
+key esc
+key 5
+key f9
+sleep 400
+shot shots/12.png
+key esc
+key 0
+key period
+key 0
+key 0
+key 0
+sleep 400
+shot shots/13.png
+key bs
+sleep 400
+shot shots/14.png
+key esc
+key 1
+key 2
+key 3
+key period
+key 4
+key 5
+key bs
+key bs
+sleep 400
+shot shots/15.png
+key bs
+key bs
+sleep 400
+shot shots/16.png
+key esc
+key 1
+key slash
+key 0
+key equals
+sleep 400
+shot shots/17.png
+key esc
+key 4
+sleep 400
+shot shots/18.png
+key esc
+key 0
+key r
+sleep 400
+shot shots/19.png
+key esc
+key 1
+key 2
+key kp_multiply
+key 3
+key equals
+key equals
+sleep 400
+shot shots/20.png
+key 4
+key equals
+sleep 400
+shot shots/21.png
+quit

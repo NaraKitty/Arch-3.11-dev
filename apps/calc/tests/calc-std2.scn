@@ -1,0 +1,21 @@
+# Calculator, standard view: more results digit for digit (divisions and a product)
+# ini: WIN.INI SciCalc layout=
+shot
+type 1/6=
+shot
+type 1/9=
+shot
+type 1/11=
+shot
+type 22/7=
+shot
+type 355/113=
+shot
+type 1/81=
+shot
+type 100/7=
+shot
+type 12345679
+key kp_multiply
+type 81=
+shot

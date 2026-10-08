@@ -482,7 +482,8 @@ static void popup_draw_item(Popup *p, HDC dc, int i)
     if (it->flags & MF_CHECKED) {
         W16Bitmap *ck = w16_obm(OBM_CHECK);
         if (ck) {
-            int cx = r.left + 1, cy = r.top + (r.bottom - r.top - ck->h) / 2;
+            /* at the item's left edge (measured on real 3.11: Calculator's View menu) */
+            int cx = r.left, cy = r.top + (r.bottom - r.top - ck->h) / 2;
             HDC tmp = dc;
             int a = cx, b = cy;
             w16_lp_to_dp(tmp, &a, &b);
@@ -541,13 +542,16 @@ static LRESULT popup_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         OffsetRect(&r, -r.left, -r.top);
         r.right -= 1; r.bottom -= 1; /* shadow column/row */
         FrameRect(dc, &r, w16_sys_brush(COLOR_WINDOWFRAME));
-        /* 1-pixel shadow to the right and below (measured: light gray, AND-ed with the screen) */
+        /* 1-pixel shadow to the right and below: solid light gray whatever is under it (measured
+         * on real 3.11 over white, black and bright blue - Calculator's menus over its display
+         * frame and buttons) */
+        uint32_t sh = w16_rgb(RGB(192, 192, 192));
         int x0 = h->rw.right - 1, y0 = h->rw.top + 1, y1 = h->rw.bottom;
         for (int y = y0; y < y1 && y < w16_screen.h; y++)
-            if (x0 >= 0 && x0 < w16_screen.w && y >= 0) w16_screen.px[y * w16_screen.w + x0] &= w16_rgb(RGB(192, 192, 192));
+            if (x0 >= 0 && x0 < w16_screen.w && y >= 0) w16_screen.px[y * w16_screen.w + x0] = sh;
         int yb = h->rw.bottom - 1;
         for (int x = h->rw.left + 1; x < h->rw.right - 1 && yb < w16_screen.h; x++)
-            if (x >= 0 && x < w16_screen.w && yb >= 0) w16_screen.px[yb * w16_screen.w + x] &= w16_rgb(RGB(192, 192, 192));
+            if (x >= 0 && x < w16_screen.w && yb >= 0) w16_screen.px[yb * w16_screen.w + x] = sh;
         w16_screen_dirty = 1;
         ReleaseDC(h, dc);
         return 0;

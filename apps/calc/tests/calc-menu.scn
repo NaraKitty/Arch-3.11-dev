@@ -1,0 +1,34 @@
+# Calculator: the Edit, View and Help menus, Help > About, View > Scientific and back
+# full: 2 3 4 8
+# The About box shows this machine's user name, free memory and resources: those lines are left out
+# compare+: 5 ignore 266 286 490 304 ignore 378 390 575 428
+# ini: WIN.INI SciCalc layout=1
+shot
+key alt
+type e
+shot
+key esc
+key esc
+type 7
+key alt
+type v
+shot
+key esc
+key esc
+type 8
+key alt
+type h
+shot
+type a
+shot
+key enter
+type 9
+shot
+key alt
+type vs
+shot
+key alt
+type v
+shot
+type t
+shot
