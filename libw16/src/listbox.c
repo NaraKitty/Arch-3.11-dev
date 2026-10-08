@@ -21,7 +21,12 @@ typedef struct {
     int fitting;      /* fit_height is resizing the window */
     int fit_h;        /* the client height fit_height gave it last */
     int vbar;         /* created with WS_VSCROLL: the bar comes back when the items do not fit */
+    int caret_on;     /* a combo's dropped list shows its caret once a key has moved it (3.11) */
 } Lb;
+
+/* where a list box sends WM_MEASUREITEM, WM_DRAWITEM, WM_COMPAREITEM: its parent, or the combo box
+ * it belongs to, which hands them on to its own parent as the combo's (USER seg33:073F) */
+static HWND lb_owner(HWND h);
 
 static Lb *lbd(HWND h) { return (Lb *)h->ctl; }
 static int has_strings(HWND h) { return !(h->style & (LBS_OWNERDRAWFIXED | LBS_OWNERDRAWVARIABLE)) || (h->style & LBS_HASSTRINGS); }
@@ -70,12 +75,13 @@ static void draw_item(HWND h, HDC dc, int i, HBRUSH bg)
     RECT ir = {0, y, r.right, y + l->ih};
     if (y >= r.bottom || i < l->top) return;
     int sel = i < l->n && (multisel(h) ? l->it[i].sel : i == l->cursel);
+    int caret = (l->focus || l->caret_on) && i == l->caret;
     if (ownerdraw(h) && i < l->n) {
         /* USER seg35:23E1; a combo box passes its list's items on as its own (seg33:073F:
          * ODT_COMBOBOX, the combo's id and handle) */
         HWND ctl = l->combo ? l->combo : h;
         DRAWITEMSTRUCT di = {l->combo ? ODT_COMBOBOX : ODT_LISTBOX, ctl->id, i, ODA_DRAWENTIRE,
-                             (sel ? ODS_SELECTED : 0) | (l->focus && i == l->caret ? ODS_FOCUS : 0) |
+                             (sel ? ODS_SELECTED : 0) | (caret ? ODS_FOCUS : 0) |
                                  ((h->style & WS_DISABLED) ? ODS_DISABLED : 0),
                              ctl, dc, ir, l->it[i].data};
         SendMessage(ctl->parent, WM_DRAWITEM, ctl->id, (LPARAM)&di);
@@ -92,7 +98,13 @@ static void draw_item(HWND h, HDC dc, int i, HBRUSH bg)
     if (h->style & LBS_USETABSTOPS) TabbedTextOut(dc, 2, y, s, strlen(s), l->ntabs, l->ntabs ? l->tabs : NULL, 0);
     else TextOut(dc, 2, y, s, strlen(s));
     SetTextColor(dc, old);
-    if (l->focus && i == l->caret) DrawFocusRect(dc, &ir);
+    if (caret) DrawFocusRect(dc, &ir);
+}
+
+static HWND lb_owner(HWND h)
+{
+    Lb *l = lbd(h);
+    return l && l->combo ? l->combo : h->parent;
 }
 
 static void paint(HWND h, HDC dc)
@@ -172,7 +184,7 @@ static int sorted_pos(HWND h, const char *s, ULONG_PTR data)
         if (has_strings(h)) c = sort_compare(s, l->it[i].s ? l->it[i].s : "");
         else {
             COMPAREITEMSTRUCT ci = {ODT_LISTBOX, h->id, h, (UINT)-1, data, i, l->it[i].data};
-            c = (int)SendMessage(h->parent, WM_COMPAREITEM, h->id, (LPARAM)&ci);
+            c = (int)SendMessage(lb_owner(h), WM_COMPAREITEM, h->id, (LPARAM)&ci);
         }
         if (c < 0) return i;
     }
@@ -213,22 +225,29 @@ static int item_at(HWND h, int y)
     return i;
 }
 
-/* unless LBS_NOINTEGRALHEIGHT, a list box shows whole items only: the height it was given is cut
- * down to whole items of the current font, again whenever the font or item height changes (on
- * 3.11, SND.CPL's lists come out 8 items of 13 px high from a 114 px template height) */
+/* unless LBS_NOINTEGRALHEIGHT, a list box shows whole items only, again whenever the font or item
+ * height changes */
 static void fit_height(HWND h)
 {
     Lb *l = lbd(h);
-    if ((h->style & (LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWVARIABLE)) || l->combo || l->ih <= 0) return;
+    if ((h->style & (LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWVARIABLE)) || l->ih <= 0) return;
+    /* USER seg38:0457 (the list box's WM_SIZE, again after a font change): unless the height less two
+     * borders is whole items, the window becomes as many whole items as its full height holds, plus
+     * two borders - so it can grow by a pixel or two. Measured on 3.11: COMMDLG's 16-pixel directory
+     * list 113 -> 114 and its dropped drive list; from the system font's fit, MAIN.CPL Printers' lists
+     * of 72 and 111 px end up 5 and 8 items of 13 px, SND.CPL's of 114 px 8 */
     RECT r;
     GetClientRect(h, &r);
-    int want = l->want_h / l->ih * l->ih;
-    if (want > 0) l->fit_h = want;
-    if (want <= 0 || want == r.bottom) return;
+    int H = h->rw.bottom - h->rw.top, cyb2 = 2 * GetSystemMetrics(SM_CYBORDER);
+    l->fit_h = r.bottom;
+    if ((H - cyb2) % l->ih == 0) return;
+    int nh = H / l->ih * l->ih + cyb2;
+    if (nh <= cyb2) return;
+    l->fit_h = r.bottom + nh - H;
     RECT pr = h->parent && h->parent != w16_desktop ? h->parent->rc : (RECT){0, 0, 0, 0};
     l->fitting = 1;
-    SetWindowPos(h, NULL, h->rw.left - pr.left, h->rw.top - pr.top, h->rw.right - h->rw.left,
-                 h->rw.bottom - h->rw.top - (r.bottom - want), SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+    SetWindowPos(h, NULL, h->rw.left - pr.left, h->rw.top - pr.top, h->rw.right - h->rw.left, nh,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
     l->fitting = 0;
 }
 
@@ -516,7 +535,9 @@ LRESULT w16_listbox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         return i;
     }
     case LB_GETTOPINDEX: return l->top;
-    case LB_SETTOPINDEX: l->top = max(0, min((int)wp, l->n - 1)); update_sb(h); redraw(h); return 0;
+    /* as far as the scroll range goes: the last page stays full (on 3.11 COMMDLG's three-item
+     * directory list stays at the top when it asks for item 1) */
+    case LB_SETTOPINDEX: l->top = max(0, min((int)wp, l->n - visible_items(h))); update_sb(h); redraw(h); return 0;
     case LB_GETITEMRECT: {
         RECT r;
         GetClientRect(h, &r);
@@ -562,6 +583,7 @@ typedef struct {
     int ih;
     int drop_h;
     int focus;
+    int extui;        /* CB_SETEXTENDEDUI */
 } Cb;
 
 static Cb *cbd(HWND h) { return (Cb *)h->ctl; }
@@ -641,14 +663,14 @@ static void cb_show(HWND h, int show)
     Cb *c = cbd(h);
     if (cbtype(h) == CBS_SIMPLE || c->dropped == show) return;
     c->dropped = show;
+    lbd(c->list)->caret_on = 0;
     if (show) {
         w16_notify_parent(h, CBN_DROPDOWN);
         RECT r = h->rw;
         int w = r.right - r.left;
-        int n = (int)SendMessage(c->list, LB_GETCOUNT, 0, 0);
-        int maxh = c->drop_h > 0 ? c->drop_h : c->ih * 8 + 2;
-        int hh = min(maxh, max(1, n) * c->ih + 2);
-        /* UNTESTED against 3.11: the dropped list's height (sized to its items here) */
+        /* the list drops to the combo's full height whatever the number of items (measured on
+         * 3.11: COMMDLG's drive list with three drives and its file type list with two) */
+        int hh = c->drop_h > 0 ? c->drop_h : c->ih * 8 + 2;
         SetWindowPos(c->list, HWND_TOP, r.left + c->droprc.left, r.top + c->droprc.top, w - c->droprc.left, hh,
                      SWP_SHOWWINDOW | SWP_NOACTIVATE);
         int sel = (int)SendMessage(c->list, LB_GETCURSEL, 0, 0);
@@ -753,8 +775,11 @@ LRESULT w16_combobox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         RECT r;
         GetClientRect(h, &r);
         c->full_h = r.bottom;
+        /* seg34:00DD: the list's height is whole items unless CBS_NOINTEGRALHEIGHT (measured on 3.11:
+         * COMMDLG's drive list drops five 16-pixel items deep) */
         DWORD ls = WS_BORDER | WS_VSCROLL | LBS_NOTIFY | (h->style & CBS_SORT ? LBS_SORT : 0) |
-                   (h->style & CBS_OWNERDRAWFIXED ? LBS_OWNERDRAWFIXED : 0) | (h->style & CBS_HASSTRINGS ? LBS_HASSTRINGS : 0) | LBS_NOINTEGRALHEIGHT;
+                   (h->style & CBS_OWNERDRAWFIXED ? LBS_OWNERDRAWFIXED : 0) | (h->style & CBS_HASSTRINGS ? LBS_HASSTRINGS : 0) |
+                   (h->style & CBS_NOINTEGRALHEIGHT ? LBS_NOINTEGRALHEIGHT : 0);
         if (cbtype(h) != CBS_DROPDOWNLIST)
             /* seg34: the selection stays drawn (the combo clears it when the focus leaves);
              * scrolling and OEM conversion only when the combo has them */
@@ -823,9 +848,18 @@ LRESULT w16_combobox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         return 0;
     }
     case WM_KEYDOWN:
-        if (wp == VK_F4 || ((wp == VK_DOWN || wp == VK_UP) && (w16_keystate[VK_MENU] & 0x80))) { cb_show(h, !c->dropped); return 0; }
+        if ((wp == VK_DOWN || wp == VK_UP) && (w16_keystate[VK_MENU] & 0x80)) { cb_show(h, !c->dropped); return 0; }
+        /* USER seg35:1919: F4 drops or closes the list, except with the extended interface; with
+         * it, Down drops the closed list and the other movement keys do nothing until it is open */
+        if (wp == VK_F4) { if (cbtype(h) != CBS_SIMPLE && !c->extui) cb_show(h, !c->dropped); return 0; }
+        if (c->extui && !c->dropped && cbtype(h) != CBS_SIMPLE &&
+            (wp == VK_UP || wp == VK_DOWN || wp == VK_PRIOR || wp == VK_NEXT || wp == VK_HOME || wp == VK_END)) {
+            if (wp == VK_DOWN) cb_show(h, 1);
+            return 0;
+        }
         if (wp == VK_UP || wp == VK_DOWN || wp == VK_PRIOR || wp == VK_NEXT || wp == VK_HOME || wp == VK_END) {
             int old = (int)SendMessage(c->list, LB_GETCURSEL, 0, 0);
+            if (c->dropped) lbd(c->list)->caret_on = 1;
             SendMessage(c->list, WM_KEYDOWN, wp, lp);
             int now = (int)SendMessage(c->list, LB_GETCURSEL, 0, 0);
             if (old != now) { cb_text_from_list(h); w16_notify_parent(h, CBN_SELCHANGE); }
@@ -867,6 +901,16 @@ LRESULT w16_combobox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         if (wp == LBN_DBLCLK) w16_notify_parent(h, CBN_DBLCLK);
         return 0;
     case WM_USER + 0x501: cb_show(h, 0); return 0;
+    case WM_MEASUREITEM: case WM_DRAWITEM: case WM_DELETEITEM: case WM_COMPAREITEM: {
+        /* seg33:073F: from the combo's list, handed on to the parent as the combo's own */
+        UINT *s = (UINT *)lp; /* CtlType, CtlID lead every one of these structures */
+        s[0] = ODT_COMBOBOX;
+        s[1] = h->id;
+        if (m == WM_DRAWITEM) ((DRAWITEMSTRUCT *)lp)->hwndItem = h;
+        else if (m == WM_DELETEITEM) ((DELETEITEMSTRUCT *)lp)->hwndItem = h;
+        else if (m == WM_COMPAREITEM) ((COMPAREITEMSTRUCT *)lp)->hwndItem = h;
+        return SendMessage(h->parent, m, h->id, lp);
+    }
     case WM_SETTEXT:
     case WM_GETTEXTLENGTH:
         /* seg33:05AE: these go to the edit; a drop-down list has none and answers CB_ERR (the
@@ -903,8 +947,15 @@ LRESULT w16_combobox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     case CB_SETEDITSEL: return c->edit ? SendMessage(c->edit, EM_SETSEL, 0, lp) : CB_ERR;
     case CB_GETDROPPEDCONTROLRECT: GetWindowRect(c->list, (RECT *)lp); return 0;
     case CB_SETITEMHEIGHT: return SendMessage(c->list, LB_SETITEMHEIGHT, wp, lp);
-    case CB_GETITEMHEIGHT: return SendMessage(c->list, LB_GETITEMHEIGHT, wp, lp);
-    case CB_SETEXTENDEDUI: case CB_GETEXTENDEDUI: return 0;
+    case CB_GETITEMHEIGHT:
+        if ((int)(SHORT)wp == -1) return c->field.bottom - c->field.top; /* seg33:06BD: the field */
+        return SendMessage(c->list, LB_GETITEMHEIGHT, wp, lp);
+    /* seg33:0568: drop-down combos only */
+    case CB_SETEXTENDEDUI:
+        if (cbtype(h) == CBS_SIMPLE || wp > 1) return CB_ERR;
+        c->extui = (int)wp;
+        return 0;
+    case CB_GETEXTENDEDUI: return cbtype(h) != CBS_SIMPLE && c->extui;
     }
     return DefWindowProc(h, m, wp, lp);
 }

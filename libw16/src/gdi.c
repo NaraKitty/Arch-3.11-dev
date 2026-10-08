@@ -839,7 +839,9 @@ int GetDeviceCaps(HDC dc, int i)
     case VERTSIZE: return 156;
     case HORZRES: return w16_screen.w;
     case VERTRES: return w16_screen.h;
-    case BITSPIXEL: return 1;
+    /* VGA: 4 planes of 1 bit; 256 colours and true colour are one plane of 8 and 24 bits (USER
+     * picks icon images by planes * bits, so a true-colour screen must not look monochrome) */
+    case BITSPIXEL: return ncolors > 256 ? 24 : ncolors > 16 ? 8 : 1;
     case PLANES: return ncolors > 16 ? 1 : 4;
     case NUMBRUSHES: return -1;
     case NUMPENS: return 80;

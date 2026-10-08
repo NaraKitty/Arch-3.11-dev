@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
@@ -287,21 +288,48 @@ static int ini_get(const char *path, LPCSTR app, LPCSTR key, LPSTR out, int cb, 
     return found;
 }
 
-/* KERNEL's WriteProfileString as measured on 3.11 (Desktop applet, WIN.INI [Desktop]): a key that is
- * there keeps its own spelling and only the value after its '=' changes ("Wallpaper=" stays when
- * MAIN.CPL writes "WallPaper"); a new key goes after the last line of its section that is not
- * blank; a new section goes at the end after an empty line. key NULL removes the section, val NULL
- * the key. */
-static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
+/* KERNEL seg1:6864: a string written to a profile ends at its first control character (0..0x0D)
+ * and loses its trailing blanks (3.1 even cuts the caller's buffer there): MAIN.CPL's keyboard
+ * layout "kbdgr.dll " is written as "kbdgr.dll" (measured) */
+static char *ini_cut(const char *s)
+{
+    size_t n = 0;
+    while ((unsigned char)s[n] > 0x0D) n++;
+    while (n && s[n - 1] == ' ') n--;
+    char *c = malloc(n + 1);
+    memcpy(c, s, n);
+    c[n] = 0;
+    return c;
+}
+
+/* "key=value" at `at` in out (a buffer with room), after a line break if the text before lacks one */
+static void ini_insert(char *out, size_t at, const char *key, const char *val)
+{
+    char line[2100];
+    int lead = at && out[at - 1] != '\n';
+    snprintf(line, sizeof line, "%s%s=%s\r\n", lead ? "\r\n" : "", key, val);
+    size_t n = strlen(line);
+    memmove(out + at + n, out + at, strlen(out + at) + 1);
+    memcpy(out + at, line, n);
+}
+
+/* KERNEL's WriteProfileString (seg1:6CEC), as measured on 3.11: a key that is there keeps its line up
+ * to the '=' - its own spelling too ("Wallpaper=" stays when MAIN.CPL writes "WallPaper", USER's
+ * "LANGUAGE.DLL" rewrote SYSTEM.INI's "language.dll=" line) - and only the value changes; a new key
+ * goes after the last line of its section that is not blank; a new section goes at the end after an
+ * empty line (at the top of an empty file without one: Clock's CLOCK.INI). key NULL removes the
+ * section, val NULL the key. */
+static int ini_set(const char *path, LPCSTR app0, LPCSTR key0, LPCSTR val0)
 {
     char *d = read_all(path);
     if (!d)
         d = strdup("");
+    char *app = ini_cut(app0), *key = key0 ? ini_cut(key0) : NULL, *val = val0 ? ini_cut(val0) : NULL;
     size_t cap = strlen(d) + strlen(app) + (key ? strlen(key) : 0) + (val ? strlen(val) : 0) + 64;
     char *out = malloc(cap);
     out[0] = 0;
     int in = 0, done = 0, sawsec = 0;
-    size_t after_last = 0;   /* in out: the end of the section's last line that is not blank */
+    size_t sec_end = 0;   /* where the section's last non-blank line (or its header) ends in out */
     char *p = d;
     while (*p) {
         char *nl = strchr(p, '\n');
@@ -313,11 +341,7 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
         trim(t);
         if (t[0] == '[') {
             if (in && !done && key && val) {
-                /* the new key after the section's last line */
-                char line[2048];
-                snprintf(line, sizeof line, "%s=%s\r\n", key, val);
-                memmove(out + after_last + strlen(line), out + after_last, strlen(out + after_last) + 1);
-                memcpy(out + after_last, line, strlen(line));
+                ini_insert(out, sec_end, key, val);
                 done = 1;
             }
             char *e = strchr(t, ']');
@@ -325,13 +349,6 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
             in = !done && !strcasecmp(t + 1, app);
             if (in) sawsec = 1;
             if (in && !key) { p += n; continue; } /* delete whole section */
-            if (in) {
-                strncat(out, p, n);
-                if (!nl) strcat(out, "\r\n");
-                after_last = strlen(out);
-                p += n;
-                continue;
-            }
         } else if (in) {
             if (!key) { p += n; continue; }
             char *eq = strchr(t, '=');
@@ -340,44 +357,34 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
                 trim(t);
                 if (!strcasecmp(t, key)) {
                     if (val && !done) {
-                        /* the line up to its '=' stays */
-                        size_t pre = (size_t)(strchr(p, '=') - p) + 1;
+                        /* the line up to its '=', the value, the line's own ending */
+                        size_t pre = strchr(p, '=') - p + 1, end = n;
+                        while (end > pre && (p[end - 1] == '\n' || p[end - 1] == '\r')) end--;
                         strncat(out, p, pre);
                         strcat(out, val);
-                        strcat(out, "\r\n");
-                        after_last = strlen(out);
+                        strncat(out, p + end, n - end);
+                        if (end == n) strcat(out, "\r\n");
+                        sec_end = strlen(out);
                     }
                     done = 1;
                     p += n;
                     continue;
                 }
             }
-            if (t[0]) {
-                strncat(out, p, n);
-                if (!nl) strcat(out, "\r\n");
-                after_last = strlen(out);
-                p += n;
-                continue;
-            }
         }
         strncat(out, p, n);
         p += n;
+        if (in && t[0]) sec_end = strlen(out);
     }
-    if (!done && key && val) {
-        if (!sawsec) {
-            /* a new section follows a blank line, except at the top of an empty file (real 3.11's
-             * Clock created CLOCK.INI as "[Clock]\r\nMaximized=0\r\n...") */
-            size_t L = strlen(out);
-            if (L && out[L - 1] != '\n') strcat(out, "\r\n");
-            strcat(out, L ? "\r\n[" : "["); strcat(out, app); strcat(out, "]\r\n");
-            strcat(out, key); strcat(out, "="); strcat(out, val); strcat(out, "\r\n");
-        } else {
-            /* the section ends the file */
-            char line[2048];
-            snprintf(line, sizeof line, "%s=%s\r\n", key, val);
-            memmove(out + after_last + strlen(line), out + after_last, strlen(out + after_last) + 1);
-            memcpy(out + after_last, line, strlen(line));
-        }
+    if (in && !done && key && val) {   /* the section is the file's last one */
+        ini_insert(out, sec_end, key, val);
+        done = 1;
+    }
+    if (!done && key && val && !sawsec) {
+        size_t L = strlen(out);
+        if (L && out[L - 1] != '\n') strcat(out, "\r\n");
+        strcat(out, L ? "\r\n[" : "["); strcat(out, app); strcat(out, "]\r\n");
+        strcat(out, key); strcat(out, "="); strcat(out, val); strcat(out, "\r\n");
     }
     FILE *f = fopen(path, "wb");
     if (f) {
@@ -386,6 +393,9 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
     }
     free(out);
     free(d);
+    free(app);
+    free(key);
+    free(val);
     return f != NULL;
 }
 
@@ -484,9 +494,12 @@ void w16_sys_init(void)
         sscanf(s, "%dx%d", &sw, &sh);
     init_metrics(sw, sh);
     /* like a program started from a DOS prompt: the current directory is where it was launched,
-     * if that folder is on a mapped drive */
+     * if that folder is on a mapped drive; W16_DOS_CWD names one (tests start in C:\WINDOWS, as the
+     * reference machine does: tools/run-fixture-test.sh) */
     char host[1024], dos[300];
-    if (getcwd(host, sizeof host) && w16_host_to_dos(host, dos, sizeof dos) == 0) w16_chdir(dos);
+    const char *cwd = getenv("W16_DOS_CWD");
+    if (cwd && *cwd) w16_chdir(cwd);
+    else if (getcwd(host, sizeof host) && w16_host_to_dos(host, dos, sizeof dos) == 0) w16_chdir(dos);
 }
 
 /* ------------------------------------------------------------------ time */
@@ -1039,6 +1052,39 @@ UINT _lwrite(HFILE f, const void *b, UINT n)
 LONG _llseek(HFILE f, LONG off, int o) { return (LONG)lseek(f, off, o == 0 ? SEEK_SET : o == 1 ? SEEK_CUR : SEEK_END); }
 HFILE _lclose(HFILE f) { return close(f) ? HFILE_ERROR : 0; }
 
+/* DOS extended error codes (INT 21h AH=59h) for what Linux reports */
+int w16_dos_error(int err)
+{
+    switch (err) {
+    case 0: return 0;
+    case ENOENT: return 2;          /* file not found */
+    case ENOTDIR: case ENAMETOOLONG: case ELOOP: return 3; /* path not found */
+    case EMFILE: case ENFILE: return 4;  /* too many open files */
+    case EACCES: case EPERM: case EISDIR: case ENOTEMPTY: return 5; /* access denied */
+    case EEXIST: return 0x50;       /* file exists */
+    case EROFS: return 0x13;        /* write-protected */
+    case ETXTBSY: case EBUSY: return 0x20; /* sharing violation */
+    case ENOSPC: case EDQUOT: return 0x52; /* cannot make directory entry (disk full) */
+    case ENODEV: case ENXIO: case EIO: return 0x15; /* drive not ready */
+    }
+    return 0x1F;                    /* general failure */
+}
+
+/* as w16_dos_error for an operation on host path `h`: a missing file whose directory is missing too
+ * is DOS's "path not found" */
+static int dos_error_at(const char *h, int err)
+{
+    if (err == ENOENT) {
+        char dir[2048];
+        struct stat st;
+        snprintf(dir, sizeof dir, "%s", h);
+        char *s = strrchr(dir, '/');
+        if (s && s != dir) *s = 0;
+        if (s && (stat(dir, &st) || !S_ISDIR(st.st_mode))) return 3;
+    }
+    return w16_dos_error(err);
+}
+
 /* OpenFile's search for a file named without a directory: the current directory, the Windows
  * directory, then the system directory (3.1 goes on to the program's directory and PATH; the
  * programs live in the Windows directory here and PATH holds Linux folders) */
@@ -1084,7 +1130,7 @@ HFILE OpenFile(LPCSTR name, OFSTRUCT *of, UINT style)
     }
     if (style & OF_DELETE) {
         int r = unlink(h);
-        if (r && of) of->nErrCode = 2;
+        if (r && of) of->nErrCode = dos_error_at(h, errno);
         return r ? HFILE_ERROR : 1;
     }
     int fd;
@@ -1094,8 +1140,15 @@ HFILE OpenFile(LPCSTR name, OFSTRUCT *of, UINT style)
         int m = style & 3;
         fd = open(h, m == OF_WRITE ? O_WRONLY : m == OF_READWRITE ? O_RDWR : O_RDONLY);
     }
+    struct stat fst;
+    if (fd >= 0 && fstat(fd, &fst) == 0 && S_ISDIR(fst.st_mode)) {
+        /* DOS opens no directory: access denied */
+        close(fd);
+        fd = -1;
+        errno = EISDIR;
+    }
     if (fd < 0) {
-        if (of) of->nErrCode = errno == ENOENT ? 2 : errno == EACCES ? 5 : 3;
+        if (of) of->nErrCode = dos_error_at(h, errno);
         return HFILE_ERROR;
     }
     if (style & OF_EXIST) {
@@ -1243,3 +1296,118 @@ void w16_find_close(W16FINDDATA *f)
     }
     f->search = NULL;
 }
+
+/* ------------------------------------------------------------------ drive types, labels, attributes */
+/* /proc/mounts escapes blanks and backslashes in mount points as \ooo */
+static void unescape_mount(char *s)
+{
+    char *o = s;
+    for (char *i = s; *i; i++) {
+        if (i[0] == '\\' && i[1] >= '0' && i[1] <= '7' && i[2] >= '0' && i[2] <= '7' && i[3] >= '0' && i[3] <= '7') {
+            *o++ = (char)(((i[1] - '0') << 6) | ((i[2] - '0') << 3) | (i[3] - '0'));
+            i += 3;
+        } else
+            *o++ = *i;
+    }
+    *o = 0;
+}
+
+/* what kind of drive a letter is: A: and B: are floppies (as on a PC); any other mapped drive is
+ * what the file system holding its folder is, from the deepest /proc/mounts entry above it */
+int w16_drive_class(char letter)
+{
+    char root[1024], real[PATH_MAX];
+    letter = toupper((unsigned char)letter);
+    if (w16_drive_root(letter, root, sizeof root)) return W16_DRV_NONE;
+    if (letter == 'A' || letter == 'B') return W16_DRV_FLOPPY;
+    if (!realpath(root, real)) snprintf(real, sizeof real, "%s", root);
+    FILE *f = fopen("/proc/mounts", "r");
+    if (!f) return W16_DRV_FIXED;
+    char line[4096], best[64] = "";
+    size_t bestlen = 0;
+    while (fgets(line, sizeof line, f)) {
+        char dev[1024], mp[2048], type[64];
+        if (sscanf(line, "%1023s %2047s %63s", dev, mp, type) != 3) continue;
+        unescape_mount(mp);
+        size_t l = strlen(mp);
+        int under = !strcmp(mp, "/") || (!strncmp(real, mp, l) && (real[l] == '/' || !real[l]));
+        if (under && l >= bestlen) { bestlen = l; snprintf(best, sizeof best, "%s", type); }
+    }
+    fclose(f);
+    static const char *cd[] = {"iso9660", "udf", NULL};
+    static const char *net[] = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "ncpfs", "afs", "davfs", "sshfs",
+                                "fuse.sshfs", "fuse.rclone", "fuse.s3fs", "fuse.davfs2", "fuse.gvfsd-fuse", NULL};
+    static const char *ram[] = {"tmpfs", "ramfs", NULL};
+    for (int i = 0; cd[i]; i++) if (!strcmp(best, cd[i])) return W16_DRV_CDROM;
+    for (int i = 0; net[i]; i++) if (!strcmp(best, net[i])) return W16_DRV_REMOTE;
+    for (int i = 0; ram[i]; i++) if (!strcmp(best, ram[i])) return W16_DRV_RAM;
+    return W16_DRV_FIXED;
+}
+
+/* KERNEL GetDriveType: floppies are removable; a CD-ROM is an MSCDEX network-redirector drive to
+ * KERNEL, so it is "remote" like a network drive; RAM disks and hard disks are fixed */
+UINT GetDriveType(int drive)
+{
+    if (drive < 0 || drive > 25) return 0;
+    switch (w16_drive_class((char)('A' + drive))) {
+    case W16_DRV_FLOPPY: return DRIVE_REMOVABLE;
+    case W16_DRV_CDROM: case W16_DRV_REMOTE: return DRIVE_REMOTE;
+    case W16_DRV_FIXED: case W16_DRV_RAM: return DRIVE_FIXED;
+    }
+    return 0;
+}
+
+/* Linux folders carry no volume label: a drive is labelled with its folder's name, as a FAT label
+ * (upper case, 11 characters) */
+int w16_volume_label(char letter, LPSTR out, size_t cb)
+{
+    char root[1024];
+    if (cb) out[0] = 0;
+    if (w16_drive_root(letter, root, sizeof root)) return -1;
+    size_t l = strlen(root);
+    while (l > 1 && root[l - 1] == '/') root[--l] = 0;
+    const char *b = strrchr(root, '/');
+    b = b ? b + 1 : root;
+    if (cb) snprintf(out, cb < 12 ? cb : 12, "%s", b);
+    AnsiUpper(out);
+    return 0;
+}
+
+int w16_dos_attr(LPCSTR dos)
+{
+    char h[2048];
+    struct stat st;
+    if (w16_dos_to_host(dos, h, sizeof h)) return -3;
+    if (stat(h, &st)) return -dos_error_at(h, errno);
+    const char *b = strrchr(h, '/');
+    int hidden = b && b[1] == '.' ? 0x02 : 0;
+    if (S_ISDIR(st.st_mode)) return 0x10 | hidden;
+    return 0x20 | hidden | (access(h, W_OK) ? 0x01 : 0);
+}
+
+HFILE w16_dos_create_temp(LPCSTR dir, LPSTR out, size_t cb)
+{
+    static unsigned seq;
+    for (int tries = 0; tries < 100; tries++) {
+        char dos[400], h[2048];
+        size_t l = strlen(dir);
+        snprintf(dos, sizeof dos, "%s%s%08X", dir, l && dir[l - 1] == '\\' ? "" : "\\",
+                 (unsigned)(time(NULL) * 7 + getpid() * 131 + seq++) & 0xFFFFFFFFu);
+        if (w16_dos_to_host(dos, h, sizeof h)) return -3;
+        int fd = open(h, O_RDWR | O_CREAT | O_EXCL, 0644);
+        if (fd >= 0) {
+            w16_dos_fullpath(dos, out, cb);
+            return fd;
+        }
+        if (errno != EEXIST) return -dos_error_at(h, errno);
+    }
+    return -5;
+}
+
+/* ------------------------------------------------------------------ WNet (USER's network entry points) */
+/* 3.1 hands these to the network driver; arch311 has none, so they answer as 3.1 does without one:
+ * no capabilities (WNNC_NET_TYPE 0, no WNNC_DIALOG bits, no driver handle for index 0xFFFF) and
+ * WN_NOT_SUPPORTED for everything else */
+WORD WNetGetCaps(WORD index) { (void)index; return 0; }
+WORD WNetGetConnection(LPSTR local, LPSTR remote, WORD *cb) { (void)local; (void)remote; (void)cb; return WN_NOT_SUPPORTED; }
+WORD WNetConnectDialog(HWND owner, WORD type) { (void)owner; (void)type; return WN_NOT_SUPPORTED; }

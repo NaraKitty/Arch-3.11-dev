@@ -133,6 +133,9 @@ void w16_syscolors_realize(void); /* USER's start-up snapping of the WIN.INI col
 
 /* OEM bitmaps from the user's display driver (VGA.DRV) */
 W16Bitmap *w16_obm(int id);
+/* a bitmap from DIB data as resources store it (BITMAPINFOHEADER, colour table, bits): GDI's
+ * CreateDIBitmap(hdc, lpbi, CBM_INIT, bits, lpbi, DIB_RGB_COLORS) (gdi.c) */
+HBITMAP w16_bitmap_from_dib(const uint8_t *d, int len, int force_color);
 
 /* ------------------------------------------------------------------ fonts */
 struct W16Font {

@@ -57,3 +57,10 @@ Addendum (owner): the players open everything libVLC can read and play, not only
   (WIN.INI [Extensions], File Manager's Associate dialog, ShellExecute/FindExecutable) is kept and
   extended so that the media players are the default for the formats they play, and Linux defaults
   (xdg-mime / mimeapps.list) and 3.1's [Extensions] agree in both directions.
+
+## ADR-009 (session 7) - Long Linux names reach 3.1 programs as 8.3 aliases
+Ported 3.1 code (COMMDLG's ParseFile, File Manager, every program's own checks) refuses names that are
+not 8.3, but Linux folders hold long names. Rather than relaxing each ported check (inaccurate), the
+libw16 DOS path layer (sys.c) gives every long or non-8.3 name a stable 8.3 alias the way VFAT does
+(NAME~1.EXT, upper case, unique per directory) and maps it back on open/create/rename; File Manager
+also shows the long names through WfW's own long-file-name layer (seg19) where 3.11 would.

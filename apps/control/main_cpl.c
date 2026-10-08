@@ -43,7 +43,7 @@ static Applet applets[] = {
     {32, 56, 608, 8, TRUE, 5008, TRUE},    /* Desktop */
     {29, 53, 605, 5, TRUE, 5005, TRUE},    /* Keyboard */
     {25, 49, 601, 1, TRUE, 5001, TRUE},    /* Printers */
-    {27, 51, 603, 3, TRUE, 5003, FALSE},   /* International */
+    {27, 51, 603, 3, TRUE, 5003, TRUE},    /* International */
     {31, 55, 607, 7, TRUE, 5007, TRUE},    /* Date/Time */
     {34, 58, 610, 10, TRUE, 5010, TRUE},   /* Network */
 };
@@ -258,7 +258,7 @@ HFILE OpenFileFromWinDir(LPCSTR file, OFSTRUCT *of, UINT style)
 }
 
 /* ------------------------------------------------------------------ seg3:0733: run applet <id>
- * Not ported yet: 2 Fonts = dialog 2, seg9:0CBC; 3 International = dialog 3, seg12:194D. */
+ * Not ported yet: 2 Fonts = dialog 2, seg9:0CBC. */
 static void RunApplet(HWND hwnd, int id)
 {
     switch (id) {
@@ -267,6 +267,9 @@ static void RunApplet(HWND hwnd, int id)
         break;
     case 1:
         PrintersRun(hwnd);  /* seg3:0782, dialog 1 */
+        break;
+    case 3:
+        DialogBox(hInstMain, MAKEINTRESOURCE(3), hwnd, IntlDlgProc);
         break;
     case 4:
         DialogBox(hInstMain, MAKEINTRESOURCE(4), hwnd, PortsDlgProc);

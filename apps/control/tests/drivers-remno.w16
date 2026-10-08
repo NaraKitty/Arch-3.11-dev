@@ -4,7 +4,7 @@
 # regress: ARCH311_REF_INI=1 sh tools/run-cp-test.sh "$TEST" "$OUT" Drivers
 # compare: drivers-remno/02.png 01-open.png active ignore 320 239 333 261
 # compare: drivers-remno/03.png 02-sequencer.png active ignore 320 239 333 261
-# pending-compare (MessageBox, see drivers-remmap.w16): drivers-remno/04.png 03-confirm.png active ignore 320 239 333 261
+# compare: drivers-remno/04.png 03-confirm.png active ignore 320 239 333 261
 # compare: drivers-remno/05.png 04-close.png active ignore 320 239 333 261
 # ini: SYSTEM.INI mci Sequencer=mciseq.drv
 # ini: CONTROL.INI drivers.desc mciseq.drv=[MCI] MIDI Sequencer

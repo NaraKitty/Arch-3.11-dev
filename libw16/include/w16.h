@@ -97,6 +97,7 @@ typedef void *FARPROC;
 #define GetGValue(c) ((BYTE)((c) >> 8))
 #define GetBValue(c) ((BYTE)((c) >> 16))
 #define MAKEINTRESOURCE(i) ((LPCSTR)(uintptr_t)(WORD)(i))
+#define MAKEINTATOM(i) ((LPCSTR)(uintptr_t)(WORD)(i))
 #define IS_INTRESOURCE(p) (((uintptr_t)(p) >> 16) == 0)
 #ifndef max
 #define max(a, b) ((a) > (b) ? (a) : (b))
@@ -388,6 +389,7 @@ typedef struct {
 #define GCW_HBRBACKGROUND (-10)
 #define GCW_HCURSOR (-12)
 #define GCW_HICON (-14)
+#define GCL_WNDPROC (-24)
 
 /* GetWindow */
 #define GW_HWNDFIRST 0
@@ -1372,6 +1374,15 @@ UINT _lread(HFILE f, void *buf, UINT n);
 UINT _lwrite(HFILE f, const void *buf, UINT n);
 LONG _llseek(HFILE f, LONG off, int origin);
 HFILE _lclose(HFILE f);
+/* LZEXPAND (uncompressed files only, see lzexpand.c) */
+#define LZERROR_BADINHANDLE (-1)
+#define LZERROR_BADOUTHANDLE (-2)
+#define LZERROR_READ (-3)
+#define LZERROR_WRITE (-4)
+HFILE LZOpenFile(LPCSTR name, OFSTRUCT *of, UINT style);
+LONG LZSeek(HFILE f, LONG off, int origin);
+int LZRead(HFILE f, void *buf, int cb);
+void LZClose(HFILE f);
 /* "C:\\FOO\\BAR.TXT" <-> "/home/user/FOO/BAR.TXT" (drive map in ~/.config/arch311/drives) */
 int w16_dos_to_host(LPCSTR dos, char *host, size_t cb);
 int w16_host_to_dos(const char *host, LPSTR dos, size_t cb);
@@ -1393,6 +1404,39 @@ typedef struct {
 int w16_find_first(LPCSTR spec, UINT attr, W16FINDDATA *f);
 int w16_find_next(W16FINDDATA *f);
 void w16_find_close(W16FINDDATA *f);
+/* KERNEL GetDriveType (0 = no such drive). What a drive letter is comes from the Linux folder it maps
+ * to (w16_drive_class): A: and B: are floppies; otherwise the file system of that folder in
+ * /proc/mounts - a CD-ROM (iso9660, udf), a network drive (nfs, cifs, sshfs, ...), a RAM disk (tmpfs,
+ * ramfs) or a hard disk. As on 3.1, a CD-ROM (an MSCDEX drive) reports DRIVE_REMOTE. */
+#define DRIVE_REMOVABLE 2
+#define DRIVE_FIXED 3
+#define DRIVE_REMOTE 4
+UINT GetDriveType(int drive); /* 0 = A: */
+enum { W16_DRV_NONE, W16_DRV_FLOPPY, W16_DRV_FIXED, W16_DRV_CDROM, W16_DRV_REMOTE, W16_DRV_RAM };
+int w16_drive_class(char letter);
+/* the volume label DOS would report for a drive (INT 21h AH=11h with the volume attribute): the name
+ * of the folder the drive maps to, upper case, at most 11 characters; "" for a drive at "/" */
+int w16_volume_label(char letter, LPSTR out, size_t cb);
+/* INT 21h AX=4300h: a file's DOS attributes (0x01 read-only, 0x02 hidden, 0x10 directory, 0x20
+ * archive), or the negative DOS error (-2 file not found, -3 path not found, ...) */
+int w16_dos_attr(LPCSTR dos);
+/* INT 21h AH=5Ah: create a file with a new unique name in DOS directory `dir`; returns the open
+ * handle and the file's DOS path in `out`, or the negative DOS error */
+HFILE w16_dos_create_temp(LPCSTR dir, LPSTR out, size_t cb);
+/* the DOS extended error (INT 21h AH=59h) for a Linux errno */
+int w16_dos_error(int err);
+
+/* USER's network entry points (WNet*, forwarded to the network driver on 3.1). arch311 has no
+ * Windows network driver: WNetGetCaps answers 0 for every index (no driver, no dialogs) and the
+ * others WN_NOT_SUPPORTED, which is what 3.1 returns without a network. */
+#define WN_SUCCESS 0x0000
+#define WN_NOT_SUPPORTED 0x0001
+#define WNNC_NET_TYPE 0x0002
+#define WNNC_DIALOG 0x0008
+#define WNTYPE_DRIVE 1
+WORD WNetGetCaps(WORD index);
+WORD WNetGetConnection(LPSTR local, LPSTR remote, WORD *cb);
+WORD WNetConnectDialog(HWND owner, WORD type);
 /* COMM (comm.c): COM1..4 are Linux's ttyS0..3 */
 #define SETXOFF 1
 #define SETXON 2
@@ -1462,6 +1506,7 @@ WORD SetWindowWord(HWND h, int idx, WORD v);
 intptr_t w16_GetWindowPtr(HWND h, int idx);
 intptr_t w16_SetWindowPtr(HWND h, int idx, intptr_t v);
 LONG GetClassLong(HWND h, int idx);
+intptr_t w16_GetClassPtr(HWND h, int idx); /* GetClassLong(GCL_WNDPROC) etc. at pointer size */
 WORD GetClassWord(HWND h, int idx);
 WORD SetClassWord(HWND h, int idx, WORD v);
 intptr_t w16_SetClassPtr(HWND h, int idx, intptr_t v);
@@ -1598,6 +1643,7 @@ HICON CreateIcon(HINSTANCE inst, int w, int h, BYTE planes, BYTE bpp, const void
 #define SPI_SETBORDER 0x0006
 #define SPI_GETKEYBOARDSPEED 0x000A
 #define SPI_SETKEYBOARDSPEED 0x000B
+#define SPI_SETLANGDRIVER 0x000C
 #define SPI_ICONHORIZONTALSPACING 0x000D
 #define SPI_GETSCREENSAVETIMEOUT 0x000E
 #define SPI_SETSCREENSAVETIMEOUT 0x000F

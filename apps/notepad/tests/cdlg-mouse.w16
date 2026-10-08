@@ -1,0 +1,27 @@
+# Notepad File > Open (COMMDLG) with the mouse: a double click on "system" in the directory list, then
+# on "windows" to go back up, a click on a file name, Cancel clicked. The reference rig cannot click
+# (DOSBox-X AUTOTYPE), so the screens after the double clicks are compared with the ones the keyboard
+# gave in arch311-ref run cdlg-open (Enter on the selected directory), which must be the same; the
+# file name click (04-file) is not compared.
+# regress: sh tools/run-fixture-test.sh notepad "$TEST" "$OUT"
+# compare: cdlg-open/06.png 02-insystem.png active ignore 320 240 332 260
+# compare: cdlg-open/08.png 03-back.png active ignore 320 240 332 260
+# compare: cdlg-open/09.png 05-closed.png active ignore 316 228 333 261
+sleep 400
+key alt+f
+key o
+sleep 400
+shotcaret shots/01-open.png
+dblclick 310 173
+sleep 400
+shot shots/02-insystem.png
+dblclick 310 157
+sleep 400
+shot shots/03-back.png
+click 120 153
+sleep 400
+shotcaret shots/04-file.png
+click 476 131
+sleep 400
+shotcaret shots/05-closed.png
+quit

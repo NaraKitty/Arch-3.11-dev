@@ -184,7 +184,10 @@ static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC 
     }
     if (!first) first = GetNextDlgTabItem(h, NULL, FALSE);
     HWND param = first;
-    dd->focus = first; /* given at the first activation (RestoreDlgFocus) */
+    /* nothing is kept for RestoreDlgFocus while WM_INITDIALOG runs (USER's hwndFocusSave is still 0):
+     * a procedure that focuses a control itself activates the dialog without the first tab stop
+     * becoming the default button (a message box's MB_DEFBUTTON2, arch311-ref cdlg-save/07) */
+    dd->focus = NULL;
     if (SendMessage(h, WM_INITDIALOG, (WPARAM)first, lp) && w16_valid(h)) {
         /* WM_INITDIALOG may have disabled or hidden the control picked before it ran */
         if (first && !tabbable(first)) first = GetNextDlgTabItem(h, first, FALSE);
@@ -251,6 +254,8 @@ static int run_modal(HWND h, HWND owner)
 
 int DialogBoxIndirectParam(HINSTANCE h, const void *tmpl, HWND owner, DLGPROC proc, LPARAM lp)
 {
+    /* USER seg25:08EB: the dialog box of a child window belongs to that window's top-level window */
+    if (owner && w16_valid(owner) && (owner->style & WS_CHILD)) owner = w16_top_level(owner);
     HWND d = create_dialog(h, tmpl, owner, proc, lp, 1);
     if (!d) return -1;
     return run_modal(d, owner);
@@ -426,6 +431,9 @@ LRESULT w16_dialog_wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp)
                 return r;
             return d->msgresult ? d->msgresult : r;
         }
+        /* USER's DefDlgProc returns the dialog procedure's own answer to WM_INITDIALOG (seg25:051C):
+         * FALSE when it placed the focus itself */
+        if (m == WM_INITDIALOG) return FALSE;
     }
     if (m == WM_INITDIALOG) return TRUE;
     return DefDlgProc(h, m, wp, lp);
@@ -698,17 +706,47 @@ BOOL IsDialogMessage(HWND dlg, LPMSG m)
 }
 
 /* ------------------------------------------------------------------ MessageBox */
-/* USER seg42:04F5 lays a message box out in pixels of the system font and builds a dialog template
- * from it (seg42:0299 header, 038E items, 01E2 buttons); seg42:0101 is its dialog procedure.
- * (MB_SYSTEMMODAL without an icon or with MB_ICONHAND is 3.1's system error box, seg1:9A86, not
- * ported: such boxes are laid out like the others.) */
-typedef struct { UINT type; int nb; int def; } MbData;
+/* USER's MessageBox (seg1:9B91) runs SoftModalMessageBox (seg42:04F5), which lays the box out in
+ * pixels of the system font and builds a dialog template from it (seg42:0299 header, 038E items,
+ * 01E2 buttons); seg42:0101 is its dialog procedure. Sizes and places pass through dialog units
+ * (client x = 2 * units with the system font's 8-px average), and "#32770" is CS_BYTEALIGNWINDOW, so
+ * the frame's left edge then moves to the nearest multiple of 8 (real boxes 384 and 388 px wide both
+ * start at x=128). The text is wrapped by DrawText's DT_CALCRECT, whose width of a wrapped line
+ * includes the blank it broke at. 3.1's MessageBox plays no sound: programs call MessageBeep
+ * themselves. (MB_SYSTEMMODAL without an icon or with MB_ICONHAND is 3.1's system error box,
+ * seg1:9A86 / SysErrorBox seg1:9325, not ported: such boxes are laid out like the others.) */
+typedef struct {
+    UINT type;
+    int nb, def;       /* buttons, and the default one's place among them */
+    HWND owner;
+    HWND task[64];     /* the windows a task-modal box without an owner disabled */
+    int ntask;
+} MbData;
 static int mb_nest;   /* [0x1a2] message boxes open: each further one moves by a caption button */
+
+/* seg42:0000 (WM_INITDIALOG) and seg42:0073 (before EndDialog): a task-modal box without an owner
+ * disables the task's enabled top-level windows, and enables them again */
+static void mb_task_disable(HWND box, MbData *mb)
+{
+    for (HWND c = w16_desktop->child; c && mb->ntask < 64; c = c->next)
+        if (c != box && !(c->style & WS_DISABLED)) mb->task[mb->ntask++] = c;
+    for (int i = 0; i < mb->ntask; i++) EnableWindow(mb->task[i], FALSE);
+}
+static void mb_task_enable(MbData *mb)
+{
+    for (int i = 0; i < mb->ntask; i++)
+        if (w16_valid(mb->task[i])) EnableWindow(mb->task[i], TRUE);
+    mb->ntask = 0;
+}
 
 static BOOL mb_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
 {
+    MbData *mb = (MbData *)GetProp(h, "W16MBOX");
     if (m == WM_INITDIALOG) {
-        MbData *mb = (MbData *)lp;
+        mb = (MbData *)lp;
+        SetProp(h, "W16MBOX", mb);
+        /* (a DS_SYSMODAL box becomes the system-modal window, SetSysModalWindow: libw16 has none) */
+        if ((mb->type & (MB_SYSTEMMODAL | MB_TASKMODAL)) == MB_TASKMODAL && !mb->owner) mb_task_disable(h, mb);
         /* the default button: the def-th child (the buttons come first) */
         HWND c = h->child;
         for (int i = mb->def; c && i > 0; i--) c = c->next;
@@ -726,7 +764,9 @@ static BOOL mb_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     if (m == WM_COMMAND) {
         int id = (int)wp;
         if (id < IDOK || id > IDNO) return FALSE;
-        if (id <= IDCANCEL && !GetDlgItem(h, id)) return TRUE; /* Esc without a Cancel button */
+        if (id <= IDCANCEL && !GetDlgItem(h, id)) return FALSE; /* Esc without a Cancel button */
+        if (mb) mb_task_enable(mb);
+        RemoveProp(h, "W16MBOX");
         EndDialog(h, id);
         return TRUE;
     }
@@ -743,23 +783,39 @@ static void mb_item(W16DlgTemplate *t, int cls, const char *text, int textlen, i
     w16_dlgt_item(t, cls, text, textlen, id, style, ux, uy, ucx, ucy);
 }
 
+/* GetTextExtent without the '&' prefixes ("&&" is one '&'): PSMGetTextExtent, seg1:1292 */
+static int mb_label_extent(HDC dc, const char *s)
+{
+    char t[64];
+    int n = 0;
+    for (; *s && n < (int)sizeof t; s++) {
+        if (*s == '&' && *++s != '&') { s--; continue; }
+        t[n++] = *s;
+    }
+    return LOWORD(GetTextExtent(dc, t, n));
+}
+
 int MessageBox(HWND owner, LPCSTR text, LPCSTR caption, UINT type)
 {
+    if (owner && !w16_valid(owner)) return 0; /* USER's parameter check (seg1:AB5D) fails the call */
     HINSTANCE user = w16_system_module("USER.EXE");
-    /* USER's button texts ([0x226]) and per type: count [0x1fe], first text [0x204], ids [0x21e] */
-    static const char *defaults[8] = {"OK", "Cancel", "&Abort", "&Retry", "&Ignore", "&Yes", "&No", "Error"};
-    char s[8][16];
-    for (int i = 0; i < 8; i++)
-        if (!user || !LoadString(user, i < 7 ? 84 + i : 78, s[i], 16)) snprintf(s[i], 16, "%s", defaults[i]);
+    /* USER's button texts ([0x228]: strings 84 OK, 85 Cancel, 89 &Yes, 90 &No, 87 &Retry, 86 &Abort,
+     * 88 &Ignore, 114 &Close) and the default caption (78), and per type: the button count [0x1fe]
+     * and, for each button, its text and id ([0x204] -> [0x20a], [0x21e]) */
+    static const int sid[9] = {84, 85, 89, 90, 87, 86, 88, 114, 78};
+    static const int scch[9] = {10, 15, 10, 10, 15, 15, 15, 15, 10};
+    static const char *defaults[9] = {"OK", "Cancel", "&Yes", "&No", "&Retry", "&Abort", "&Ignore", "&Close", "Error"};
+    char s[9][16];
+    for (int i = 0; i < 9; i++)
+        if (!user || !LoadString(user, sid[i], s[i], scch[i])) snprintf(s[i], 16, "%s", defaults[i]);
     static const BYTE count[6] = {1, 2, 3, 3, 2, 2};
-    static const BYTE label[6][3] = {{0}, {0, 1}, {2, 3, 4}, {5, 6, 1}, {5, 6}, {3, 1}};
+    static const BYTE label[6][3] = {{0}, {0, 1}, {5, 4, 6}, {2, 3, 1}, {2, 3}, {4, 1}};
     static const BYTE ids[6][3] = {{IDOK}, {IDOK, IDCANCEL}, {IDABORT, IDRETRY, IDIGNORE}, {IDYES, IDNO, IDCANCEL},
                                    {IDYES, IDNO}, {IDRETRY, IDCANCEL}};
-    if (!caption) caption = s[7];
-    if (!text) text = "";
+    if (!caption) caption = s[8];
     int kind = type & MB_TYPEMASK;
-    if (kind > MB_RETRYCANCEL) kind = MB_OK;
-    MbData mb = {type, count[kind], (type & MB_DEFMASK) >> 8};
+    if (kind > MB_RETRYCANCEL) kind = MB_OK; /* (USER reads past its tables there) */
+    MbData mb = {type, count[kind], (type & MB_DEFMASK) >> 8, owner, {0}, 0};
     if (mb.def >= mb.nb) mb.def = 0;
     int icon = 0;
     switch (type & MB_ICONMASK) { /* seg42:00C9 */
@@ -779,16 +835,12 @@ int MessageBox(HWND owner, LPCSTR text, LPCSTR caption, UINT type)
     if (icon) { iconw = GetSystemMetrics(SM_CXICON) + cxs; iconh = GetSystemMetrics(SM_CYICON); }
     HDC dc = GetDC(NULL);
     SelectObject(dc, GetStockObject(SYSTEM_FONT));
-    /* the button width, seg3:23BE: the longest text (by length) without its '&', and two "0"s */
+    /* the button width, seg3:23BE: the longest text by length (the first of equals) without its
+     * prefix, and two "0"s */
     int longest = 0;
-    for (int i = 1; i < 7; i++)
+    for (int i = 1; i < 8; i++)
         if (strlen(s[i]) > strlen(s[longest])) longest = i;
-    char plain[16];
-    int k = 0;
-    for (const char *p = s[longest]; *p && k < 15; p++)
-        if (*p != '&') plain[k++] = *p;
-    plain[k] = 0;
-    int btnw = LOWORD(GetTextExtent(dc, plain, k)) + 2 * LOWORD(GetTextExtent(dc, "0", 1));
+    int btnw = mb_label_extent(dc, s[longest]) + 2 * LOWORD(GetTextExtent(dc, "0", 1));
     int btnh = buy * 14 >> 3;
     int capw = LOWORD(GetTextExtent(dc, caption, strlen(caption)));
     int btnsw = btnw * mb.nb + (mb.nb - 1) * cxs;
@@ -797,7 +849,7 @@ int MessageBox(HWND owner, LPCSTR text, LPCSTR caption, UINT type)
     int wrap = minw - 2 * (cyb + cxs) - iconw;
     wrap = max(wrap, (scrw >> 3) * 5 - 2 * (cyb + cxs) - iconw);
     RECT tr = {0, 0, wrap, wrap};
-    int texth = DrawText(dc, text, -1, &tr, DT_CALCRECT | DT_WORDBREAK | DT_EXPANDTABS | DT_NOPREFIX);
+    int texth = DrawText(dc, text ? text : "", -1, &tr, DT_CALCRECT | DT_WORDBREAK | DT_EXPANDTABS | DT_NOPREFIX);
     ReleaseDC(NULL, dc);
     int textw = tr.right - tr.left;
 
@@ -814,7 +866,7 @@ int MessageBox(HWND owner, LPCSTR text, LPCSTR caption, UINT type)
             texth, wrap, capw, x, y, w, hgt);
 
     /* the template: the client area (inside the border and caption) in dialog units, absolute;
-     * buttons, then the icon, then the text */
+     * buttons, then the icon, then the text (none without one: USER leaves it out of the count) */
     RECT r = {x + cxb, y + cyc, x + w - cxb, y + hgt - cyb};
     DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_ABSALIGN | DS_NOIDLEMSG |
                   ((type & (MB_SYSTEMMODAL | MB_TASKMODAL)) == MB_SYSTEMMODAL ? DS_SYSMODAL : DS_MODALFRAME);
@@ -829,15 +881,20 @@ int MessageBox(HWND owner, LPCSTR text, LPCSTR caption, UINT type)
         mb_item(t, 0x82, ord, 3, 0xFFFF, WS_CHILD | WS_VISIBLE | WS_GROUP | SS_ICON, cxs, ((texth - iconh) >> 1) + ty, 0, 0,
                 bux, buy);
     }
-    mb_item(t, 0x82, text, -1, 0xFFFF, WS_CHILD | WS_VISIBLE | WS_GROUP | SS_NOPREFIX, cxs + iconw, ty, textw, texth, bux, buy);
+    if (text)
+        mb_item(t, 0x82, text, -1, 0xFFFF, WS_CHILD | WS_VISIBLE | WS_GROUP | SS_NOPREFIX, cxs + iconw, ty, textw, texth,
+                bux, buy);
 
-    HWND parent = owner && w16_valid(owner) ? w16_top_level(owner) : NULL;
+    HWND parent = owner ? w16_top_level(owner) : NULL;
     mb_nest++;
-    /* (3.1's MessageBox plays no sound: programs call MessageBeep themselves) */
+    /* the arrow while the box is up ([0x9a8]), the cursor before it afterwards */
+    HCURSOR oldcur = SetCursor(LoadCursor(NULL, IDC_ARROW));
     int res = DialogBoxIndirectParam(NULL, w16_dlgt_data(t), parent, mb_proc, (LPARAM)&mb);
+    if (res == -1) res = 0;
+    if ((type & MB_TYPEMASK) == MB_OK && res) res = IDOK;
     if (mb_nest) mb_nest--;
     w16_dlgt_free(t);
-    if (kind == MB_OK && res) res = IDOK;
+    if (oldcur) SetCursor(oldcur);
     return res;
 }
 
@@ -940,6 +997,35 @@ int w16_dir_add(HWND lb, UINT attr, LPCSTR spec, int combo)
     return last;
 }
 
+/* USER seg37:0000: the directory shown in DlgDirList's static, shortened when it is wider than the
+ * static (measured in the static's font) to "c:\...\" and the tail from the first directory boundary
+ * at which it fits ("c:\..." when none does). USER builds the result in place in front of the tail;
+ * it goes into `out` here. */
+static const char *fit_dir_path(HWND st, const char *path, char *out, size_t cb)
+{
+    RECT rc;
+    GetClientRect(st, &rc);
+    int cx = rc.right - rc.left;
+    HDC dc = GetDC(st);
+    HGDIOBJ of = st->font ? SelectObject(dc, st->font) : NULL;
+    snprintf(out, cb, "%s", path);
+    if ((int)LOWORD(GetTextExtent(dc, path, strlen(path))) > cx) {
+        char pre[16];
+        wsprintf(pre, "%c:\\...\\", path[0]);
+        cx -= LOWORD(GetTextExtent(dc, pre, strlen(pre)));
+        const char *s = path;
+        for (;;) {
+            while (*s && *s++ != '\\') {}
+            if (!*s || (int)LOWORD(GetTextExtent(dc, s, strlen(s))) <= cx) break;
+        }
+        if (!*s) pre[strlen(pre) - 1] = 0;
+        snprintf(out, cb, "%s%s", pre, s);
+    }
+    if (of) SelectObject(dc, of);
+    ReleaseDC(st, dc);
+    return out;
+}
+
 static int dir_fill(HWND dlg, LPSTR path, int idlist, int idstatic, UINT attr, int combo)
 {
     char spec[260] = "*.*", dir[260] = "";
@@ -958,11 +1044,11 @@ static int dir_fill(HWND dlg, LPSTR path, int idlist, int idstatic, UINT attr, i
         SendMessage(lb, combo ? CB_RESETCONTENT : LB_RESETCONTENT, 0, 0);
         w16_dir_add(lb, attr, spec, combo);
     }
-    if (idstatic) {
-        char cwd[300];
+    if (idstatic && GetDlgItem(dlg, idstatic)) {
+        char cwd[300], fit[320];
         w16_getcwd(cwd, sizeof cwd);
         AnsiLower(cwd);
-        SetDlgItemText(dlg, idstatic, cwd);
+        SetDlgItemText(dlg, idstatic, fit_dir_path(GetDlgItem(dlg, idstatic), cwd, fit, sizeof fit));
     }
     if (path) snprintf(path, 260, "%s", spec);
     return 1;
