@@ -431,7 +431,8 @@ int GetKeyState(int vk)
 {
     if (vk < 0 || vk > 255) return 0;
     int v = w16_keystate[vk];
-    return (v & 0x80 ? (int)0xFF80 : 0) | (v & 1);
+    /* Win16's int is 16 bits: a key that is down reads negative (GetKeyState(VK_SHIFT) < 0) */
+    return (v & 0x80 ? (int)(SHORT)0xFF80 : 0) | (v & 1);
 }
 int GetAsyncKeyState(int vk) { return GetKeyState(vk); }
 
@@ -450,6 +451,9 @@ static DWORD last_click_time;
 static POINT last_click_pt;
 static HWND last_click_hwnd;
 static UINT last_click_msg;
+/* the next click starts afresh, not as the second of a double click (USER clears its double-click
+ * time, e.g. for a list box's WM_LBTRACKPOINT answered 2: seg35:13CD) */
+void w16_cancel_dblclk(void) { last_click_hwnd = NULL; }
 
 static int mk_flags(void)
 {
@@ -657,7 +661,9 @@ static int script_step(void)
             for (int i = 0; i < 2; i++) {
                 const char *m = i ? m2 : m1;
                 mods[i] = !strcasecmp(m, "shift") ? VK_SHIFT : !strcasecmp(m, "ctrl") ? VK_CONTROL : 0;
-                if (mods[i]) w16_keystate[mods[i]] |= 0x80;
+                /* the key goes down as a message too, so GetKeyState still sees it when the queued
+                 * click is processed (USER's list box reads Shift / Ctrl that way) */
+                if (mods[i]) { w16_keystate[mods[i]] |= 0x80; key_event(WM_KEYDOWN, mods[i], 0, 0); }
             }
             mouse_event(WM_MOUSEMOVE);
             if (!strcmp(mc, "click") || !strcmp(mc, "down") || !strcmp(mc, "dblclick")) {
@@ -670,8 +676,8 @@ static int script_step(void)
                 w16_keystate[bvk] |= 0x80; mouse_event(bdown);
                 w16_keystate[bvk] &= ~0x80; mouse_event(bdown + 1);
             }
-            for (int i = 0; i < 2; i++)
-                if (mods[i]) w16_keystate[mods[i]] &= ~0x80;
+            for (int i = 1; i >= 0; i--)
+                if (mods[i]) { w16_keystate[mods[i]] &= ~0x80; key_event(WM_KEYUP, mods[i], 0, 0); }
             script_wait_until = GetTickCount() + 30;
             return 1;
         }

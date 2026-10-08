@@ -801,3 +801,26 @@ UNTESTED: owner display (no 3.1 program offers it), palettes on a palette device
 DSP formats, BITMAPCOREHEADER DIBs, WM_RENDERALLFORMATS when the owner viewer quits, Help (WinHelp),
 the "FileName" format (File Manager), mouse scrolling (the rig types keys only), MM_TEXT/HIMETRIC pictures.
 The Open/Save As dialogs differ from 3.11 (commdlg.c's business; not compared here).
+
+### Session 12 (Oct 8, list box worktree) - USER's list box ported for File Manager
+libw16/src/listbox.c's LISTBOX is now a function-by-function port of USER's list box (seg35 window
+procedure 0100 and helpers, seg36 multicolumn, seg38 create/size/font/item height, seg43 items and
+SetScrollbars; seg:offset comments): multicolumn lists (column width, whole-column scrolling,
+Left/Right by a column), horizontal extent (pixel scrolling), extended/multiple selection with anchor,
+caret, hilite-then-commit mouse ranges, Shift+F8 add mode, Ctrl+/ and Ctrl+\, LB_SET/GETANCHORINDEX,
+LB_SETCARETINDEX, LB_SELITEMRANGE, LB_SETSEL -1; WM_LBTRACKPOINT (0x131, documented in w16.h: a nonzero
+answer ends the click, 2 also cancels double-click detection); LBS_WANTKEYBOARDINPUT (WM_VKEYTOITEM /
+WM_CHARTOITEM lParam = MAKELONG(list slot, caret) as in Win16 - reversed before); owner-draw ODA_* as
+USER sends them (focus only through ODA_FOCUS, an empty list's focus itemID -1 with ODS_FOCUS |
+ODS_SELECTED), WM_DELETEITEM, item-data search for lists without strings, LB_GETTEXT of a whole
+ULONG_PTR. Scroll bars keep range 0..100 (SetScrollbars shows/hides them, or only enables/disables
+them with LBS_DISABLENOSCROLL). 3.1 quirks kept: insert/delete do not shift iSel/caret/top;
+LBN_SELCHANGE on every mouse button-up; LBN_SETFOCUS/KILLFOCUS without LBS_NOTIFY. Geometry (border,
+integral height) unchanged. msg.c: GetKeyState of a down key is negative (was 0xFF80 positive), script
+clicks with shift/ctrl send the key messages, w16_cancel_dblclk. apps/lbtest + tests/lists.w16,
+empty.w16 (state via ini lines; no real-3.11 reference exists for this program). Verified (WSL):
+regress.sh 521 PASS 0 FAIL (before empty.w16 was added); empty.w16 12 PASS. Not ported / UNTESTED:
+LBS_OWNERDRAWVARIABLE heights, WS_EX_DRAGOBJECT DragDetect and WM_DRAGSELECT/DRAGLOOP item lookup,
+GrayString for a black GRAYTEXT, fWin2App differences; combo boxes keep their own code (hooked to the
+new list only). To reconcile: the 386 Enhanced branch's listbox.c changes (caret model, SETREDRAW,
+LB_SETTOPINDEX clamp) when they reach dev.

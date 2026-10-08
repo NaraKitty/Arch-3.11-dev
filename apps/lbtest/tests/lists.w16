@@ -1,0 +1,65 @@
+# USER's list box (seg35/36/38/43 port) in apps/lbtest's three lists; no real-3.11 reference (the
+# program is libw16's own), so the lists' state is checked against what USER's code does:
+# A (multicolumn, extended selection): click item 1, Shift+click 9, Ctrl+click 14, Right (14 -> 20,
+#   one column), Shift+Right (20..26, the columns scroll so 26's column shows: top 12, scroll bar
+#   at 100), Ctrl+/ selects everything.
+# B (horizontal extent 520): click 3, Right x3 scrolls 3 average widths (24 px, bar at 9 of 100),
+#   click 5 (WM_LBTRACKPOINT answered 1: nothing happens), click 4 twice (answered 2: the second
+#   click is no double click, nothing is selected).
+# C (owner-draw, no strings, sorted by WM_COMPAREITEM): click 2, Shift+Down (2..3), F3 (WM_VKEYTOITEM
+#   answers item 2), "m" (WM_CHARTOITEM answers 9: mango; top 3), F2 (answered -2).
+# The "ini:" values below are what USER's code gives (worked through by hand from the decode; the
+# screenshots were checked by eye). WM_LBTRACKPOINT reaches the parent for every click on an item
+# (8 here), the last one C's item 2 at (36,45); WM_VKEYTOITEM comes for Shift too (4 keys).
+# regress: sh apps/lbtest/tests/lbtest.sh "$TEST" "$OUT"
+# ini: LBTEST.INI A selcount=30
+# ini: LBTEST.INI A caret=26
+# ini: LBTEST.INI A anchor=20
+# ini: LBTEST.INI A top=12
+# ini: LBTEST.INI A hbar=1
+# ini: LBTEST.INI A hpos=100
+# ini: LBTEST.INI A rect1=0,-160,16,-80,32
+# ini: LBTEST.INI B sel=3
+# ini: LBTEST.INI B hpos=9
+# ini: LBTEST.INI B rect1=1,0,16,268,32
+# ini: LBTEST.INI C sel=9
+# ini: LBTEST.INI C caret=9
+# ini: LBTEST.INI C top=3
+# ini: LBTEST.INI C vpos=33
+# ini: LBTEST.INI events selchangeA=6
+# ini: LBTEST.INI events selchangeB=1
+# ini: LBTEST.INI events dblclkB=0
+# ini: LBTEST.INI events selchangeC=4
+# ini: LBTEST.INI events track=8,103,2,36,45
+# ini: LBTEST.INI events vkey=4,113,9
+# ini: LBTEST.INI events chartoitem=1,109
+# ini: LBTEST.INI events cfind=1
+# ini: LBTEST.INI events ctext=8,apple
+sleep 300
+click 34 67
+click 114 99 shift
+click 194 83 ctrl
+sleep 200
+shot shots/01-a-sel.png
+key right
+key shift+right
+sleep 200
+shot shots/02-a-scroll.png
+key ctrl+slash
+click 354 99
+key right
+key right
+key right
+sleep 200
+shot shots/03-b-hext.png
+click 354 131
+click 354 115
+click 354 115
+click 60 268
+key shift+down
+key f3
+type m
+key f2
+sleep 300
+shot shots/04-c.png
+quit

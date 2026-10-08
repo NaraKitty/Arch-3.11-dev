@@ -32,7 +32,10 @@ typedef uintptr_t WPARAM;
 typedef intptr_t LPARAM;
 typedef intptr_t LRESULT;
 /* list and combo box item data: a DWORD in 3.1, pointer-sized here (Win32's ULONG_PTR) so ports can
- * keep pointers there as 3.1 programs kept near pointers and handles */
+ * keep pointers there as 3.1 programs kept near pointers and handles. LB_GETTEXT / CB_GETLBTEXT of
+ * an owner-draw list without LBS_HASSTRINGS copies the whole ULONG_PTR (sizeof(ULONG_PTR) bytes, and
+ * LB_GETTEXTLEN answers that size), and LB_FINDSTRING / LB_SELECTSTRING on such a list take an item
+ * data value in lParam as 3.1's do. */
 typedef uintptr_t ULONG_PTR;
 typedef uint32_t COLORREF;
 typedef char *LPSTR;
@@ -160,6 +163,10 @@ LPARAM W16_CMD_LPARAM(HWND ctl, int code);
 #define WM_DRAWITEM 0x002B
 #define WM_MEASUREITEM 0x002C
 #define WM_DELETEITEM 0x002D
+/* WM_VKEYTOITEM / WM_CHARTOITEM (LBS_WANTKEYBOARDINPUT; WM_CHARTOITEM also from any list without
+ * strings): wParam = key / character, lParam = MAKELONG(list, caret index) as in Win16 - the list's
+ * slot in LOWORD (W16_CMD_HWND(lParam) gives the list), the caret index in HIWORD. Answer -1 for the
+ * default action, -2 when handled, or the index of the item to go to. */
 #define WM_VKEYTOITEM 0x002E
 #define WM_CHARTOITEM 0x002F
 #define WM_SETFONT 0x0030
@@ -723,13 +730,22 @@ typedef struct {
 #define LB_GETITEMDATA (WM_USER + 26)
 #define LB_SETITEMDATA (WM_USER + 27)
 #define LB_SELITEMRANGE (WM_USER + 28)
+#define LB_SETANCHORINDEX (WM_USER + 29)
+#define LB_GETANCHORINDEX (WM_USER + 30)
 #define LB_SETCARETINDEX (WM_USER + 31)
 #define LB_GETCARETINDEX (WM_USER + 32)
 #define LB_SETITEMHEIGHT (WM_USER + 33)
 #define LB_GETITEMHEIGHT (WM_USER + 34)
 #define LB_FINDSTRINGEXACT (WM_USER + 35)
+#define LB_OKAY 0
 #define LB_ERR (-1)
 #define LB_ERRSPACE (-2)
+/* undocumented 3.1 message (USER seg35:13A9): a list box's WM_LBUTTONDOWN on an item (not a double
+ * click, not past the last item) is first offered to the parent: wParam = the item, lParam =
+ * MAKELONG(x + horizontal scroll origin, y) in the list's client coordinates. 0 lets the list
+ * select as usual; any other answer ends the click there (no selection, no capture), and 2 also
+ * keeps the next click from becoming a double click. */
+#define WM_LBTRACKPOINT 0x0131
 #define LBN_ERRSPACE (-2)
 #define LBN_SELCHANGE 1
 #define LBN_DBLCLK 2
