@@ -49,14 +49,9 @@ LRESULT SendMessage(HWND h, UINT m, WPARAM wp, LPARAM lp)
 BOOL InSendMessage(void) { return FALSE; }
 LRESULT CallWindowProc(WNDPROC p, HWND h, UINT m, WPARAM wp, LPARAM lp) { return p ? p(h, m, wp, lp) : 0; }
 
-UINT RegisterWindowMessage(LPCSTR name)
-{
-    static char names[64][64];
-    static int n;
-    for (int i = 0; i < n; i++) if (!strcasecmp(names[i], name)) return 0xC000 + i;
-    if (n < 64) snprintf(names[n++], 64, "%s", name);
-    return 0xC000 + n - 1;
-}
+/* USER's atom table, shared with RegisterClipboardFormat (atom.c) */
+ATOM w16_user_atom_add(LPCSTR name);
+UINT RegisterWindowMessage(LPCSTR name) { return w16_user_atom_add(name); }
 
 static HWND cmd_hwnd_table[256];
 HWND W16_CMD_HWND(LPARAM lp)
@@ -804,6 +799,7 @@ static void handle_sdl(SDL_Event *e)
 
 void w16_pump(int wait_ms)
 {
+    w16_clipboard_poll();
     if (script_step()) return;
     if (headless) {
         if (wait_ms > 0) usleep((wait_ms > 20 ? 20 : wait_ms) * 1000);
