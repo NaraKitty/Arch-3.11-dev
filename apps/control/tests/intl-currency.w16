@@ -1,0 +1,35 @@
+# International > Currency Format (dialog 18): symbol after the number, "-$1" negative, symbol "dm",
+# 3 digits (both lists are rebuilt as each edit loses the focus), OK, then OK in International (tab
+# from Change... to OK) - WIN.INI [intl] is written. Same keys as arch311-ref/scn/intl-currency.scn
+# after opening. Run as intl.w16 (ARCH311_PRISTINE_INI=1, ARCH311_CLOCK="2026-10-08 09:30:24",
+# applet International).
+sleep 900
+shot shots/01-open.png
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key enter
+sleep 600
+shot shots/02-currency.png
+key down
+key tab
+key down
+key tab
+type dm
+key tab
+type 3
+key tab
+sleep 300
+shot shots/03-changed.png
+key enter
+sleep 500
+shot shots/04-samples.png
+key tab
+key tab
+key tab
+key enter
+sleep 400
+quit

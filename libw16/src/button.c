@@ -293,13 +293,11 @@ static void click(HWND h)
             }
             for (HWND p = start; p; p = p->next) {
                 if (p != start && (p->style & WS_GROUP)) break;
-                if (p != h && !strcasecmp(p->cls->name, "BUTTON") && btype(p) == BS_AUTORADIOBUTTON && btn(p)->check) {
-                    btn(p)->check = 0;
-                    redraw(p);
-                }
+                if (p != h && !strcasecmp(p->cls->name, "BUTTON") && btype(p) == BS_AUTORADIOBUTTON && btn(p)->check)
+                    SendMessage(p, BM_SETCHECK, 0, 0);
             }
         }
-        b->check = 1;
+        SendMessage(h, BM_SETCHECK, 1, 0);   /* (and the tab stop moves with the check) */
         break;
     }
     redraw(h);
@@ -332,7 +330,22 @@ LRESULT w16_button_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         return DLGC_BUTTON;
     }
     case BM_GETCHECK: return b->check;
-    case BM_SETCHECK: if (b->check != (int)wp) { b->check = (int)wp; redraw(h); } return 0;
+    case BM_SETCHECK: {
+        /* USER seg25:1E1B: a check box is checked by any non-zero value, a 3-state box takes up to 2,
+         * and a radio button is a tab stop exactly while it is checked; other styles ignore it */
+        int v;
+        switch (btype(h)) {
+        case BS_CHECKBOX: case BS_AUTOCHECKBOX: v = wp != 0; break;
+        case BS_RADIOBUTTON: case BS_AUTORADIOBUTTON:
+            if (wp) h->style |= WS_TABSTOP; else h->style &= ~WS_TABSTOP;
+            v = wp != 0;
+            break;
+        case BS_3STATE: case BS_AUTO3STATE: v = (UINT)wp > 2 ? 2 : (int)wp; break;
+        default: return 0;
+        }
+        if (b->check != v) { b->check = v; redraw(h); }
+        return 0;
+    }
     case BM_GETSTATE: return b->state | b->check;
     case BM_SETSTATE:
         if (wp) b->state |= BST_PUSHED; else b->state &= ~BST_PUSHED;

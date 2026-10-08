@@ -1,0 +1,37 @@
+# International > Time Format (dialog 16): 24 hour with the suffix "h", separator ".", leading zero,
+# OK, then OK in International (tab from Change... to OK) - WIN.INI [intl] is written. Same keys as
+# arch311-ref/scn/intl-time.scn after opening. Run as intl.w16 (ARCH311_PRISTINE_INI=1,
+# ARCH311_CLOCK="2026-10-08 09:30:24", applet International). The reference's time sample read :42
+# after the Time Format OK, 18 s after the dialog opened: the long pause puts the port's OK in :42.
+sleep 900
+shot shots/01-open.png
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key enter
+sleep 600
+shot shots/02-time.png
+key down
+sleep 300
+shot shots/03-24hour.png
+key tab
+type h
+key tab
+type .
+key tab
+key right
+sleep 300
+shot shots/04-changed.png
+sleep 16000
+key enter
+sleep 500
+shot shots/05-sample.png
+key tab
+key tab
+key enter
+sleep 400
+quit

@@ -16,7 +16,9 @@ typedef struct {
     int top, xoff;            /* first visible line; horizontal pixel offset */
     W16Font *f;
     int lh, avgw;
+    int cdim;                 /* the font's average width as USER's GetCharDimensions gives it */
     RECT fmt;
+    RECT clip;                /* single-line: the area it paints in (USER seg26:0A36) */
     int modified;
     HLOCAL undo;              /* snapshot for one-level undo */
     int undo_len, undo_a, undo_c, undo_run;
@@ -193,6 +195,44 @@ static void update_sb(HWND h)
 }
 
 /* ------------------------------------------------------------------ painting */
+/* a single-line edit's text (USER seg28:04E1 / seg28:0280): each run of selected or unselected
+ * text fills its GetTextExtent (the overhang included, so a later run covers it again) a row
+ * above and below the line, the rest of the line from the text's extent on; all within the
+ * edit's paint area */
+static void draw_single(HWND h, HDC dc, HBRUSH bg, char *t)
+{
+    Edit *e = ed(h);
+    int y = e->fmt.top, ovh = e->f ? e->f->bold_sim : 0;
+    int ss = smin(e), se = smax(e);
+    int showsel = (e->focus || e->nohidesel) && ss != se;
+    int x0 = e->fmt.left - e->xoff, x = 0;
+    int sv = SaveDC(dc);
+    IntersectClipRect(dc, e->clip.left, e->clip.top, e->clip.right, e->clip.bottom);
+    COLORREF fg = GetTextColor(dc);
+    SetBkMode(dc, TRANSPARENT);
+    for (int i = 0; i < e->len;) {
+        int sel = showsel && i >= ss && i < se, j = i;
+        while (j < e->len && (showsel && j >= ss && j < se) == sel) j++;
+        int adv = seg_width(e, t, i, j);
+        RECT rr = {x0 + x, y - 1, x0 + x + adv + ovh, y + e->lh + 1};
+        FillRect(dc, &rr, sel ? w16_sys_brush(COLOR_HIGHLIGHT) : bg);
+        SetTextColor(dc, sel ? GetSysColor(COLOR_HIGHLIGHTTEXT) : fg);
+        if (e->pw) {
+            char buf[256];
+            int n = min(j - i, 255);
+            memset(buf, e->pw, n);
+            TextOut(dc, x0 + x, y, buf, n);
+        } else
+            TextOut(dc, x0 + x, y, t + i, j - i);
+        x += adv;
+        i = j;
+    }
+    RECT rest = {x0 + x + (e->len ? ovh : 0), y - 1, e->fmt.right, y + e->lh + 1};
+    FillRect(dc, &rest, bg);
+    SetTextColor(dc, fg);
+    RestoreDC(dc, sv);
+}
+
 static void draw_line(HWND h, HDC dc, int l, HBRUSH bg, char *t)
 {
     Edit *e = ed(h);
@@ -258,6 +298,15 @@ static void paint(HWND h, HDC dc)
     HBRUSH bg = w16_ctl_color(h, dc, CTLCOLOR_EDIT);
     RECT r;
     GetClientRect(h, &r);
+    if (!e->multi) {
+        FillRect(dc, &r, bg);
+        if (h->style & WS_DISABLED) SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
+        char *t = txt(e);
+        draw_single(h, dc, bg, t);
+        untxt(e);
+        SelectObject(dc, of);
+        return;
+    }
     /* margins around the formatting rectangle */
     RECT m;
     SetRect(&m, r.left, r.top, r.right, e->fmt.top); FillRect(dc, &m, bg);
@@ -283,12 +332,53 @@ static void redraw(HWND h)
     ShowCaret(h);
 }
 
+/* USER's GetCharDimensions (seg2:03A4): tmAveCharWidth for a fixed-pitch font, else the average
+ * of "a".."z" and "A".."Z" the way dialog base units are computed */
+static int char_dim_w(HDC dc)
+{
+    static const char az[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    TEXTMETRIC tm;
+    GetTextMetrics(dc, &tm);
+    if (!(tm.tmPitchAndFamily & 1)) return tm.tmAveCharWidth;
+    return (LOWORD(GetTextExtent(dc, az, 52)) / 26 + 1) / 2;
+}
+
+/* the system font's width and height, which single-line edits compare their own with */
+static void sys_font_dims(int *cdim, int *lh)
+{
+    static int w, ht;
+    if (!w) {
+        HDC dc = GetDC(NULL);
+        HGDIOBJ old = SelectObject(dc, GetStockObject(SYSTEM_FONT));
+        TEXTMETRIC tm;
+        GetTextMetrics(dc, &tm);
+        w = char_dim_w(dc);
+        ht = tm.tmHeight;
+        SelectObject(dc, old);
+        ReleaseDC(NULL, dc);
+    }
+    *cdim = w;
+    *lh = ht;
+}
+
+/* a single-line edit's caret is 1 px wide unless its font is as wide on average as the system
+ * font, and a pixel taller than the line (USER seg28:1224); multiline ones are 2 x the line */
+static int caret_w(Edit *e)
+{
+    int sw, sh;
+    if (e->multi) return 2;
+    sys_font_dims(&sw, &sh);
+    return e->cdim >= sw ? 2 : 1;
+}
+
 static void place_caret(HWND h)
 {
     Edit *e = ed(h);
     if (!e->focus) return;
     int x, y;
     pos_xy(h, e->caret, &x, &y);
+    /* seg28:0000: kept inside the formatting rectangle */
+    if (!e->multi && x > e->fmt.right - caret_w(e)) x = e->fmt.right - caret_w(e);
     SetCaretPos(x, y);
 }
 
@@ -499,6 +589,10 @@ static void set_font(HWND h, HFONT f)
     e->lh = tm.tmHeight;
     e->avgw = tm.tmAveCharWidth - (e->f->bold_sim ? 1 : 0);
     if (e->avgw < 1) e->avgw = 1;
+    dc = GetDC(h);
+    SelectObject(dc, f ? f : GetStockObject(SYSTEM_FONT));
+    e->cdim = char_dim_w(dc);
+    ReleaseDC(h, dc);
 }
 
 static void calc_fmt(HWND h)
@@ -515,12 +609,20 @@ static void calc_fmt(HWND h)
             r.right -= e->avgw / 2;
         }
     } else {
-        int pad = (h->style & WS_BORDER) ? e->avgw / 2 : 0;
-        int vpad = (h->style & WS_BORDER) ? max(0, (r.bottom - r.top - e->lh) / 2) : 0;
-        r.left += pad;
-        r.right -= pad;
-        r.top += vpad;
-        r.bottom = r.top + e->lh;
+        /* USER seg29:0000 and seg26:0A36: a bordered single-line edit keeps min(average, system
+         * average)/2 from its window's sides and min(height, system height)/4 from its top and
+         * bottom, which is the area it paints in; the formatting rectangle is that area cut to
+         * one line. 3.1 draws the border inside the window; libw16's is a 1-px non-client border,
+         * so the client is a border narrower on each side. */
+        if (h->style & WS_BORDER) {
+            int sw, sh;
+            sys_font_dims(&sw, &sh);
+            int dx = min(e->cdim, sw) / 2 - GetSystemMetrics(SM_CXBORDER);
+            int dy = min(e->lh, sh) / 4 - GetSystemMetrics(SM_CYBORDER);
+            InflateRect(&r, -max(dx, 0), -max(dy, 0));
+        }
+        e->clip = r;
+        if (r.bottom > r.top + e->lh) r.bottom = r.top + e->lh;
     }
     e->fmt = r;
 }
@@ -614,7 +716,7 @@ LRESULT w16_edit_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     }
     case WM_SETFOCUS:
         e->focus = 1;
-        CreateCaret(h, NULL, 2, e->lh);
+        CreateCaret(h, NULL, caret_w(e), e->multi ? e->lh : e->lh + 1);
         place_caret(h);
         ShowCaret(h);
         if (e->anchor != e->caret && !e->nohidesel) redraw(h);

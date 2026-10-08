@@ -1,0 +1,14 @@
+# International: Germany picked in the Country list (the samples change), then OK - WIN.INI [intl]
+# is written. Same keys as arch311-ref/scn/intl-country.scn after opening. Run as intl.w16
+# (ARCH311_PRISTINE_INI=1, ARCH311_CLOCK="2026-10-08 09:30:24", applet International): the
+# reference's time sample read :24 when the dialog opened and :28 after the country change; the
+# pauses put the port's change half a second into :28.
+sleep 900
+shot shots/01-open.png
+sleep 3600
+type g
+sleep 500
+shot shots/02-germany.png
+key enter
+sleep 400
+quit

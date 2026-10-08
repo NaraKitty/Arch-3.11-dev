@@ -133,21 +133,29 @@ static char g_sz24Suffix[9];    /* [0x1a18] */
 /* Currency Format dialog */
 static BOOL g_fCurrDirty;       /* [0x0e3a] */
 
-static time_t tClockOffset;     /* arch311: the clock minus the system clock (tests) */
+static long long llClockOffset;   /* arch311: the clock minus the system clock in ns (tests) */
 
 /* ------------------------------------------------------------------ the clock */
+static long long NowNs(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
 static void ClockNow(struct tm *t)
 {
-    time_t now = time(NULL) + tClockOffset;
+    time_t now = (time_t)((NowNs() + llClockOffset) / 1000000000LL);
     localtime_r(&now, t);
 }
 
-/* arch311: tests start the clock at ARCH311_CLOCK ("1993-11-08 09:30:00") when the applet opens */
+/* arch311: tests start the clock at ARCH311_CLOCK ("1993-11-08 09:30:00") when the applet opens,
+ * to the nanosecond, so a script's pauses decide which second each sample shows */
 static void ClockFromEnv(void)
 {
     const char *fixed = getenv("ARCH311_CLOCK");
     struct tm t;
-    tClockOffset = 0;
+    llClockOffset = 0;
     if (!fixed || !*fixed) return;
     memset(&t, 0, sizeof t);
     if (sscanf(fixed, "%d-%d-%d %d:%d:%d", &t.tm_year, &t.tm_mon, &t.tm_mday, &t.tm_hour, &t.tm_min, &t.tm_sec) != 6)
@@ -156,7 +164,7 @@ static void ClockFromEnv(void)
     t.tm_mon -= 1;
     t.tm_isdst = -1;
     time_t when = mktime(&t);
-    if (when != (time_t)-1) tClockOffset = when - time(NULL);
+    if (when != (time_t)-1) llClockOffset = (long long)when * 1000000000LL - NowNs();
 }
 
 /* seg1:189B, DOS 2Ch */
@@ -1434,7 +1442,7 @@ static BOOL TimeDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 /* seg13:0000 */
 static BOOL NumberDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    char szDec[4], szMsg[0x84], szCaption[0x1E];
+    char szDec[4], szMsg[0x84];
     BOOL fOk;
     int n;
     switch (msg) {
@@ -1452,7 +1460,6 @@ static BOOL NumberDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_COMMAND:
         switch (wParam) {
         case IDOK:
-            LoadString(hInstMain, 1, szCaption, sizeof szCaption);   /* [0x1f6a] "Control Panel" */
             if (GetDlgItemText(hDlg, IDC_DECIMAL, szDec, 2) == 0) {
                 LoadString(hInstMain, 800, szMsg, sizeof szMsg);
                 MessageBox(hDlg, szMsg, szCaption, MB_OK | MB_ICONINFORMATION);

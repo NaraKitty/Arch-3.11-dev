@@ -446,91 +446,115 @@ void w16_draw_prefix_text(HDC dc, int x, int y, const char *s, int n, int nopref
     }
 }
 
-/* ------------------------------------------------------------------ DrawText */
+/* ------------------------------------------------------------------ DrawText (USER seg6:0571) */
+/* seg6:0311: where the word at p ends: at a blank (with DT_WORDBREAK) or a tab, which is a word by
+ * itself when it comes first, or before a CR or LF */
+static int dt_word_end(const char *s, int p, int n, int wordbreak)
+{
+    for (int first = 1; p < n; p++, first = 0) {
+        char c = s[p];
+        if ((c == ' ' && wordbreak) || c == '\t') return p + first;
+        if (c == '\r' || c == '\n') return p;
+    }
+    return p;
+}
+
+/* seg6:0360: a piece of a line from x (relative to the line's start): its advance (without the
+ * overhang) is added to x, which is returned. Tabs - always when measuring, with DT_EXPANDTABS when
+ * drawing - go to the next multiple of the tab width, counted from half an average character on.
+ * Drawn at org + x on line y when `draw`. */
+static int dt_piece(HDC dc, W16Font *f, int x, int org, int y, const char *s, int n, int tabw, int expand,
+                    int noprefix, int draw)
+{
+    int st = 0;
+    for (int k = 0; k <= n; k++) {
+        if (k < n && !(expand && s[k] == '\t')) continue;
+        if (draw && k > st) w16_draw_prefix_text(dc, org + x, y, s + st, k - st, noprefix);
+        x += noprefix ? extent(dc, f, s + st, k - st) : prefix_advance(dc, s + st, k - st);
+        if (k < n && tabw) x = ((x + f->avgw / 2) / tabw + 1) * tabw;
+        st = k + 1;
+    }
+    return x;
+}
+
+/* one line [s, s + n) at y: aligned on the line's extent - trailing blanks included, as 3.1
+ * measures the whole piece - and drawn; returns that extent (overhang included) */
+static int dt_line(HDC dc, W16Font *f, const char *s, int n, LPRECT r, int y, UINT fmt, int tabw)
+{
+    int noprefix = (fmt & DT_NOPREFIX) != 0, expand = (fmt & DT_EXPANDTABS) != 0;
+    int org = r->left, width = r->right - r->left;
+    if (fmt & (DT_CENTER | DT_RIGHT)) {
+        int d = width - (dt_piece(dc, f, 0, 0, 0, s, n, tabw, 1, noprefix, 0) + f->bold_sim);
+        /* a line wider than the rectangle starts left of it by half the excess, rounded down
+         * (measured: a 7-px "/" in MAIN.CPL's 6-px Date & Time separator starts 1 px left) */
+        if (fmt & DT_CENTER) d >>= 1;
+        org += d;
+    }
+    int w = dt_piece(dc, f, 0, org, y, s, n, tabw, expand, noprefix, !(fmt & DT_CALCRECT));
+    return n > 0 ? w + f->bold_sim : w;   /* GetTextExtent: the overhang once */
+}
+
 int DrawText(HDC dc, LPCSTR s, int n, LPRECT r, UINT fmt)
 {
     W16Font *f = w16_dc_font(dc);
     if (n < 0) n = strlen(s);
+    UINT fmt0 = fmt;
+    int tabs = 8;
+    if (fmt & DT_TABSTOP) {
+        /* the tab size is in the high byte, which then carries no flags */
+        tabs = (fmt >> 8) & 0xFF;
+        fmt &= ~0xFF00u;
+    }
     int lh = f->height + ((fmt & DT_EXTERNALLEADING) ? f->eleading : 0);
     int width = r->right - r->left;
-    int tabw = 8 * f->avgw;
-    if (fmt & DT_TABSTOP) tabw = ((fmt >> 8) & 0xFF) * f->avgw;
-    int noprefix = (fmt & DT_NOPREFIX) != 0;
+    int tabw = tabs * f->avgw;
+    int wordbreak = (fmt & DT_WORDBREAK) != 0, left = !(fmt & (DT_CENTER | DT_RIGHT));
     int y = r->top, maxw = 0;
-    if ((fmt & DT_SINGLELINE) && (fmt & (DT_VCENTER | DT_BOTTOM)) && !(fmt & DT_CALCRECT)) {
-        if (fmt & DT_VCENTER) y = r->top + (r->bottom - r->top - lh) / 2;
-        else y = r->bottom - lh;
-    }
     int saved = 0;
     if (!(fmt & (DT_NOCLIP | DT_CALCRECT))) { saved = SaveDC(dc); IntersectClipRect(dc, r->left, r->top, r->right, r->bottom); }
-    int i = 0;
-    while (i <= n) {
-        /* find line end */
-        int j = i, last_break = -1;
-        int w = 0;
-        while (j < n) {
-            char c = s[j];
-            if (!(fmt & DT_SINGLELINE) && (c == '\r' || c == '\n')) break;
-            int cw;
-            if (c == '\t' && (fmt & DT_EXPANDTABS)) cw = tabw - (w % tabw);
-            else if (c == '&' && !noprefix) { if (j + 1 < n && s[j + 1] == '&') { j++; cw = f->widths['&']; } else cw = 0; }
-            else cw = f->widths[(unsigned char)c] + dc->charextra;
-            if ((fmt & DT_WORDBREAK) && !(fmt & DT_SINGLELINE) && w + cw > width && j > i) {
-                if (c == ' ') break;
-                if (last_break > i) { j = last_break; break; }
-                break;
+    if (n == 0 || width == 0) {
+        /* 3.1 draws nothing (and leaves DT_CALCRECT's rectangle undefined) */
+    } else if (fmt & DT_SINGLELINE) {
+        if (fmt & DT_VCENTER) y = r->top + (r->bottom - r->top - f->height) / 2;
+        else if (fmt & DT_BOTTOM) y = r->bottom - f->height;
+        maxw = dt_line(dc, f, s, n, r, y, fmt, tabw);
+    } else {
+        /* words are added while they fit; a word that does not fit starts the next line unless it
+         * is the first (a long word overflows). Left-aligned text drops one blank at a wrap or after
+         * a CR/LF; other lines keep their blanks, trailing ones included. */
+        int ls = 0, le = 0, p = 0, x = 0;
+        while (p < n) {
+            int we = dt_word_end(s, p, n, wordbreak), brk = 0;
+            le = we;
+            x = dt_piece(dc, f, x, 0, 0, s + p, we - p, tabw, 1, (fmt & DT_NOPREFIX) != 0, 0);
+            if (wordbreak && x + f->bold_sim > width && p != ls) {
+                if (left && s[p] == ' ') p++;
+                we = le = p;
+                brk = 1;
+            } else if (we < n && (s[we] == '\r' || s[we] == '\n')) {
+                char c = s[we++];
+                if (we < n && s[we] == (c ^ 7)) we++;   /* CR LF or LF CR */
+                brk = 1;
+                if (left && we < n && s[we] == ' ') we++;
             }
-            if (c == ' ') last_break = j;
-            w += cw;
-            j++;
+            p = we;
+            if (!brk) continue;
+            maxw = max(maxw, dt_line(dc, f, s + ls, le - ls, r, y, fmt, tabw));
+            y += lh;
+            ls = le = p;
+            x = 0;
+            if (!(fmt & (DT_NOCLIP | DT_CALCRECT)) && r->bottom < y) break;   /* below the rectangle */
         }
-        int lw = 0;
-        /* measure the line [i, j) */
-        for (int k = i; k < j; k++) {
-            char c = s[k];
-            if (c == '\t' && (fmt & DT_EXPANDTABS)) lw += tabw - (lw % tabw);
-            else if (c == '&' && !noprefix) { if (k + 1 < j && s[k + 1] == '&') { k++; lw += f->widths['&']; } }
-            else lw += f->widths[(unsigned char)c] + dc->charextra;
-        }
-        /* trailing spaces of a wrapped line do not count */
-        int jj = j;
-        while ((fmt & DT_WORDBREAK) && jj > i && s[jj - 1] == ' ') { jj--; lw -= f->widths[' ']; }
-        if (lw > 0) lw += f->bold_sim; /* measured with GetTextExtent: overhang included */
-        maxw = max(maxw, lw);
-        if (!(fmt & DT_CALCRECT)) {
-            int x = r->left;
-            /* a line wider than the rectangle starts left of it by half the excess, rounded down
-             * (measured: a 7-px "/" in MAIN.CPL's 6-px Date & Time separator starts 1 px left) */
-            if (fmt & DT_CENTER) x = r->left + ((width - lw) >> 1);
-            else if (fmt & DT_RIGHT) x = r->right - lw;
-            /* draw segments between tabs */
-            int cx = x, st = i;
-            for (int k = i; k <= jj; k++) {
-                if (k == jj || (s[k] == '\t' && (fmt & DT_EXPANDTABS))) {
-                    if (k > st) {
-                        w16_draw_prefix_text(dc, cx, y, s + st, k - st, noprefix);
-                        cx += noprefix ? extent(dc, f, s + st, k - st) : prefix_advance(dc, s + st, k - st);
-                    }
-                    if (k < jj) cx = x + ((cx - x) / tabw + 1) * tabw;
-                    st = k + 1;
-                }
-            }
-        }
-        y += lh;
-        if (fmt & DT_SINGLELINE) break;
-        /* skip the line break */
-        if (j < n && s[j] == '\r') j++;
-        if (j < n && s[j] == '\n') j++;
-        else if ((fmt & DT_WORDBREAK) && j < n && s[j] == ' ') while (j < n && s[j] == ' ') j++;
-        if (j >= n) break;
-        i = j;
+        if (le > ls) maxw = max(maxw, dt_line(dc, f, s + ls, le - ls, r, y, fmt, tabw));
     }
     if (saved) RestoreDC(dc, saved);
     if (fmt & DT_CALCRECT) {
         r->right = r->left + maxw;
-        r->bottom = y;
+        /* a word wider than the rectangle widens it, and the text is laid out again */
+        if (width < maxw) return DrawText(dc, s, n, r, fmt0);
+        r->bottom = y + lh;   /* the last line counts even when empty (text ending in a break) */
     }
-    return y - r->top;
+    return y + lh - r->top;
 }
 
 /* GrayString: draws text dimmed. With a solid gray available (16 colours have one),

@@ -301,10 +301,21 @@ LRESULT DefDlgProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     }
     case WM_ACTIVATE:
         if (d && LOWORD(wp) != WA_INACTIVE) {
-            if (d->focus && w16_valid(d->focus) && IsChild(h, d->focus)) SetFocus(d->focus);
-            else { HWND f = GetNextDlgTabItem(h, NULL, FALSE); if (f) SetFocus(f); }
-        } else if (d && w16_focus && IsChild(h, w16_focus))
+            /* USER seg25:03E3: the focus goes back where it was, and a push button there takes the
+             * default look again (CheckDefPushButton) */
+            HWND f = d->focus && w16_valid(d->focus) && IsChild(h, d->focus) ? d->focus : GetNextDlgTabItem(h, NULL, FALSE);
+            if (f) {
+                set_default_button(h, f);
+                SetFocus(f);
+            }
+        } else if (d && w16_focus && IsChild(h, w16_focus)) {
+            /* seg25:03A8: the focus is kept for later, and while another window is active no push
+             * button looks like the default (ClearDefPushButtons seg25:0AB2; measured: the Change...
+             * button behind International's Number Format dialog is drawn plain) */
             d->focus = w16_focus;
+            for (HWND c = h->child; c; c = c->next)
+                if (SendMessage(c, WM_GETDLGCODE, 0, 0) & DLGC_DEFPUSHBUTTON) SendMessage(c, BM_SETSTYLE, BS_PUSHBUTTON, TRUE);
+        }
         return 0;
     case WM_SETFOCUS:
         if (d && d->focus && w16_valid(d->focus)) SetFocus(d->focus);

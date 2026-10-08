@@ -1,0 +1,32 @@
+# International > Number Format (dialog 17): a blank 1000 separator, 3 decimal digits, no leading
+# zero, OK, then OK in International (tab from Change... to OK) - WIN.INI [intl] is written, the
+# blank as " ". Same keys as arch311-ref/scn/intl-number.scn after opening. Run as intl.w16
+# (ARCH311_PRISTINE_INI=1, ARCH311_CLOCK="2026-10-08 09:30:24", applet International).
+sleep 900
+shot shots/01-open.png
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key enter
+sleep 600
+shotcaret shots/02-number.png
+key space
+key tab
+key tab
+type 3
+key tab
+key left
+sleep 300
+shot shots/03-changed.png
+key enter
+sleep 500
+shot shots/04-sample.png
+key tab
+key enter
+sleep 400
+quit

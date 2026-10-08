@@ -1,0 +1,41 @@
+# International > Date Format (dialog 15): short date DMY with "-" and the day's leading zero, long
+# date order DMY with "ddd", OK, then OK in International (focus is back on Change..., so tab to
+# OK) - WIN.INI [intl] is written. Same keys as arch311-ref/scn/intl-date.scn after opening. Run as
+# intl.w16 (ARCH311_PRISTINE_INI=1, ARCH311_CLOCK="2026-10-08 09:30:24", applet International).
+sleep 900
+shot shots/01-open.png
+key tab
+key tab
+key tab
+key tab
+key tab
+key enter
+sleep 600
+shot shots/02-date.png
+key right
+key tab
+type -
+key tab
+key space
+sleep 300
+shot shots/03-short.png
+key tab
+key tab
+key tab
+key right
+sleep 300
+shot shots/04-long-dmy.png
+key tab
+key up
+sleep 300
+shot shots/05-ddd.png
+key enter
+sleep 500
+shot shots/06-samples.png
+key tab
+key tab
+key tab
+key tab
+key enter
+sleep 400
+quit

@@ -1,13 +1,10 @@
-# International applet (MAIN.CPL dialog 3): third in the window (Mouse, Keyboard, International).
-# Same keys as arch311-ref/scn/intl-open.scn (index 7 in real 3.11). Run with
-# ARCH311_CLOCK="2026-10-08 09:30:24" (the reference's clock when the dialog opened).
-sleep 600
-key right
-key right
-key enter
-sleep 600
+# International (MAIN.CPL dialog 3), just opened, then Cancel. Same keys as
+# arch311-ref/scn/intl-open.scn after opening. Run with the reference install's INI files (Setup's
+# SYSTEM.INI [boot.description] language.dll picks the language) and its clock when it opened:
+#   ARCH311_REF=<rig> ARCH311_PRISTINE_INI=1 ARCH311_CLOCK="2026-10-08 09:30:24" \
+#   tools/run-cp-test.sh apps/control/tests/intl.w16 OUT International
+sleep 900
 shot shots/01-open.png
 key esc
 sleep 300
-shot shots/02-closed.png
 quit

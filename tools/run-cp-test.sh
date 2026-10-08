@@ -10,6 +10,8 @@
 #   holding symbolic links to the user's ripped files (nothing is copied into the repo); A: exists.
 #   With ARCH311_REF set to the reference rig (the folder with c-pristine), the files are placed in
 #   WINDOWS and SYSTEM exactly as in its pristine install, so directory listings match real 3.11.
+#   ARCH311_PRISTINE_INI=1 then also starts from that install's WIN.INI, SYSTEM.INI and CONTROL.INI
+#   (what 3.11 Setup wrote, e.g. SYSTEM.INI [boot.description]) instead of the .SRC templates.
 # ARCH311_SIMULATE (default 1), ARCH311_WAVEDEVS (default 0, the rig's DOSBox has no sound card) and
 # ARCH311_CLOCK pass through.
 set -e
@@ -33,6 +35,11 @@ if [ -n "$ref" ] && [ -d "$ref/c-pristine/WINDOWS" ]; then
             if [ -e "$files/$u" ]; then ln -s "$files/$u" "$fx/c/$d/$n"; fi
         done
     done
+    if [ -n "${ARCH311_PRISTINE_INI:-}" ]; then
+        for n in WIN.INI SYSTEM.INI CONTROL.INI; do
+            if [ -f "$ref/c-pristine/WINDOWS/$n" ]; then cp "$ref/c-pristine/WINDOWS/$n" "$fx/config/arch311/$n"; fi
+        done
+    fi
 else
     for f in "$files"/*; do ln -s "$f" "$fx/c/WINDOWS/"; done
 fi
