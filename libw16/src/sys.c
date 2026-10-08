@@ -840,6 +840,14 @@ int w16_dos_to_host(LPCSTR dos, char *host, size_t cb)
     load_drives();
     char full[520];
     dos_resolve(dos, full, sizeof full);
+    /* the Windows directory's INI files are arch311's settings files, as the profile functions have
+     * them (ini_path): a program that opens C:\WINDOWS\WIN.INI itself (SysEdit) gets the same file */
+    const char *base = full + 11, *dot;
+    if (!strncasecmp(full, "C:\\WINDOWS\\", 11) && *base && !strchr(base, '\\') && (dot = strrchr(base, '.')) &&
+        !strcasecmp(dot, ".INI")) {
+        ini_path(base, host, cb);
+        return 0;
+    }
     char drv = full[0];
     const char *root = NULL, *rest = full + 2;
     for (int i = 0; i < ndrives; i++)
@@ -1129,4 +1137,88 @@ void w16_find_close(W16FINDDATA *f)
         free(s);
     }
     f->search = NULL;
+}
+
+/* ------------------------------------------------------------------ INT 21h 56h / 4300h */
+/* DOS error for a missing name: 2 when its directory exists, else 3 */
+static int missing_error(const char *host)
+{
+    char dir[2100];
+    snprintf(dir, sizeof dir, "%s", host);
+    char *sl = strrchr(dir, '/');
+    if (!sl) return 2;
+    if (sl == dir) sl[1] = 0;
+    else *sl = 0;
+    struct stat st;
+    return stat(dir, &st) == 0 && S_ISDIR(st.st_mode) ? 2 : 3;
+}
+
+int w16_dos_rename(LPCSTR from, LPCSTR to)
+{
+    char a[2048], b[2048];
+    struct stat st;
+    if (w16_dos_to_host(from, a, sizeof a) || w16_dos_to_host(to, b, sizeof b)) return 3;
+    if (stat(a, &st)) return missing_error(a);
+    if (access(b, F_OK) == 0) return 5;                /* DOS does not replace an existing file */
+    if (rename(a, b) == 0) return 0;
+    if (errno != EXDEV) return errno == ENOENT ? missing_error(b) : 5;
+    /* the two DOS names live on different Linux file systems (C: and the settings folder): copy */
+    FILE *i = fopen(a, "rb"), *o = i ? fopen(b, "wb") : NULL;
+    int ok = i && o;
+    char buf[8192];
+    size_t n;
+    while (ok && (n = fread(buf, 1, sizeof buf, i)) > 0) ok = fwrite(buf, 1, n, o) == n;
+    if (i) fclose(i);
+    if (o && fclose(o)) ok = 0;
+    if (!ok) { unlink(b); return 5; }
+    unlink(a);
+    return 0;
+}
+
+int w16_dos_getattr(LPCSTR path)
+{
+    char h[2048];
+    struct stat st;
+    if (w16_dos_to_host(path, h, sizeof h)) return -3;
+    if (stat(h, &st)) return -missing_error(h);
+    if (S_ISDIR(st.st_mode)) return 0x10;
+    return 0x20 | (access(h, W_OK) ? 0x01 : 0);
+}
+
+/* KERNEL seg3:056A GetTempFileName */
+UINT GetTempFileName(BYTE drive, LPCSTR prefix, UINT unique, LPSTR out)
+{
+    char base[300], name[320];
+    char d = drive & 0x7f;
+    if (!d) d = cur_drive;
+    d &= 0x5f;
+    if (drive & TF_FORCEDRIVE)
+        snprintf(base, sizeof base, "%c:~", d);
+    else {
+        char wd[260];
+        GetWindowsDirectory(wd, sizeof wd);
+        size_t l = strlen(wd);
+        snprintf(base, sizeof base, "%s%s~", wd, l && wd[l - 1] == '\\' ? "" : "\\");
+    }
+    size_t l = strlen(base);
+    for (int i = 0; prefix && prefix[i] && i < 3 && l < sizeof base - 1; i++) base[l++] = prefix[i];
+    base[l] = 0;
+    UINT u = unique & 0xFFFF;
+    if (!u) {
+        int hr, mi, se, hs;
+        w16_dos_gettime(&hr, &mi, &se, &hs);
+        u = (((se << 8) | hs) ^ ((hr << 8) | mi)) & 0xFFFF;
+    }
+    for (int tries = 0; tries < 0x10000; tries++) {
+        if (!u) u = 1;
+        snprintf(name, sizeof name, "%s%04X.TMP", base, u);
+        if (unique) break;
+        char h[2048];
+        int fd = w16_dos_to_host(name, h, sizeof h) ? -1 : open(h, O_WRONLY | O_CREAT | O_EXCL, 0644);
+        if (fd >= 0) { close(fd); break; }
+        if (errno != EEXIST) { u = 0; break; }
+        u = (u + 1) & 0xFFFF;
+    }
+    if (out) strcpy(out, name);
+    return u;
 }

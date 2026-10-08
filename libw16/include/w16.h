@@ -224,6 +224,8 @@ LPARAM W16_CMD_LPARAM(HWND ctl, int code);
 #define WM_MDIICONARRANGE 0x0228
 #define WM_MDIGETACTIVE 0x0229
 #define WM_MDISETMENU 0x0230
+#define WM_ISACTIVEICON 0x0035 /* USER internal: is this (MDI child) icon drawn active */
+#define WM_NEXTMENU 0x0213     /* USER internal: the menu loop moves on to another window's menu */
 #define WM_DROPFILES 0x0233
 #define WM_CUT 0x0300
 #define WM_COPY 0x0301
@@ -1327,6 +1329,16 @@ typedef struct {
 int w16_find_first(LPCSTR spec, UINT attr, W16FINDDATA *f);
 int w16_find_next(W16FINDDATA *f);
 void w16_find_close(W16FINDDATA *f);
+/* INT 21h 56h: rename (or move within a drive); 0, or the DOS error (2 file not found, 3 path not
+ * found, 5 access denied - also when the new name exists, 17 not the same device) */
+int w16_dos_rename(LPCSTR from, LPCSTR to);
+/* INT 21h 4300h: the attributes (0x01 read-only, 0x10 directory, 0x20 archive), or minus the DOS error */
+int w16_dos_getattr(LPCSTR path);
+/* KERNEL GetTempFileName: "X:~PPPhhhh.TMP" in drive X's current directory with TF_FORCEDRIVE, else in
+ * the Windows directory (arch311 programs have no DOS TEMP variable); hhhh is unique, or from the DOS
+ * time when unique is 0 - then the file is created, the number counted up past existing ones */
+#define TF_FORCEDRIVE 0x80
+UINT GetTempFileName(BYTE drive, LPCSTR prefix, UINT unique, LPSTR out);
 /* COMM (comm.c): COM1..4 are Linux's ttyS0..3 */
 #define SETXOFF 1
 #define SETXON 2
@@ -1418,6 +1430,48 @@ typedef BOOL (*WNDENUMPROC)(HWND, LPARAM);
 BOOL EnumChildWindows(HWND parent, WNDENUMPROC fn, LPARAM lp);
 BOOL EnumWindows(WNDENUMPROC fn, LPARAM lp);
 BOOL FlashWindow(HWND h, BOOL invert);
+/* several SetWindowPos calls applied together (applied one after the other, in order) */
+typedef struct W16Dwp *HDWP;
+HDWP BeginDeferWindowPos(int n);
+HDWP DeferWindowPos(HDWP d, HWND h, HWND after, int x, int y, int cx, int cy, UINT flags);
+BOOL EndDeferWindowPos(HDWP d);
+/* the 16-bit slot of a window (as in WM_COMMAND's lParam) and back: messages that packed two
+ * window handles into a Win16 lParam carry two slots (WM_MDIACTIVATE to a child) */
+WORD w16_hwnd16(HWND h);
+#define W16_HWND_FROM16(w) W16_CMD_HWND((LPARAM)(WORD)(w))
+
+/* USER: the multiple-document interface (mdi.c, ported from USER seg15 / seg20). The MDI client
+ * window class is "MDIClient". Packing differences from Win16 (handles are pointers here):
+ *  - WM_MDIACTIVATE sent to a child: wParam = TRUE when it is activated, lParam =
+ *    MAKELPARAM(w16_hwnd16(activated), w16_hwnd16(deactivated)) (W16_HWND_FROM16 maps back);
+ *  - WM_MDIGETACTIVE returns the active child; if lParam is not 0 it points to a BOOL that gets
+ *    whether that child is maximized (Win16: HIWORD of the result);
+ *  - WM_MDISETMENU: wParam = fRefresh as in Win16; lParam points to a W16MDISETMENU with the new
+ *    frame and Window menus (or is 0 with fRefresh); the old ones come back in it and the result is
+ *    the old frame menu;
+ *  - WM_NEXTMENU: lParam points to an MDINEXTMENU (as Win32): hmenuIn in, hmenuNext / hwndNext out. */
+typedef struct { HMENU hWindowMenu; UINT idFirstChild; } CLIENTCREATESTRUCT;
+typedef struct {
+    LPCSTR szClass, szTitle;
+    HINSTANCE hOwner;
+    int x, y, cx, cy;
+    DWORD style;
+    LPARAM lParam;
+} MDICREATESTRUCT, *LPMDICREATESTRUCT;
+typedef struct { HMENU hmenuFrame, hmenuWindow; } W16MDISETMENU;
+typedef struct { HMENU hmenuIn, hmenuNext; HWND hwndNext; } MDINEXTMENU;
+#define MDIS_ALLCHILDSTYLES 0x0001
+#define MDITILE_VERTICAL 0x0000
+#define MDITILE_HORIZONTAL 0x0001
+#define MDITILE_SKIPDISABLED 0x0002
+LRESULT DefFrameProc(HWND h, HWND client, UINT msg, WPARAM wp, LPARAM lp);
+LRESULT DefMDIChildProc(HWND h, UINT msg, WPARAM wp, LPARAM lp);
+BOOL TranslateMDISysAccel(HWND client, LPMSG m);
+UINT ArrangeIconicWindows(HWND parent);
+BOOL CascadeChildWindows(HWND parent, UINT flags);
+BOOL TileChildWindows(HWND parent, UINT flags);
+void CalcChildScroll(HWND h, UINT bar);
+void ScrollChildren(HWND h, UINT msg, WPARAM wp, LPARAM lp);
 
 /* USER: messages */
 LRESULT SendMessage(HWND h, UINT msg, WPARAM wp, LPARAM lp);

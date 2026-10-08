@@ -42,8 +42,10 @@ static void insert_item(HMENU m, int pos, UINT flags, UINT_PTR_W16 id, LPCSTR te
     if (flags & MF_POPUP) { it->sub = (HMENU)id; if (it->sub) it->sub->is_popup = 1; }
     else it->id = (UINT)id;
     if (flags & MF_SEPARATOR) it->text = strdup("");
-    else if (flags & (MF_BITMAP | MF_OWNERDRAW)) it->text = strdup("");
-    else it->text = strdup(text ? text : "");
+    else if (flags & (MF_BITMAP | MF_OWNERDRAW)) {
+        it->text = strdup("");
+        if (flags & MF_BITMAP) it->bmp = (uintptr_t)text; /* the bitmap travels in lpNewItem */
+    } else it->text = strdup(text ? text : "");
     if (!(flags & MF_POPUP) && !(flags & MF_SEPARATOR) && !it->text[0] && it->id == 0) it->flags |= MF_SEPARATOR;
     m->n++;
     m->height = 0;
@@ -124,6 +126,7 @@ BOOL ModifyMenu(HMENU m, UINT pos, UINT f, UINT_PTR_W16 id, LPCSTR t)
     it->flags = f & ~(MF_BYPOSITION);
     if (f & MF_POPUP) it->sub = (HMENU)id; else { it->id = (UINT)id; }
     it->text = strdup((f & (MF_SEPARATOR | MF_BITMAP | MF_OWNERDRAW)) || !t ? "" : t);
+    it->bmp = (f & MF_BITMAP) ? (uintptr_t)t : 0;
     o->height = 0;
     return TRUE;
 }
@@ -266,6 +269,16 @@ static void prep_sysmenu(HWND h, HMENU m)
     EnableMenuItem(m, SC_MAXIMIZE, ((h->style & WS_MAXIMIZEBOX) && !zoomed) ? MF_ENABLED : MF_GRAYED);
 }
 
+/* USER seg9:0D8B SetSysMenu: the system-menu items for the window's state now (the MDI code calls it
+ * when a child is maximised: its menu then lives in the frame's menu bar) */
+void w16_set_sysmenu(HWND h)
+{
+    if (w16_valid(h) && h->sysmenu) prep_sysmenu(h, h->sysmenu);
+}
+
+/* the system menu a window has been given, without making one (USER's hSysMenu) */
+HMENU w16_sysmenu_popup(HWND h) { return w16_valid(h) ? h->sysmenu : NULL; }
+
 /* ------------------------------------------------------------------ text helpers */
 static void split_tab(const char *s, int *left_n, const char **accel)
 {
@@ -295,10 +308,18 @@ static void layout_bar(HWND h, HMENU m, int width)
         struct W16MenuItem *it = &m->it[i];
         int tw = pfx_width(f, it->text, strlen(it->text));
         int w = BAR_PAD + tw + BAR_PAD;
+        if (it->flags & MF_BITMAP) {
+            /* USER seg17:026E: a bitmap item is as wide as its bitmap, with no padding; USER's own
+             * bitmaps 1-3 (an MDI child's system menu, restore and minimize boxes in a frame's menu
+             * bar) as wide as OBM_RESTORE */
+            W16Bitmap *b = it->bmp < 4 ? w16_obm(OBM_RESTORE) : w16_bitmap_of((HBITMAP)it->bmp);
+            w = b ? b->w : 0;
+        }
         /* windows of a CS_BYTEALIGNCLIENT class get item widths rounded to whole bytes, as USER
          * does for their popup items ((w + 4) & ~7): measured on Notepad (byte-aligned) vs
-         * Paintbrush (not) on real 3.11 */
-        if (h && h->cls && (h->cls->wc.style & CS_BYTEALIGNCLIENT)) w = (w + 4) & ~7;
+         * Paintbrush (not) on real 3.11; never bitmaps or the MF_HELP item (seg17:04E0) */
+        if (h && h->cls && (h->cls->wc.style & CS_BYTEALIGNCLIENT) && !(it->flags & (MF_HELP | MF_BITMAP)))
+            w = (w + 4) & ~7;
         if (x > 0 && (x + w > width || (it->flags & (MF_MENUBREAK | MF_MENUBARBREAK)))) { x = 0; y += ih; }
         SetRect(&it->rc, x, y, x + w, y + ih);
         x += w;
@@ -342,6 +363,52 @@ static void bar_origin(HWND h, int *x, int *y)
     (void)bar_left;
 }
 
+static void blit_obm(HDC dc, int id, int x, int y, int sx, int w, int h)
+{
+    W16Bitmap *b = w16_obm(id);
+    if (!b || sx >= b->w) return;
+    int dx = x, dy = y;
+    w16_lp_to_dp(dc, &dx, &dy);
+    w16_blit_bitmap(dc, dx, dy, b, sx, 0, min(w, b->w - sx), min(h, b->h), SRCCOPY);
+}
+
+/* USER seg10:25FA: a bitmap item of the menu bar. USER's bitmaps 1-3 are copied OBM_RESTORE-wide and
+ * cyMenu high out of its strip of OEM bitmaps: 1 the MDI child's system-menu box (the right half of
+ * OBM_CLOSE, then the first column of OBM_UPARROW, which follows it in the strip - black, as the
+ * strip's background below a shorter bitmap is), 2 OBM_RESTORE (OBM_RESTORED while selected), 3
+ * OBM_REDUCE (OBM_REDUCED). A selected item other than 2 and 3 is inverted. */
+static void draw_bar_bitmap(HDC dc, struct W16MenuItem *it, const RECT *r, int hilite)
+{
+    int ch = GetSystemMetrics(SM_CYMENU);
+    W16Bitmap *rb = w16_obm(OBM_RESTORE);
+    int cw = rb ? rb->w : 0;
+    switch (it->bmp) {
+    case 1: {
+        int half = GetSystemMetrics(SM_CXSIZE);
+        blit_obm(dc, OBM_CLOSE, r->left, r->top, half, half, ch);
+        if (cw > half) {
+            W16Bitmap *up = w16_obm(OBM_UPARROW);
+            RECT col = {r->left + half, r->top, r->left + cw, r->top + ch};
+            FillRect(dc, &col, GetStockObject(BLACK_BRUSH));
+            if (up) blit_obm(dc, OBM_UPARROW, r->left + half, r->top, 0, cw - half, ch);
+        }
+        break;
+    }
+    case 2: blit_obm(dc, hilite ? OBM_RESTORED : OBM_RESTORE, r->left, r->top, 0, cw, ch); return;
+    case 3: blit_obm(dc, hilite ? OBM_REDUCED : OBM_REDUCE, r->left, r->top, 0, cw, ch); return;
+    default: {
+        W16Bitmap *b = w16_bitmap_of((HBITMAP)it->bmp);
+        if (b) {
+            int dx = r->left, dy = r->top;
+            w16_lp_to_dp(dc, &dx, &dy);
+            w16_blit_bitmap(dc, dx, dy, b, 0, 0, b->w, b->h, SRCCOPY);
+        }
+        break;
+    }
+    }
+    if (hilite) InvertRect(dc, r);
+}
+
 static void draw_bar_item(HWND h, HDC dc, int i, int hilite)
 {
     HMENU m = h->menu;
@@ -350,6 +417,7 @@ static void draw_bar_item(HWND h, HDC dc, int i, int hilite)
     bar_origin(h, &ox, &oy);
     RECT r = it->rc;
     OffsetRect(&r, ox, oy);
+    if (it->flags & MF_BITMAP) { draw_bar_bitmap(dc, it, &r, hilite); return; }
     FillRect(dc, &r, w16_sys_brush(hilite ? COLOR_HIGHLIGHT : COLOR_MENU));
     SetBkMode(dc, TRANSPARENT);
     SelectObject(dc, GetStockObject(SYSTEM_FONT));
@@ -400,6 +468,8 @@ typedef struct {
     int xtab;       /* accelerator column */
     HWND owner;
     int parent_item;
+    int sys;        /* opened as the owner's system menu: its commands are WM_SYSCOMMANDs (the same
+                       menu in a frame's menu bar - a maximised MDI child's - sends WM_COMMAND) */
 } Popup;
 
 static void popup_layout(HMENU m, int *w, int *h, int *xtab)
@@ -585,6 +655,7 @@ static Popup *popup_open(HWND owner, HMENU menu, int x, int y, int item_index, i
     p->sel = -1;
     p->owner = owner;
     p->parent_item = item_index;
+    p->sys = is_sys;
     int w, h;
     popup_layout(menu, &w, &h, &p->xtab);
     w += 1; h += 1; /* shadow */
@@ -624,7 +695,7 @@ static void popup_select(Popup *p, int i, HWND owner)
     if (i >= 0) {
         struct W16MenuItem *it = &p->menu->it[i];
         SendMessage(owner, WM_MENUSELECT, it->sub ? (WPARAM)(uintptr_t)it->sub : it->id,
-                    MAKELPARAM(it->flags | MF_HILITE | (p->menu->is_sys ? MF_SYSMENU : 0), 0));
+                    MAKELPARAM(it->flags | MF_HILITE | (p->sys ? MF_SYSMENU : 0), 0));
     }
 }
 
@@ -766,12 +837,29 @@ static void move_to_bar(Track *t, int i, int open)
     if (open) open_bar_popup(t, i);
 }
 
+/* USER seg10:0409, the end of MenuChar: a character that is no item's mnemonic goes to the owner as
+ * WM_MENUCHAR - wParam the character, LOWORD(lParam) MF_POPUP inside a popup | MF_SYSMENU in the
+ * system menu (Win16's HIWORD, the menu handle, is 0 here: handles do not fit). HIWORD of the answer:
+ * 0 beep, 1 close the menu, 2 choose item LOWORD of the current menu as Enter would. Returns that,
+ * with the item in *item. */
+static int menu_char(Track *t, Popup *top, int ch, int *item)
+{
+    UINT fl = (top ? MF_POPUP : 0) | ((top ? top->sys : t->sys) ? MF_SYSMENU : 0);
+    LRESULT r = SendMessage(t->h, WM_MENUCHAR, (WPARAM)ch, MAKELPARAM(fl, 0));
+    *item = (short)LOWORD(r);
+    switch (HIWORD(r)) {
+    case 1: return 1;
+    case 2: return 2;
+    default: MessageBeep(0); return 0;
+    }
+}
+
 static void execute(Track *t, Popup *p, int i, UINT *cmd, int *is_sys)
 {
     struct W16MenuItem *it = &p->menu->it[i];
     if (it->flags & (MF_GRAYED | MF_DISABLED)) { *cmd = 0; return; }
     *cmd = it->id;
-    *is_sys = p->menu->is_sys;
+    *is_sys = p->sys;
     (void)t;
 }
 
@@ -950,26 +1038,37 @@ static void run_tracking(Track *t, int start_open, int keyboard)
             if (ch == 27 || ch == '\r') break;
             if (top) {
                 int i = mnemonic_index(top->menu, ch);
-                if (i >= 0) {
-                    popup_select(top, i, h);
-                    struct W16MenuItem *it = &top->menu->it[i];
-                    if (it->sub) {
-                        RECT r = it->rc;
-                        OffsetRect(&r, top->hwnd->rc.left, top->hwnd->rc.top);
-                        t->pop[t->npop++] = popup_open(h, it->sub, r.right - 3, r.top - 1, i, 0);
-                        popup_select(t->pop[t->npop - 1], next_selectable(t->pop[t->npop - 1]->menu, -1, 1), h);
-                    } else { execute(t, top, i, &cmd, &is_sys); done = 1; }
-                } else MessageBeep(0);
+                if (i < 0) {
+                    int act = menu_char(t, top, ch, &i);
+                    if (act == 1) { done = 1; break; }
+                    if (act != 2 || i < 0 || i >= top->menu->n) break;
+                }
+                popup_select(top, i, h);
+                struct W16MenuItem *it = &top->menu->it[i];
+                if (it->sub) {
+                    RECT r = it->rc;
+                    OffsetRect(&r, top->hwnd->rc.left, top->hwnd->rc.top);
+                    t->pop[t->npop++] = popup_open(h, it->sub, r.right - 3, r.top - 1, i, 0);
+                    popup_select(t->pop[t->npop - 1], next_selectable(t->pop[t->npop - 1]->menu, -1, 1), h);
+                } else { execute(t, top, i, &cmd, &is_sys); done = 1; }
             } else if (h->menu) {
                 int i = mnemonic_index(h->menu, ch);
-                if (ch == ' ' && (h->style & WS_SYSMENU)) { move_to_sys(t, 1); popup_select(t->pop[0], next_selectable(t->pop[0]->menu, -1, 1), h); }
-                else if (i >= 0) {
-                    move_to_bar(t, i, 0);
-                    if (h->menu->it[i].sub) {
-                        open_bar_popup(t, i);
-                        if (t->npop) popup_select(t->pop[0], next_selectable(t->pop[0]->menu, -1, 1), h);
-                    } else { if (!(h->menu->it[i].flags & MF_GRAYED)) cmd = h->menu->it[i].id; done = 1; }
-                } else MessageBeep(0);
+                if (ch == ' ' && (h->style & WS_SYSMENU)) { move_to_sys(t, 1); popup_select(t->pop[0], next_selectable(t->pop[0]->menu, -1, 1), h); break; }
+                if (i < 0) {
+                    int act = menu_char(t, NULL, ch, &i);
+                    if (act == 1) { done = 1; break; }
+                    if (act != 2 || i < 0 || i >= h->menu->n) break;
+                }
+                move_to_bar(t, i, 0);
+                if (h->menu->it[i].sub) {
+                    open_bar_popup(t, i);
+                    if (t->npop) popup_select(t->pop[0], next_selectable(t->pop[0]->menu, -1, 1), h);
+                } else { if (!(h->menu->it[i].flags & MF_GRAYED)) cmd = h->menu->it[i].id; done = 1; }
+            } else {
+                /* the system menu of a window without a menu bar (an MDI child) */
+                int i;
+                int act = menu_char(t, NULL, ch, &i);
+                if (act == 1) done = 1;
             }
             break;
         }
@@ -1003,8 +1102,9 @@ void w16_menu_track_bar(HWND h, int x, int y, int key_char, int by_key)
         if (key_char) {
             int i = mnemonic_index(h->menu, key_char);
             if (i < 0) {
-                MessageBeep(0);
-                return;
+                /* seg19:04FB MenuKeyStart -> MenuChar: no such mnemonic: WM_MENUCHAR decides */
+                int act = menu_char(&t, NULL, key_char, &i);
+                if (act != 2 || i < 0 || i >= h->menu->n) { SendMessage(h, WM_EXITMENULOOP, 0, 0); return; }
             }
             bar_hilite(&t, i);
             if (!h->menu->it[i].sub) {

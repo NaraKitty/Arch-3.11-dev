@@ -468,6 +468,17 @@ static void mouse_event(UINT base)
         return;
     }
     if (!w16_capture) SendMessage(h, WM_SETCURSOR, (WPARAM)h, MAKELPARAM(hit, base));
+    if (!w16_capture && (base == WM_LBUTTONDOWN || base == WM_RBUTTONDOWN || base == WM_MBUTTONDOWN)) {
+        /* USER seg1:2933: a button pressed over a child window - its client area or not - is reported
+         * to each of its parents in turn, with the position in that parent's client area (an MDI
+         * client activates the child under it). UNTESTED against 3.11 (the rig has no mouse input) */
+        for (HWND c = h; w16_valid(c) && (c->style & WS_CHILD) && w16_valid(c->parent) && c->parent != w16_desktop;) {
+            HWND par = c->parent;
+            SendMessage(par, WM_PARENTNOTIFY, base, MAKELPARAM(p.x - par->rc.left, p.y - par->rc.top));
+            c = par;
+        }
+        if (!w16_valid(h)) return;
+    }
     if (base == WM_LBUTTONDOWN || base == WM_RBUTTONDOWN || base == WM_MBUTTONDOWN) {
         /* activation */
         if (!w16_capture && top != w16_active && top->parent == w16_desktop) {
@@ -932,15 +943,22 @@ LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     case WM_NCCALCSIZE: return 0;
     case WM_NCPAINT:
         if (IsIconic(h)) return 0;
-        w16_nc_paint(h, h->parent == w16_desktop ? (h == w16_active || (h->active_frame && h != w16_active && 0)) : 0);
+        /* a child window's frame (an MDI child's) is drawn as its last WM_NCACTIVATE left it */
+        w16_nc_paint(h, (h->style & WS_CHILD) ? h->active_frame : h->parent == w16_desktop ? (h == w16_active) : 0);
         return 0;
     case WM_NCACTIVATE:
+        /* USER seg1:5CB8: WFFRAMEON follows wParam, then the caption is drawn so */
         if (h->parent == w16_desktop && !IsIconic(h)) {
             h->active_frame = wp != 0;
             w16_nc_paint(h, wp != 0);
+        } else if (h->style & WS_CHILD) {
+            h->active_frame = wp != 0;
+            if (!IsIconic(h) && w16_has_caption(h->style) && w16_window_visible(h)) w16_nc_paint(h, wp != 0);
         }
-        if (IsIconic(h)) w16_invalidate_icon_title(h); /* the title shows the activation */
+        if (IsIconic(h)) w16_redraw_icon_title(h); /* the title shows the activation */
         return TRUE;
+    case WM_ISACTIVEICON: return h->active_frame;
+    case WM_CHILDACTIVATE: return 0;
     case WM_NCHITTEST: return w16_nc_hittest(h, (SHORT)LOWORD(lp), (SHORT)HIWORD(lp));
     case WM_NCLBUTTONDOWN: return w16_nc_lbuttondown(h, (int)wp, (SHORT)LOWORD(lp), (SHORT)HIWORD(lp));
     case WM_NCLBUTTONDBLCLK:
@@ -971,15 +989,15 @@ LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         if (LOWORD(wp) != WA_INACTIVE && !HIWORD(wp)) SetFocus(h);
         return 0;
     case WM_SETTEXT:
-        if (IsIconic(h)) w16_invalidate_icon_title(h); /* the old title's area */
+        if (IsIconic(h) && !(h->style & WS_CHILD)) w16_invalidate_icon_title(h); /* the old title's area */
         free(h->text);
         h->text = strdup(lp ? (const char *)lp : "");
         if (w16_has_caption(h->style) && w16_window_visible(h) && !IsIconic(h)) {
             HDC dc = GetWindowDC(h);
-            w16_draw_caption(h, dc, h->parent == w16_desktop && h == w16_active);
+            w16_draw_caption(h, dc, w16_caption_active(h));
             ReleaseDC(h, dc);
         }
-        if (IsIconic(h)) w16_invalidate_icon_title(h);
+        if (IsIconic(h)) w16_redraw_icon_title(h);
         return TRUE;
     case WM_GETTEXT: {
         int n = (int)wp;
@@ -1007,10 +1025,17 @@ LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         return 1;
     }
     case WM_ICONERASEBKGND: {
-        /* the desktop shows through behind icons */
+        /* the desktop shows through behind icons; a child's icon (an MDI child's) shows its parent's
+         * background (UNTESTED against 3.11: SysEdit's children have a class icon) */
         HDC dc = (HDC)wp;
         RECT r;
         GetClientRect(h, &r);
+        if ((h->style & WS_CHILD) && w16_valid(h->parent)) {
+            HBRUSH b = h->parent->cls->wc.hbrBackground;
+            if ((uintptr_t)b > 0 && (uintptr_t)b <= COLOR_BTNHIGHLIGHT + 1) b = w16_sys_brush((int)(uintptr_t)b - 1);
+            if (b) FillRect(dc, &r, b);
+            return 1;
+        }
         w16_paint_desktop(dc, &r);
         return 1;
     }
@@ -1033,14 +1058,20 @@ LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
             SendMessage(t, WM_SYSCOMMAND, SC_KEYMENU, 0);
         }
         return 0;
-    case WM_SYSCHAR: {
+    case WM_SYSCHAR:
+        /* USER seg1:622C: Enter restores an icon; with Alt down a character becomes SC_KEYMENU for
+         * this window (the menu code goes on up from a child, w16_sys_command), except Alt+Space in a
+         * child, which goes to the parent as WM_SYSCHAR; Tab and Esc do nothing; without Alt a beep */
         menu_alt_pending = 0;
-        HWND t = (h->style & WS_CHILD) && h->parent && (w16_top_level(h)->menu == NULL) ? w16_top_level(h) : w16_top_level(h);
-        if (wp == ' ') { SendMessage(t, WM_SYSCOMMAND, SC_KEYMENU, ' '); return 0; }
-        if (wp == 27) return 0;
-        SendMessage(t, WM_SYSCOMMAND, SC_KEYMENU, (LPARAM)tolower((int)wp));
+        if (wp == '\r' && IsIconic(h)) { PostMessage(h, WM_SYSCOMMAND, SC_RESTORE, 0); return 0; }
+        if ((HIWORD(lp) & 0x2000) && wp) {
+            if (wp == '\t' || wp == 27) return 0;
+            if (wp == ' ' && (h->style & (WS_CHILD | WS_POPUP)) == WS_CHILD && w16_valid(h->parent))
+                return SendMessage(h->parent, WM_SYSCHAR, wp, lp);
+            SendMessage(h, WM_SYSCOMMAND, SC_KEYMENU, (LPARAM)wp);
+        } else if (wp != 27)
+            MessageBeep(0);
         return 0;
-    }
     case WM_KEYDOWN:
         if (wp == VK_F10) menu_alt_pending = 1;
         return 0;

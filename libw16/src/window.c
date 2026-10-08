@@ -90,6 +90,11 @@ void w16_register_system_classes(void)
     /* USER seg3:1547 registers the dialog class with style 0x2808 */
     sysclass("#32770", w16_dialog_wndproc, CS_DBLCLKS | CS_SAVEBITS | CS_BYTEALIGNWINDOW, arrow, 30);
     sysclass("#32769", w16_desktop_proc, 0, arrow, 0);
+    /* USER seg3:1595: "MDIClient" (USER string 22), style 0, 16 extra bytes, the arrow, the
+     * application workspace colour; the icon title class (atom 8004) has style 0 and no extra bytes */
+    sysclass("MDIClient", w16_mdiclient_proc, 0, arrow, 16);
+    w16_find_class("MDIClient", NULL)->wc.hbrBackground = (HBRUSH)(uintptr_t)(COLOR_APPWORKSPACE + 1);
+    sysclass("#32772", w16_icon_title_proc, 0, arrow, 0);
 }
 
 /* ------------------------------------------------------------------ helpers */
@@ -476,6 +481,49 @@ BOOL SetWindowPos(HWND h, HWND after, int x, int y, int cx, int cy, UINT fl)
     if (moved || sized) SendMessage(h, WM_WINDOWPOSCHANGED, 0, (LPARAM)&wp);
     if (!(fl & SWP_NOACTIVATE) && h->parent == w16_desktop && (h->style & WS_VISIBLE) && !(fl & SWP_HIDEWINDOW))
         w16_activate(h, WA_ACTIVE);
+    else if (!(fl & (SWP_NOACTIVATE | SWP_HIDEWINDOW)) && (h->style & WS_CHILD) && w16_valid(h))
+        SendMessage(h, WM_CHILDACTIVATE, 0, 0); /* USER seg7:0382: a child window is told instead */
+    return TRUE;
+}
+
+/* ------------------------------------------------------------------ DeferWindowPos */
+/* USER seg7:00B5 / 0114 / 01FD. The positions are applied one after the other in the order they were
+ * deferred; 3.1 computes them all first and repaints once (only the order of the repaints differs) */
+struct W16Dwp { int n, cap; WINDOWPOS *p; };
+
+HDWP BeginDeferWindowPos(int n)
+{
+    HDWP d = calloc(1, sizeof *d);
+    if (!d) return NULL;
+    d->cap = n > 0 ? n : 4;
+    d->p = calloc(d->cap, sizeof *d->p);
+    if (!d->p) { free(d); return NULL; }
+    return d;
+}
+
+HDWP DeferWindowPos(HDWP d, HWND h, HWND after, int x, int y, int cx, int cy, UINT fl)
+{
+    if (!d) return NULL;
+    if (!w16_valid(h)) return d;
+    if (d->n == d->cap) {
+        WINDOWPOS *np = realloc(d->p, sizeof *np * d->cap * 2);
+        if (!np) return d;
+        d->p = np;
+        d->cap *= 2;
+    }
+    d->p[d->n++] = (WINDOWPOS){h, after, x, y, cx, cy, fl};
+    return d;
+}
+
+BOOL EndDeferWindowPos(HDWP d)
+{
+    if (!d) return FALSE;
+    for (int i = 0; i < d->n; i++) {
+        WINDOWPOS *w = &d->p[i];
+        if (w16_valid(w->hwnd)) SetWindowPos(w->hwnd, w->hwndInsertAfter, w->x, w->y, w->cx, w->cy, w->flags);
+    }
+    free(d->p);
+    free(d);
     return TRUE;
 }
 
@@ -516,6 +564,17 @@ void w16_activate(HWND h, int how)
 }
 
 HWND GetActiveWindow(void) { return w16_active; }
+
+/* USER's WFFRAMEON: the caption shows the window active. A top-level window's follows the activation;
+ * a child's (an MDI child) is what its last WM_NCACTIVATE set */
+int w16_caption_active(HWND h)
+{
+    if (!w16_valid(h)) return 0;
+    if (h->style & WS_CHILD) return h->active_frame;
+    return h->parent == w16_desktop && h == w16_active;
+}
+
+WORD w16_hwnd16(HWND h) { WORD w16_cmd_slot(HWND h); return w16_valid(h) ? w16_cmd_slot(h) : 0; }
 HWND SetActiveWindow(HWND h)
 {
     HWND o = w16_active;
@@ -670,6 +729,7 @@ HWND CreateWindowEx(DWORD ex, LPCSTR cls, LPCSTR title, DWORD style, int x, int 
     h->rw = (RECT){pr.left + x, pr.top + y, pr.left + x + cx, pr.top + y + cy};
     if (h->parent == w16_desktop) OffsetRect(&h->rw, byte_align_dx(h), 0);
     h->restore = h->rw;
+    OffsetRect(&h->restore, -pr.left, -pr.top);
     h->style &= ~(WS_VISIBLE | WS_MINIMIZE | WS_MAXIMIZE);
     link_top(h);
     if (h->parent != w16_desktop) {
@@ -688,8 +748,18 @@ HWND CreateWindowEx(DWORD ex, LPCSTR cls, LPCSTR title, DWORD style, int x, int 
         SendMessage(h, WM_MOVE, 0, MAKELPARAM(h->rc.left - pr.left, h->rc.top - pr.top));
     } else
         h->send_sizemove = 1; /* see ShowWindow */
-    if ((style & WS_CHILD) && !(ex & WS_EX_NOPARENTNOTIFY))
-        SendMessage(h->parent, WM_PARENTNOTIFY, WM_CREATE, (LPARAM)h);
+    if (style & WS_CHILD) {
+        /* USER seg8:0843: a child created minimised or maximised gets that state hidden
+         * (MinMaximize SW_SHOWMINNOACTIVE / SW_SHOWMAXIMIZED, fKeepHidden), then WS_VISIBLE shows it
+         * without activating it */
+        if (style & WS_MINIMIZE) w16_min_maximize(h, SW_SHOWMINNOACTIVE, 1);
+        else if (style & WS_MAXIMIZE) w16_min_maximize(h, SW_SHOWMAXIMIZED, 1);
+        if (!w16_valid(h)) return NULL;
+        if (!(ex & WS_EX_NOPARENTNOTIFY)) SendMessage(h->parent, WM_PARENTNOTIFY, WM_CREATE, (LPARAM)h);
+        if (!w16_valid(h)) return NULL;
+        if (style & WS_VISIBLE) ShowWindow(h, SW_SHOW);
+        return h;
+    }
     if (style & WS_MINIMIZE) ShowWindow(h, SW_SHOWMINIMIZED);
     else if (style & WS_MAXIMIZE) ShowWindow(h, SW_SHOWMAXIMIZED);
     else if (style & WS_VISIBLE) ShowWindow(h, SW_SHOW);
@@ -752,6 +822,8 @@ BOOL DestroyWindow(HWND h)
             if (c->owner == h) DestroyWindow(c);
             c = n;
         }
+    /* a minimised child window's icon title goes with its CHECKPOINT */
+    if (w16_valid(h->icon_title)) { HWND t = h->icon_title; h->icon_title = NULL; DestroyWindow(t); }
     if (h->style & WS_VISIBLE) {
         if (IsIconic(h)) w16_invalidate_icon_title(h);
         h->style &= ~WS_VISIBLE;
@@ -779,9 +851,58 @@ BOOL DestroyWindow(HWND h)
 }
 
 /* ------------------------------------------------------------------ show / state */
+/* USER seg14:0BF2 ShowWindow for a child window: showing or hiding never activates it or changes its
+ * place in the z-order (SWP_NOZORDER | SWP_NOACTIVATE); minimising, maximising and restoring go
+ * through MinMaximize. Under a hidden parent only the WS_VISIBLE bit changes. */
+static BOOL show_child(HWND h, int cmd)
+{
+    int was = (h->style & WS_VISIBLE) != 0;
+    UINT swp = SWP_NOSIZE | SWP_NOMOVE;
+    switch (cmd) {
+    case SW_HIDE:
+        if (!was) return was;
+        swp |= SWP_HIDEWINDOW;
+        break;
+    case SW_SHOWNORMAL:
+    case SW_SHOWNOACTIVATE:
+    case SW_RESTORE:
+        if (h->style & (WS_MINIMIZE | WS_MAXIMIZE)) { w16_min_maximize(h, cmd, 0); return was; }
+        if (was) return was;
+        swp |= SWP_SHOWWINDOW;
+        break;
+    case SW_SHOWMINIMIZED:
+    case SW_SHOWMAXIMIZED:
+    case SW_MINIMIZE:
+    case SW_SHOWMINNOACTIVE:
+        w16_min_maximize(h, cmd, 0);
+        return was;
+    case SW_SHOW:
+        if (was) return was;
+        swp |= SWP_SHOWWINDOW;
+        break;
+    default: /* SW_SHOWNA */
+        swp |= SWP_SHOWWINDOW;
+        break;
+    }
+    if ((cmd != SW_HIDE) != was) SendMessage(h, WM_SHOWWINDOW, cmd != SW_HIDE, 0);
+    if (!w16_valid(h)) return was;
+    if (w16_window_visible(h->parent))
+        SetWindowPos(h, NULL, 0, 0, 0, 0, swp | SWP_NOZORDER | SWP_NOACTIVATE);
+    else if (cmd == SW_HIDE)
+        h->style &= ~WS_VISIBLE;
+    else
+        h->style |= WS_VISIBLE;
+    if (!w16_valid(h)) return was;
+    /* seg2:090A: the focus on the hidden window itself goes to its parent */
+    if (cmd == SW_HIDE && w16_focus == h) SetFocus(h->parent);
+    if (h->style & WS_MINIMIZE) w16_show_icon_title(h, cmd != SW_HIDE);
+    return was;
+}
+
 static BOOL show_window(HWND h, int cmd)
 {
     if (!w16_valid(h)) return FALSE;
+    if (h->style & WS_CHILD) return show_child(h, cmd);
     int was = (h->style & WS_VISIBLE) != 0;
     switch (cmd) {
     case SW_HIDE:
@@ -1499,8 +1620,9 @@ BOOL GetWindowPlacement(HWND h, WINDOWPLACEMENT *wp)
     wp->length = sizeof *wp;
     wp->flags = 0;
     wp->showCmd = !(h->style & WS_VISIBLE) ? SW_HIDE : IsIconic(h) ? SW_SHOWMINIMIZED : IsZoomed(h) ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
-    RECT n = (h->style & (WS_MINIMIZE | WS_MAXIMIZE)) ? h->restore : h->rw;
+    RECT n = h->rw;
     OffsetRect(&n, -pr.left, -pr.top);
+    if (h->style & (WS_MINIMIZE | WS_MAXIMIZE)) n = h->restore; /* kept in parent client coordinates */
     wp->rcNormalPosition = n;
     wp->ptMinPosition = (POINT){-1, -1};
     wp->ptMaxPosition = (POINT){-1, -1};

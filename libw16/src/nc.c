@@ -60,8 +60,10 @@ static void caption_rect(HWND h, RECT *c)
     if (has_dlgframe(h)) InflateRect(c, -1, 0); /* inside the white line beside the caption */
 }
 
-static int has_min(HWND h) { return w16_has_caption(h->style) && (h->style & WS_MINIMIZEBOX) && !(h->style & WS_CHILD); }
-static int has_max(HWND h) { return w16_has_caption(h->style) && (h->style & WS_MAXIMIZEBOX) && !(h->style & WS_CHILD); }
+/* USER's DrawCaption (seg1:A305) draws the minimize / maximize boxes from the style bits alone, for
+ * child windows (MDI children) as for top-level ones */
+static int has_min(HWND h) { return w16_has_caption(h->style) && (h->style & WS_MINIMIZEBOX); }
+static int has_max(HWND h) { return w16_has_caption(h->style) && (h->style & WS_MAXIMIZEBOX); }
 
 static void button_rects(HWND h, RECT *rmin, RECT *rmax)
 {
@@ -96,8 +98,11 @@ void w16_get_sb_rect(HWND h, int bar, RECT *r)
     else
         SetRect(r, c.left - (framed ? 1 : 0), c.bottom, c.right + (framed ? 1 : 0), c.bottom + GetSystemMetrics(SM_CYHSCROLL));
     if (!framed) {
-        if (bar == SB_VERT) r->bottom = c.bottom;
-        else r->right = c.right;
+        /* without a frame the bars end at the window's edges; with both bars each runs one pixel
+         * into the other's end, so the size box between them is a plain 16 x 16 (measured on
+         * SysEdit's edit windows, which have both bars and no border) */
+        if (bar == SB_VERT) r->bottom = c.bottom + ((h->style & WS_HSCROLL) ? 1 : 0);
+        else r->right = c.right + ((h->style & WS_VSCROLL) ? 1 : 0);
     }
 }
 
@@ -407,9 +412,12 @@ void w16_nc_paint(HWND h, int active)
     if (h->style & WS_HSCROLL) w16_draw_sb(h, dc, SB_HORZ, 0);
     if ((h->style & WS_VSCROLL) && (h->style & WS_HSCROLL)) {
         RECT v, hz;
+        int l, t, rr, b;
         w16_get_sb_rect(h, SB_VERT, &v);
         w16_get_sb_rect(h, SB_HORZ, &hz);
-        fill(dc, v.left + 1, hz.top + 1, v.right - 1, hz.bottom - 1, GetSysColor(COLOR_SCROLLBAR));
+        frame_insets(h, &l, &t, &rr, &b);
+        if (l > 0) fill(dc, v.left + 1, hz.top + 1, v.right - 1, hz.bottom - 1, GetSysColor(COLOR_SCROLLBAR));
+        else fill(dc, v.left + 1, v.bottom, v.right, hz.bottom, GetSysColor(COLOR_SCROLLBAR)); /* to the edges */
     }
     ReleaseDC(h, dc);
     h->active_frame = active;
@@ -653,6 +661,337 @@ void w16_iconic_paint(HWND h)
     ReleaseDC(h, dc);
 }
 
+/* ------------------------------------------------------------------ child windows: MinMaximize */
+/* The parent's client rectangle on the screen (the screen for top-level windows) */
+static RECT parent_client(HWND h)
+{
+    if (h->parent && h->parent != w16_desktop) return h->parent->rc;
+    return (RECT){0, 0, w16_screen.w, w16_screen.h};
+}
+
+/* USER seg4:0000 FindIconSlot: slots of SM_CXICONSPACING x SM_CYICONSPACING fill the parent's client
+ * area from its bottom-left corner, left to right, then upwards. A slot is taken when it overlaps
+ * another visible icon's slot (its icon window centred across a slot's top) or the remembered icon
+ * position of a window whose user placed its icon (shrunk by a quarter icon on every side). The icon
+ * window goes to the slot's top, centred across: (parent client coordinates). */
+void w16_icon_slot_in(HWND h, POINT *pt)
+{
+    RECT pc = parent_client(h);
+    int sx = GetSystemMetrics(SM_CXICONSPACING), sy = GetSystemMetrics(SM_CYICONSPACING);
+    int hx = GetSystemMetrics(SM_CXICON) / 2, hy = GetSystemMetrics(SM_CYICON) / 2;
+    int ph = pc.bottom - pc.top, cols = (UINT)(pc.right - pc.left) / (UINT)sx;
+    if (cols < 1) cols = 1;
+    RECT s;
+    for (int i = 0;; i++) {
+        s.left = (i % cols) * sx;
+        s.right = s.left + sx;
+        s.top = ph - (i / cols + 1) * sy;
+        s.bottom = s.top + sy;
+        OffsetRect(&s, pc.left, pc.top);
+        HWND c = h->parent ? h->parent->child : NULL;
+        for (; c; c = c->next) {
+            if (!(c->style & WS_VISIBLE) || c == h) continue;
+            RECT o;
+            if (c->style & WS_MINIMIZE) {
+                o.left = c->rw.left - sx / 2 + hx;
+                o.top = c->rw.top;
+            } else {
+                if (!c->has_iconpos) continue;
+                o.left = c->iconpos.x - sx / 2 + hx + pc.left;
+                o.top = c->iconpos.y + pc.top;
+            }
+            o.right = o.left + sx;
+            o.bottom = o.top + sy;
+            if (!(c->style & WS_MINIMIZE)) InflateRect(&o, -(hx / 2), -(hy / 2));
+            RECT x;
+            if (IntersectRect(&x, &o, &s)) break;
+        }
+        if (!c || i > 10000) break;
+    }
+    OffsetRect(&s, -pc.left, -pc.top);
+    pt->x = sx / 2 - hx + s.left;
+    pt->y = s.top;
+}
+
+/* USER seg6:18E0 + 1A4F: the MINMAXINFO a window starts from, then WM_GETMINMAXINFO (an MDI child
+ * answers with its client's area). UNTESTED for windows that do not answer: the non-sizable default
+ * (screen plus a border on each side) is not measured */
+static void get_minmax(HWND h, MINMAXINFO *mm)
+{
+    int fx = GetSystemMetrics(SM_CXFRAME), fy = GetSystemMetrics(SM_CYFRAME);
+    int bx = GetSystemMetrics(SM_CXBORDER), by = GetSystemMetrics(SM_CYBORDER);
+    memset(mm, 0, sizeof *mm);
+    mm->ptReserved = (POINT){icon_wnd_cx(), icon_wnd_cy()};
+    if (h->style & WS_THICKFRAME) {
+        mm->ptMaxSize = (POINT){w16_screen.w + 2 * fx, w16_screen.h + 2 * fy};
+        mm->ptMaxPosition = (POINT){-fx, -fy};
+    } else {
+        mm->ptMaxSize = (POINT){w16_screen.w + 2 * bx, w16_screen.h + 2 * by};
+        mm->ptMaxPosition = (POINT){-bx, -by};
+    }
+    mm->ptMinTrackSize = (POINT){GetSystemMetrics(SM_CXMINTRACK), GetSystemMetrics(SM_CYMINTRACK)};
+    mm->ptMaxTrackSize = mm->ptMaxSize;
+    SendMessage(h, WM_GETMINMAXINFO, 0, (LPARAM)mm);
+}
+
+/* seg6:1E58: the last window below h among its siblings (as far as they share h's topmost state)
+ * with h's owner: a window minimised with SW_MINIMIZE goes below it */
+static HWND last_same_owner(HWND h)
+{
+    HWND r = NULL;
+    for (HWND s = h->next; s; s = s->next) {
+        if ((s->exstyle & WS_EX_TOPMOST) != (h->exstyle & WS_EX_TOPMOST)) break;
+        if (s->owner == h->owner) r = s;
+    }
+    return r;
+}
+
+/* USER seg6:1A72 MinMaximize, used here for child windows (MDI children; top-level windows keep
+ * w16_minimize / w16_maximize / w16_restore). The CHECKPOINT keeps the normal rectangle and the icon
+ * position in the parent's client coordinates. cmd 0xCC (MDI) restores the window, or minimises it
+ * again when it was minimised before it was maximised, without activating it or changing its place. */
+void w16_min_maximize(HWND h, int cmd, int keep_hidden)
+{
+    if (!w16_valid(h)) return;
+    RECT pc = parent_client(h), rc = h->rw;
+    OffsetRect(&rc, -pc.left, -pc.top);
+    /* seg6:0BFC GetCheckpoint */
+    if (h->style & WS_MINIMIZE) h->iconpos = (POINT){rc.left, rc.top};
+    else if (!(h->style & WS_MAXIMIZE)) h->restore = rc;
+    RECT nr = h->restore;
+    UINT swp = 0;
+    HWND after = HWND_TOP;
+    int minimizing = 0, show_title = 0, set_focus = 0;
+    MINMAXINFO mm;
+    if (cmd == 0xCC) {
+        swp = SWP_NOZORDER | SWP_NOACTIVATE;
+        cmd = (h->cp_flags & 4) ? SW_SHOWMINIMIZED : SW_SHOWNORMAL;
+    }
+    switch (cmd) {
+    case SW_SHOWNOACTIVATE:
+        if (w16_active) swp |= SWP_NOACTIVATE;
+        /* fall through */
+    case SW_RESTORE:
+        cmd = ((h->style & WS_MINIMIZE) && (h->cp_flags & 2)) ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+        goto restore;
+    case SW_MINIMIZE:
+    case SW_SHOWMINNOACTIVE:
+        if (w16_active) swp |= SWP_NOACTIVATE;
+        after = last_same_owner(h);
+        if (!after) swp |= SWP_NOZORDER;
+        /* fall through */
+    case SW_SHOWMINIMIZED: {
+        if ((h->style & WS_MINIMIZE) && (h->style & WS_VISIBLE)) return;
+        minimizing = show_title = 1;
+        if (h->style & WS_MINIMIZE) {
+            swp |= SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE;
+            break;
+        }
+        POINT pt;
+        if (h->has_iconpos) pt = h->iconpos;
+        else w16_icon_slot_in(h, &pt);
+        h->iconpos = pt;
+        nr = (RECT){pt.x, pt.y, pt.x + icon_wnd_cx(), pt.y + icon_wnd_cy()};
+        for (HWND w = w16_focus; w; w = w->parent)
+            if (w == h) { SetFocus((h->style & WS_CHILD) ? h->parent : NULL); break; }
+        if (h->style & WS_MAXIMIZE) h->cp_flags |= 2;
+        else h->cp_flags &= ~2;
+        h->style |= WS_MINIMIZE;
+        h->style &= ~WS_MAXIMIZE;
+        swp |= SWP_NOCOPYBITS | SWP_FRAMECHANGED;
+        break;
+    }
+    case SW_SHOWNORMAL:
+    case SW_SHOWMAXIMIZED:
+    restore:
+        if (cmd == SW_SHOWMAXIMIZED) {
+            if ((h->style & WS_MAXIMIZE) && (h->style & WS_VISIBLE)) return;
+            if (keep_hidden) swp |= SWP_NOACTIVATE;
+            if (h->style & WS_MINIMIZE) h->cp_flags |= 4;
+            else h->cp_flags &= ~4;
+            get_minmax(h, &mm);
+            if (!w16_valid(h)) return;
+        }
+        if (h->style & WS_MINIMIZE) {
+            if (!SendMessage(h, WM_QUERYOPEN, 0, 0)) return;
+            set_focus = 1;
+            swp |= SWP_NOCOPYBITS;
+            w16_show_icon_title(h, FALSE);
+        }
+        if (cmd == SW_SHOWMAXIMIZED) {
+            nr = (RECT){mm.ptMaxPosition.x, mm.ptMaxPosition.y, mm.ptMaxPosition.x + mm.ptMaxSize.x,
+                        mm.ptMaxPosition.y + mm.ptMaxSize.y};
+            h->style |= WS_MAXIMIZE;
+        } else {
+            nr = h->restore;
+            h->style &= ~WS_MAXIMIZE;
+        }
+        h->style &= ~WS_MINIMIZE;
+        swp |= SWP_FRAMECHANGED;
+        break;
+    default:
+        break;
+    }
+    if (!keep_hidden && (minimizing || !(h->style & WS_VISIBLE))) swp |= SWP_SHOWWINDOW;
+    SetWindowPos(h, after, nr.left, nr.top, nr.right - nr.left, nr.bottom - nr.top, swp);
+    if (!w16_valid(h)) return;
+    if (show_title && !keep_hidden) w16_show_icon_title(h, TRUE);
+    if (set_focus) SetFocus(h);
+}
+
+/* ------------------------------------------------------------------ icon titles of child windows */
+/* USER seg1:6B43: the title's width and height: the window text without its trailing blanks, measured
+ * with DrawText(DT_CALCRECT | DT_WORDBREAK | DT_CENTER | DT_NOPREFIX) in SM_CXICONSPACING - 2 cxBorder
+ * in the icon title font (one line without IconTitleWrap), the height of "X"... for no text */
+static void icon_title_size(HWND icon, int *w, int *ht)
+{
+    int cxb = GetSystemMetrics(SM_CXBORDER);
+    HDC dc = GetDC(NULL);
+    HGDIOBJ of = SelectObject(dc, icon_title_font());
+    RECT t = {0, 0, GetSystemMetrics(SM_CXICONSPACING) - 2 * cxb, 2};
+    char buf[80];
+    snprintf(buf, sizeof buf, "%s", icon->text ? icon->text : "");
+    int n = strlen(buf);
+    while (n > 1 && buf[n - 1] == ' ') buf[--n] = 0;
+    if (n) DrawText(dc, buf, n, &t, DT_CALCRECT | icon_title_dt());
+    else t.bottom = t.top + HIWORD(GetTextExtent(dc, " ", 1));
+    SelectObject(dc, of);
+    ReleaseDC(NULL, dc);
+    *w = t.right - t.left;
+    *ht = t.bottom - t.top;
+}
+
+/* seg1:6C14: the title's place for an icon window at (x, y) of its parent's client area: centred under
+ * the icon window, 4 cxBorder wider than the text; r gets x, y, cx, cy */
+void w16_icon_title_rect_at(HWND icon, int x, int y, RECT *r)
+{
+    int w, ht, cxb = GetSystemMetrics(SM_CXBORDER);
+    icon_title_size(icon, &w, &ht);
+    r->left = icon_wnd_cx() / 2 - (UINT)w / 2 - 2 * cxb + x;
+    r->top = icon_wnd_cy() + y;
+    r->right = 4 * cxb + w;
+    r->bottom = ht;
+}
+
+/* seg1:6984: an icon title painted - the active one on the active caption colour in the caption text
+ * colour, else on the parent's class background with black text on light colours (R + G + B > 381)
+ * and white on dark ones; the text in the title's client area less cxBorder on the left and
+ * 2 cxBorder on the right */
+static void draw_icon_title(HWND title, HDC dc, int active)
+{
+    HWND icon = title->owner;
+    HBRUSH br;
+    COLORREF fg;
+    if (active) {
+        br = w16_sys_brush(COLOR_ACTIVECAPTION);
+        fg = GetSysColor(COLOR_CAPTIONTEXT);
+    } else {
+        COLORREF bk;
+        br = title->parent && title->parent != w16_desktop ? title->parent->cls->wc.hbrBackground : NULL;
+        if ((uintptr_t)br > 0 && (uintptr_t)br <= COLOR_BTNHIGHLIGHT + 1) {
+            bk = GetSysColor((int)(uintptr_t)br - 1);
+            br = w16_sys_brush((int)(uintptr_t)br - 1);
+        } else if (br)
+            bk = br->u.brush.color;
+        else {
+            br = w16_sys_brush(COLOR_WINDOW); /* UNTESTED: a parent class without a background brush */
+            bk = GetSysColor(COLOR_WINDOW);
+        }
+        fg = GetRValue(bk) + GetGValue(bk) + GetBValue(bk) > 0x17D ? RGB(0, 0, 0) : RGB(255, 255, 255);
+    }
+    RECT r;
+    GetClientRect(title, &r);
+    FillRect(dc, &r, br);
+    if (!w16_valid(icon)) return;
+    SetTextColor(dc, fg);
+    HGDIOBJ of = SelectObject(dc, icon_title_font());
+    SetBkMode(dc, TRANSPARENT);
+    int cxb = GetSystemMetrics(SM_CXBORDER);
+    r.left += cxb;
+    r.right -= 2 * cxb;
+    DrawText(dc, icon->text ? icon->text : "", -1, &r, icon_title_dt());
+    SelectObject(dc, of);
+}
+
+/* seg1:6CA0, the icon title window procedure (class #32772) */
+LRESULT w16_icon_title_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    HWND icon = h->owner;
+    switch (m) {
+    case WM_ACTIVATE:
+        if (wp && w16_valid(icon)) SetActiveWindow(icon);
+        return 0;
+    case WM_CLOSE:
+        return 0;
+    case WM_ERASEBKGND: {
+        int active = 0;
+        if (w16_valid(icon))
+            active = (icon->style & WS_CHILD) ? (int)SendMessage(icon, WM_ISACTIVEICON, 0, 0) : icon == w16_active;
+        draw_icon_title(h, (HDC)wp, active);
+        ValidateRect(h, NULL);
+        return 1;
+    }
+    case WM_SHOWWINDOW:
+        if (wp && w16_valid(icon)) {
+            /* placed just above its icon among the icon's siblings */
+            UINT swp = SWP_NOZORDER | SWP_NOACTIVATE;
+            HWND after = HWND_TOP;
+            if (h->parent != w16_desktop) {
+                after = GetWindow(icon, GW_HWNDPREV);
+                if (after != h) swp = SWP_NOACTIVATE;
+            }
+            RECT pc = parent_client(icon), r;
+            w16_icon_title_rect_at(icon, icon->rw.left - pc.left, icon->rw.top - pc.top, &r);
+            SetWindowPos(h, after, r.left, r.top, r.right, r.bottom, swp);
+        }
+        return 0;
+    case WM_NCHITTEST:
+        return HTCAPTION;
+    case WM_NCMOUSEMOVE:
+    case WM_NCLBUTTONDOWN:
+    case WM_NCLBUTTONUP:
+    case WM_NCLBUTTONDBLCLK:
+        return w16_valid(icon) ? SendMessage(icon, m, wp, lp) : 0;
+    }
+    return DefWindowProc(h, m, wp, lp);
+}
+
+/* seg1:6E25: a child icon's title shown (created the first time: a WS_CHILD | WS_CLIPSIBLINGS sibling
+ * of the icon that the icon owns, disabled with it) and placed just above the icon, or hidden. Icons
+ * of top-level windows keep their titles drawn by the desktop (w16_paint_icon_titles). */
+void w16_show_icon_title(HWND h, BOOL show)
+{
+    if (!w16_valid(h)) return;
+    if (!(h->style & WS_CHILD)) { w16_invalidate_icon_title(h); return; }
+    HWND t = h->icon_title;
+    if (!w16_valid(t)) {
+        if (!show) return;
+        t = CreateWindowEx(WS_EX_NOPARENTNOTIFY, "#32772", NULL, WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 1, 1, h->parent,
+                           NULL, h->inst, NULL);
+        if (!t) return;
+        t->owner = h;
+        if (h->style & WS_DISABLED) t->style |= WS_DISABLED;
+        h->icon_title = t;
+    }
+    if (show) {
+        SendMessage(t, WM_SHOWWINDOW, TRUE, 0);
+        HWND after = GetWindow(h, GW_HWNDPREV);
+        if (after != t) SetWindowPos(t, after, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+        else SetWindowPos(t, NULL, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+    } else
+        ShowWindow(t, SW_HIDE);
+}
+
+/* seg1:6DE3: the title placed and painted again (activation, new window text) */
+void w16_redraw_icon_title(HWND h)
+{
+    if (!w16_valid(h)) return;
+    if (!(h->style & WS_CHILD)) { w16_invalidate_icon_title(h); return; }
+    if (!w16_valid(h->icon_title)) return;
+    SendMessage(h->icon_title, WM_SHOWWINDOW, TRUE, 0);
+    InvalidateRect(h->icon_title, NULL, TRUE);
+}
+
 /* ------------------------------------------------------------------ move / size tracking */
 void w16_xor_frame_rect(const RECT *r, int t)
 {
@@ -828,12 +1167,29 @@ void w16_sys_command(HWND h, UINT cmd, int x, int y)
         if ((cmd & 0xF) == HTSYSMENU) w16_menu_track_sys(h, 0);
         else w16_menu_track_bar(h, x, y, 0, 0);
         return;
-    case SC_KEYMENU:
-        if (x == ' ' || (x == '-' && (h->style & WS_CHILD))) w16_menu_track_sys(h, 1);
-        else if (h->menu && !(h->style & WS_CHILD)) w16_menu_track_bar(h, 0, 0, x, 1);
-        else if (h->style & WS_SYSMENU && x == 0) w16_menu_track_sys(h, 1);
+    case SC_KEYMENU: {
+        /* USER seg17:00FE MenuStateInit: from a child window the keys go up to the first window that
+         * is not a child or has a system menu (an MDI child); a top-level window's to the active one */
+        HWND o = h;
+        if (h->style & WS_CHILD) {
+            while ((o->style & WS_CHILD) && !(o->style & WS_SYSMENU) && w16_valid(o->parent) && o->parent != w16_desktop)
+                o = o->parent;
+        } else if (w16_valid(w16_active))
+            o = w16_active;
+        if ((o->style & WS_CHILD) ? !(o->style & WS_SYSMENU) : (!o->menu && !(o->style & WS_SYSMENU))) return;
+        /* seg19:04FB MenuKeyStart: a child's only menu is its system menu: '-' and ' ' open it, other
+         * characters ask the child (WM_MENUCHAR; an MDI child hands them to its frame) */
+        if (o->style & WS_CHILD) {
+            if (x == 0 || x == ' ' || x == '-') w16_menu_track_sys(o, 1);
+            else if (HIWORD(SendMessage(o, WM_MENUCHAR, (WPARAM)x, MAKELPARAM(MF_SYSMENU, 0))) == 0) MessageBeep(0);
+            return;
+        }
+        if (x == ' ' && (o->style & WS_SYSMENU)) w16_menu_track_sys(o, 1);
+        else if (o->menu && !IsIconic(o)) w16_menu_track_bar(o, 0, 0, x, 1);
+        else if ((o->style & WS_SYSMENU) && x == 0) w16_menu_track_sys(o, 1);
         else MessageBeep(0);
         return;
+    }
     case SC_NEXTWINDOW:
     case SC_PREVWINDOW: {
         HWND last = NULL;

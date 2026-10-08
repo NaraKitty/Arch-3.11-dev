@@ -1,0 +1,8 @@
+# SysEdit (System Configuration Editor) started: SYSTEM.INI, WIN.INI, CONFIG.SYS and AUTOEXEC.BAT
+# in four MDI children at the cascade positions, AUTOEXEC.BAT active
+# reference: scn/mdi-tile.scn, frame 01 (SysEdit as the shell, just opened)
+# regress: sh apps/sysedit/tests/sysedit.sh "$TEST" "$OUT"
+# compare: mdi-tile/01.png 01.png active ignore 316 228 333 261
+sleep 500
+shotcaret shots/01.png
+quit
