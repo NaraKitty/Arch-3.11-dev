@@ -57,6 +57,14 @@ new pieces drawn in the theme's style, such as the Volume, Network and Internet 
    The MS-DOS Prompt item starts the built-in DOSBox; Terminal is the Linux terminal in 3.11's
    Terminal look (ADR-006).
 
+## Light / dark preference (owner, October 2026)
+Once the theme manager exists, is accurate and the other themes' colours are imported, it gets a
+Light / Dark toggle. The toggle does not change any arch311 theme's look: it only sets the desktop's
+colour-scheme preference that Linux applications read to pick their own light or dark appearance
+(the freedesktop `org.freedesktop.appearance color-scheme` setting served by xdg-desktop-portal, the
+GNOME `color-scheme` key GTK reads, and the matching Qt/KDE setting), so apps that auto-detect follow
+the user's choice.
+
 ## Browsers
 
 Internet Explorer and Netscape Navigator are theme programs: their frames, toolbars, menus,
