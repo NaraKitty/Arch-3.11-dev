@@ -520,10 +520,22 @@ BOOL SetWindowPos(HWND h, HWND after, int x, int y, int cx, int cy, UINT fl)
     int moved = nr.left != h->rw.left || nr.top != h->rw.top;
     int sized = (nr.right - nr.left) != (h->rw.right - h->rw.left) || (nr.bottom - nr.top) != (h->rw.bottom - h->rw.top);
     if (!(fl & SWP_NOZORDER) && h->parent) {
+        /* the siblings above h before the move: those that end up above it but were below it get the
+         * parts of h they now cover repainted (a window sent down the z-order, as MDI's Next does) */
+        HWND above[64];
+        int na = 0;
+        for (HWND s = h->parent->child; s && s != h && na < 64; s = s->next) above[na++] = s;
         if (after == HWND_TOP || after == HWND_TOPMOST || after == NULL) raise_w(h);
         else if (after == HWND_BOTTOM) { unlink_w(h); link_after(h, HWND_BOTTOM); }
         else if (w16_valid(after) && after->parent == h->parent && after != h) { unlink_w(h); link_after(h, after); }
-        if (w16_window_visible(h)) w16_invalidate_window(h, NULL, 1, 1);
+        if (w16_window_visible(h)) {
+            w16_invalidate_window(h, NULL, 1, 1);
+            for (HWND s = h->parent->child; s && s != h; s = s->next) {
+                int was_above = 0;
+                for (int i = 0; i < na; i++) was_above |= above[i] == s;
+                if (!was_above && (s->style & WS_VISIBLE)) w16_invalidate_window(s, &h->rw, 1, 1);
+            }
+        }
     }
     if (fl & SWP_HIDEWINDOW) {
         if (h->style & WS_VISIBLE) {

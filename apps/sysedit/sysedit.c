@@ -276,7 +276,7 @@ static LRESULT MPFrameWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                                      (HMENU)(uintptr_t)ID_EDIT, hInst, &ccs);
         ShowWindow(hwndMDIClient, SW_SHOW);
     }
-        /* fall through: the printer is looked at as for WM_WININICHANGE */
+        /* fall through - the printer is looked at as for WM_WININICHANGE */
     case WM_WININICHANGE:
     case 0x001B: { /* WM_DEVMODECHANGE */
         HDC hdc = GetPrinterDC();
