@@ -88,19 +88,62 @@ static void init_metrics(int sw, int sh)
     m[SM_CYMINTRACK] = 27;
     m[SM_CXDOUBLECLK] = 4;
     m[SM_CYDOUBLECLK] = 4;
-    m[SM_CXICONSPACING] = 77;
-    m[SM_CYICONSPACING] = 77;
+    /* USER seg3:1DF5: LOGPIXELSX * 75 / 96 (75 on VGA) unless WIN.INI [desktop] IconSpacing says
+     * otherwise, never under cxIcon (measured: the first icon sits at 75 / 2 - 16 = 21, and at 34 with
+     * IconSpacing=100). rgwSysMet[SM_CXICONSPACING] is USER's [0xc0], which
+     * SPI_ICONHORIZONTALSPACING sets, so GetSystemMetrics reads w16_icon_spacing. */
+    m[SM_CXICONSPACING] = w16_icon_spacing;
+    /* USER seg3:1E1C/1E98: cyIcon / 4 + the icon window (cyIcon + 4 cyBorder) + the title: with
+     * IconTitleWrap=1 two lines of the 13-pixel MS Sans Serif 8 icon title font plus cyBorder each
+     * (72 on VGA, the measured distance of the first icon row above the bottom of the screen), else
+     * one line plus 2 cyBorder */
+    m[SM_CYICONSPACING] = w16_icon_title_wrap ? 2 * (13 + 1) + 32 / 4 + 32 + 4 : 32 / 4 + 2 + 32 + 4 + 13;
     m[SM_MENUDROPALIGNMENT] = 0;
 }
 
-int GetSystemMetrics(int i) { return (i >= 0 && i < SM_CMETRICS) ? w16_metric[i] : 0; }
+int GetSystemMetrics(int i)
+{
+    if (i == SM_CXICONSPACING) return w16_icon_spacing;
+    return (i >= 0 && i < SM_CMETRICS) ? w16_metric[i] : 0;
+}
 COLORREF GetSysColor(int i) { return (i >= 0 && i < W16_NUM_SYSCOLORS) ? w16_syscolor[i] : 0; }
 
+/* USER, both at start-up (seg3:0748, jump table 07D1) and in SetSysColors (seg41:0C06, table 0C50):
+ * the text-like colours are made solid with the display's GetNearestColor; a scroll bar colour of
+ * exactly E0E0E0 gets the 0x10 flag in its high byte (VGA.DRV then realizes the brush as its 50% gray
+ * pattern) */
+static COLORREF snap_syscolor(int k, COLORREF c)
+{
+    switch (k) {
+    case COLOR_SCROLLBAR:
+        if (c == 0x00E0E0E0) c |= 0x10000000;
+        break;
+    case COLOR_MENU: case COLOR_WINDOW: case COLOR_WINDOWFRAME: case COLOR_MENUTEXT:
+    case COLOR_WINDOWTEXT: case COLOR_CAPTIONTEXT: case COLOR_HIGHLIGHT: case COLOR_HIGHLIGHTTEXT:
+    case COLOR_BTNTEXT: case COLOR_INACTIVECAPTIONTEXT:
+        c = GetNearestColor(NULL, c);
+        break;
+    }
+    return c;
+}
+
+/* the start-up half, once the display (W16_COLORS) is set up: libw16 reads WIN.INI before that */
+void w16_syscolors_realize(void)
+{
+    for (int k = 0; k < W16_NUM_SYSCOLORS; k++) w16_syscolor[k] = snap_syscolor(k, w16_syscolor[k]);
+}
+
+/* SetSysColors (seg41:0C06): every top-level window then gets WM_SYSCOLORCHANGE and the whole screen
+ * is redrawn, frames and children included (RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN
+ * on the desktop) */
 void SetSysColors(int n, const int *idx, const COLORREF *v)
 {
-    for (int i = 0; i < n; i++)
-        if (idx[i] >= 0 && idx[i] < W16_NUM_SYSCOLORS)
-            w16_syscolor[idx[i]] = v[i];
+    for (int i = 0; i < n; i++) {
+        int k = idx[i];
+        if (k < 0 || k >= W16_NUM_SYSCOLORS) continue;
+        w16_syscolor[k] = snap_syscolor(k, v[i]);
+    }
+    SendMessage(HWND_BROADCAST, WM_SYSCOLORCHANGE, 0, 0);
     w16_invalidate_screen_rect(&(RECT){0, 0, w16_metric[SM_CXSCREEN], w16_metric[SM_CYSCREEN]});
 }
 
@@ -422,11 +465,18 @@ void w16_sys_init(void)
     w16_mouse_params[2] = GetProfileInt("windows", "MouseSpeed", 1);
     if (w16_mouse_params[2] == 2) w16_mouse_params[1] = GetProfileInt("windows", "MouseThreshold2", 10);
     w16_trails_init();
+    /* USER's start-up (seg3:0748 with its reader seg3:06D7): three numbers, each the next run of
+     * digits (anything else between them is skipped), kept as a byte. 3.1 reads on past the end of a
+     * value with fewer than three numbers; libw16 stops there and takes 0 for the rest. */
     for (int i = 0; i < W16_NUM_SYSCOLORS; i++) {
-        if (GetProfileString("colors", color_keys[i], "", b, sizeof b)) {
-            int r, g, bl;
-            if (sscanf(b, "%d %d %d", &r, &g, &bl) == 3)
-                w16_syscolor[i] = RGB(r, g, bl);
+        if (GetProfileString("colors", color_keys[i], "", b, sizeof b) && b[0]) {
+            BYTE v[3] = {0, 0, 0};
+            const char *p = b;
+            for (int k = 0; k < 3; k++) {
+                while (*p && (*p < '0' || *p > '9')) p++;
+                while (*p >= '0' && *p <= '9') v[k] = (BYTE)(v[k] * 10 + (*p++ - '0'));
+            }
+            w16_syscolor[i] = RGB(v[0], v[1], v[2]);
         }
     }
     int sw = 640, sh = 480;
@@ -451,6 +501,59 @@ DWORD GetTickCount(void)
     return (DWORD)((t.tv_sec - t0.tv_sec) * 1000 + (t.tv_nsec - t0.tv_nsec) / 1000000) + 60000;
 }
 DWORD GetCurrentTime(void) { return GetTickCount(); }
+
+/* The DOS clock (INT 21h AH=2Ah get date, AH=2Ch get time, as DOS3Call returns them): local time with
+ * hundredths of a second. With ARCH311_CLOCK="YYYY-MM-DD HH:MM:SS" the clock reads exactly that at the
+ * first call and runs on in real time, like a DOS clock set with the DATE and TIME commands - the
+ * reference machine's clock is set the same way (ref-run.ps1 -Dos 'time 09:30:00'). */
+static void dos_clock(struct tm *tm, int *hundredths)
+{
+    static int init;
+    static long long offset_us;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    long long now = (long long)tv.tv_sec * 1000000 + tv.tv_usec;
+    if (!init) {
+        init = 1;
+        const char *fixed = getenv("ARCH311_CLOCK");
+        struct tm t;
+        memset(&t, 0, sizeof t);
+        if (fixed && sscanf(fixed, "%d-%d-%d %d:%d:%d", &t.tm_year, &t.tm_mon, &t.tm_mday, &t.tm_hour, &t.tm_min,
+                            &t.tm_sec) == 6) {
+            t.tm_year -= 1900;
+            t.tm_mon -= 1;
+            t.tm_isdst = -1;
+            time_t when = mktime(&t);
+            if (when != (time_t)-1) offset_us = (long long)when * 1000000 - now;
+        }
+    }
+    now += offset_us;
+    time_t s = (time_t)(now / 1000000);
+    localtime_r(&s, tm);
+    *hundredths = (int)(now % 1000000) / 10000;
+}
+
+void w16_dos_gettime(int *hour, int *min, int *sec, int *hundredths)
+{
+    struct tm t;
+    int h;
+    dos_clock(&t, &h);
+    if (hour) *hour = t.tm_hour;
+    if (min) *min = t.tm_min;
+    if (sec) *sec = t.tm_sec;
+    if (hundredths) *hundredths = h;
+}
+
+void w16_dos_getdate(int *year, int *month, int *day, int *weekday)
+{
+    struct tm t;
+    int h;
+    dos_clock(&t, &h);
+    if (year) *year = t.tm_year + 1900;
+    if (month) *month = t.tm_mon + 1;
+    if (day) *day = t.tm_mday;
+    if (weekday) *weekday = t.tm_wday;
+}
 
 /* ------------------------------------------------------------------ memory */
 #define MEM_MAGIC 0x4D454D31u

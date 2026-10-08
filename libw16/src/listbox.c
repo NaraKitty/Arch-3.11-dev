@@ -71,10 +71,14 @@ static void draw_item(HWND h, HDC dc, int i, HBRUSH bg)
     if (y >= r.bottom || i < l->top) return;
     int sel = i < l->n && (multisel(h) ? l->it[i].sel : i == l->cursel);
     if (ownerdraw(h) && i < l->n) {
-        DRAWITEMSTRUCT di = {ODT_LISTBOX, h->id, i, ODA_DRAWENTIRE, (sel ? ODS_SELECTED : 0) | (l->focus && i == l->caret ? ODS_FOCUS : 0),
-                             h, dc, ir, l->it[i].data};
-        HWND notify = l->combo ? l->combo->parent : h->parent;
-        SendMessage(notify, WM_DRAWITEM, h->id, (LPARAM)&di);
+        /* USER seg35:23E1; a combo box passes its list's items on as its own (seg33:073F:
+         * ODT_COMBOBOX, the combo's id and handle) */
+        HWND ctl = l->combo ? l->combo : h;
+        DRAWITEMSTRUCT di = {l->combo ? ODT_COMBOBOX : ODT_LISTBOX, ctl->id, i, ODA_DRAWENTIRE,
+                             (sel ? ODS_SELECTED : 0) | (l->focus && i == l->caret ? ODS_FOCUS : 0) |
+                                 ((h->style & WS_DISABLED) ? ODS_DISABLED : 0),
+                             ctl, dc, ir, l->it[i].data};
+        SendMessage(ctl->parent, WM_DRAWITEM, ctl->id, (LPARAM)&di);
         return;
     }
     FillRect(dc, &ir, sel ? w16_sys_brush(COLOR_HIGHLIGHT) : bg);
@@ -233,8 +237,9 @@ LRESULT w16_listbox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     }
     case WM_CREATE:
         if (ownerdraw(h)) {
-            MEASUREITEMSTRUCT mi = {ODT_LISTBOX, h->id, 0, 0, l->ih, 0};
-            SendMessage(l->combo ? l->combo->parent : h->parent, WM_MEASUREITEM, h->id, (LPARAM)&mi);
+            HWND ctl = l->combo ? l->combo : h;
+            MEASUREITEMSTRUCT mi = {l->combo ? ODT_COMBOBOX : ODT_LISTBOX, ctl->id, 0, 0, l->ih, 0};
+            SendMessage(ctl->parent, WM_MEASUREITEM, ctl->id, (LPARAM)&mi);
             if (mi.itemHeight) l->ih = mi.itemHeight;
         }
         if ((h->style & WS_BORDER) && !l->combo) {
@@ -577,6 +582,16 @@ static void cb_layout(HWND h)
     int w = h->rc.right - h->rc.left;
     int eh = tm.tmHeight + min(tm.tmHeight, sys.tmHeight) / 4 + 4 * cyb, fw = w;
     c->ih = tm.tmHeight;
+    if (h->style & (CBS_OWNERDRAWFIXED | CBS_OWNERDRAWVARIABLE)) {
+        /* owner-drawn: the field keeps the height its parent gave at the first layout, through
+         * WM_MEASUREITEM for item -1 (itemHeight = field - 6); MAIN.CPL Color's scheme combo is 19 px */
+        if (c->field.bottom > c->field.top) eh = c->field.bottom - c->field.top;
+        else {
+            MEASUREITEMSTRUCT mi = {ODT_COMBOBOX, h->id, (UINT)-1, 0, (UINT)(eh - 6), 0};
+            SendMessage(h->parent, WM_MEASUREITEM, h->id, (LPARAM)&mi);
+            eh = (int)mi.itemHeight + 6;
+        }
+    }
     if (cbtype(h) == CBS_SIMPLE)
         SetRectEmpty(&c->btn);
     else {
@@ -685,8 +700,18 @@ static void cb_paint(HWND h, HDC dc)
         } else if (h->style & WS_DISABLED)
             SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
         SetBkMode(dc, OPAQUE);
-        ExtTextOut(dc, t.left + 1, t.top + 1, ETO_CLIPPED | ETO_OPAQUE, &t, h->text, strlen(h->text), NULL);
-        if (sel) DrawFocusRect(dc, &t);
+        if (h->style & (CBS_OWNERDRAWFIXED | CBS_OWNERDRAWVARIABLE)) {
+            /* seg33:0F14: the parent draws the current item 3 px inside the field */
+            int cur = (int)SendMessage(c->list, LB_GETCURSEL, 0, 0);
+            DRAWITEMSTRUCT di = {ODT_COMBOBOX, h->id, (UINT)cur, ODA_DRAWENTIRE,
+                                 (sel ? ODS_SELECTED | ODS_FOCUS : 0) | ((h->style & WS_DISABLED) ? ODS_DISABLED : 0),
+                                 h, dc, c->field, (ULONG_PTR)SendMessage(c->list, LB_GETITEMDATA, cur, 0)};
+            InflateRect(&di.rcItem, -3, -3);
+            SendMessage(h->parent, WM_DRAWITEM, h->id, (LPARAM)&di);
+        } else {
+            ExtTextOut(dc, t.left + 1, t.top + 1, ETO_CLIPPED | ETO_OPAQUE, &t, h->text, strlen(h->text), NULL);
+            if (sel) DrawFocusRect(dc, &t);
+        }
     }
     SelectObject(dc, of);
 }

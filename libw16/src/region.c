@@ -127,6 +127,45 @@ int rgn_contains(const Region *g, int x, int y)
     return 0;
 }
 
+/* ------------------------------------------------------------------ GDI region objects */
+static Region *rgn_of(HRGN h) { return h && h->kind == OBJ_RGN ? &h->u.rgn : NULL; }
+
+/* GDI CombineRgn: dst = a op b (dst may be a or b); NULLREGION / SIMPLEREGION / COMPLEXREGION,
+ * ERROR for a bad handle */
+int CombineRgn(HRGN dst, HRGN a, HRGN b, int mode)
+{
+    Region *d = rgn_of(dst), *ra = rgn_of(a), *rb = rgn_of(b), out;
+    if (!d || !ra || (mode != RGN_COPY && !rb)) return ERROR;
+    rgn_init(&out);
+    switch (mode) {
+    case RGN_COPY: rgn_copy(&out, ra); break;
+    case RGN_AND: rgn_copy(&out, ra); rgn_and_rgn(&out, rb); break;
+    case RGN_OR: rgn_copy(&out, ra); for (int i = 0; i < rb->n; i++) rgn_add(&out, &rb->r[i]); break;
+    case RGN_DIFF: rgn_copy(&out, ra); for (int i = 0; i < rb->n; i++) rgn_sub(&out, &rb->r[i]); break;
+    case RGN_XOR: {
+        Region t;
+        rgn_init(&t);
+        rgn_copy(&out, ra);
+        for (int i = 0; i < rb->n; i++) rgn_sub(&out, &rb->r[i]);
+        rgn_copy(&t, rb);
+        for (int i = 0; i < ra->n; i++) rgn_sub(&t, &ra->r[i]);
+        for (int i = 0; i < t.n; i++) push(&out, &t.r[i]);
+        rgn_free(&t);
+        break;
+    }
+    default: rgn_free(&out); return ERROR;
+    }
+    rgn_free(d);
+    *d = out;
+    return d->n == 0 ? NULLREGION : d->n == 1 ? SIMPLEREGION : COMPLEXREGION;
+}
+
+BOOL PtInRegion(HRGN h, int x, int y)
+{
+    Region *g = rgn_of(h);
+    return g && rgn_contains(g, x, y);
+}
+
 /* ------------------------------------------------------------------ RECT helpers (USER) */
 void SetRect(LPRECT r, int l, int t, int rt, int b) { r->left = l; r->top = t; r->right = rt; r->bottom = b; }
 void SetRectEmpty(LPRECT r) { SetRect(r, 0, 0, 0, 0); }

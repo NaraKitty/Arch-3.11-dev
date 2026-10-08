@@ -12,8 +12,9 @@
 # in at most N pixels (default 0). Reference frames show the mouse pointer (the rig leaves it at
 # 320,240: "ignore 320 240 332 260") and port frames never do. "# ini: FILE SECTION KEY=VALUE" lines
 # check what the run left in $OUT/ini/FILE (tools/run-cp-test.sh copies the INI files there) against
-# what real 3.11 wrote. Prints a PASS, FAIL or SKIP (no reference frame on this machine) line per
-# check and exits with status 1 if anything failed.
+# what real 3.11 wrote; a SECTION with spaces goes in brackets ("# ini: CONTROL.INI [Custom Colors]
+# ColorA=12C2C2"), and "KEY=" checks that the key is absent or empty. Prints a PASS, FAIL or SKIP
+# (no reference frame on this machine) line per check and exits with status 1 if anything failed.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
@@ -87,6 +88,7 @@ for t in "${tests[@]}"; do
         fi
     done < <(sed -n 's/^# compare: //p' "$t")
     while read -r file sect kv; do
+        case $sect in \[*) sect="${sect#\[} $kv"; kv=${sect#*\] }; sect=${sect%%\]*} ;; esac
         key=${kv%%=*} val=${kv#*=}
         # a section header ends at its "]" (3.11's SYSTEM.INI has "[boot]" followed by spaces)
         got=$(awk -v s="$sect" -v k="$key" '{ sub(/\r$/, "") }

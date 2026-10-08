@@ -1227,8 +1227,15 @@ extern const char *w16_app_module;
 /* KERNEL */
 HINSTANCE GetModuleHandle(LPCSTR name);
 HINSTANCE w16_load_module(LPCSTR filename);
+/* the file contents of segment seg (0 = the automatic data segment) of a loaded NE module, for
+ * read-only tables; NULL if absent */
+const void *w16_module_data(HINSTANCE m, int seg, unsigned *len);
 DWORD GetTickCount(void);
 DWORD GetCurrentTime(void);
+/* the DOS clock as programs read it through DOS3Call (INT 21h): local time. ARCH311_CLOCK=
+ * "YYYY-MM-DD HH:MM:SS" (tests) sets it to that moment at the first call; it runs on from there */
+void w16_dos_gettime(int *hour, int *min, int *sec, int *hundredths); /* AH=2Ch: CH, CL, DH, DL */
+void w16_dos_getdate(int *year, int *month, int *day, int *weekday);  /* AH=2Ah: CX, DH, DL, AL */
 int GetProfileInt(LPCSTR app, LPCSTR key, int def);
 int GetProfileString(LPCSTR app, LPCSTR key, LPCSTR def, LPSTR out, int cb);
 BOOL WriteProfileString(LPCSTR app, LPCSTR key, LPCSTR val);
@@ -1393,6 +1400,7 @@ void ReleaseCapture(void);
 HWND WindowFromPoint(POINT pt);
 HWND ChildWindowFromPoint(HWND parent, POINT pt);
 HWND FindWindow(LPCSTR cls, LPCSTR title);
+HWND GetLastActivePopup(HWND h);
 LONG GetWindowLong(HWND h, int idx);
 LONG SetWindowLong(HWND h, int idx, LONG v);
 WORD GetWindowWord(HWND h, int idx);
@@ -1448,6 +1456,8 @@ int GetKeyState(int vk);
 int GetAsyncKeyState(int vk);
 void GetCursorPos(LPPOINT p);
 void SetCursorPos(int x, int y);
+void ClipCursor(LPCRECT r);         /* screen rectangle the pointer is kept in, NULL = whole screen */
+void GetClipCursor(LPRECT r);
 HCURSOR SetCursor(HCURSOR c);
 int ShowCursor(BOOL show);
 void MessageBeep(UINT t);
@@ -1460,6 +1470,28 @@ void MessageBeep(UINT t);
 #define SND_NOSTOP 0x0010
 BOOL sndPlaySound(LPCSTR sound, UINT flags);
 UINT waveOutGetNumDevs(void);
+/* SOUND: the 3.x voice interface as 3.11's MMSOUND.DRV (SYSTEM.INI [boot] sound.drv) provides it -
+ * one voice on the PC speaker, played through the sound server (sound.c) */
+#define S_NORMAL 0
+#define S_LEGATO 1
+#define S_STACCATO 2
+#define S_SERDVNA (-1)
+#define S_SEROFM (-2)
+#define S_SERMACT (-3)
+#define S_SERQFUL (-4)
+#define S_SERBDNT (-5)
+#define S_SERDTP (-8)
+#define S_SERDMD (-10)
+#define S_SERDPT (-12)
+#define S_SERDFQ (-13)
+int OpenSound(void);
+void CloseSound(void);
+int SetVoiceQueueSize(int voice, int bytes);
+int SetVoiceNote(int voice, int value, int length, int cdots);
+int SetVoiceAccent(int voice, int tempo, int volume, int mode, int pitch);
+int StartSound(void);
+int StopSound(void);
+int CountVoiceNotes(int voice);
 BOOL Yield(void);
 BOOL GetInputState(void);
 
@@ -1746,6 +1778,15 @@ BOOL PtVisible(HDC dc, int x, int y);
 BOOL RectVisible(HDC dc, LPCRECT r);
 HRGN CreateRectRgn(int l, int t, int r, int b);
 HRGN CreateRectRgnIndirect(LPCRECT r);
+/* CombineRgn modes; regions are rectangle lists (region.c) */
+#define RGN_AND 1
+#define RGN_OR 2
+#define RGN_XOR 3
+#define RGN_DIFF 4
+#define RGN_COPY 5
+int CombineRgn(HRGN dst, HRGN a, HRGN b, int mode);
+BOOL PtInRegion(HRGN r, int x, int y);
+BOOL FillRgn(HDC dc, HRGN r, HBRUSH b);
 DWORD SetBrushOrg(HDC dc, int x, int y);
 BOOL UnrealizeObject(HGDIOBJ o);
 int AddFontResource(LPCSTR file);
@@ -1753,6 +1794,28 @@ int AddFontResource(LPCSTR file);
 #define SIMPLEREGION 2
 #define COMPLEXREGION 3
 #define ERROR 0
+
+/* device-independent bitmaps, laid out as in resources and .BMP files (40-byte header, then the
+ * colour table). libw16 reads the header byte by byte, so a pointer into resource data works. */
+typedef struct {
+    DWORD biSize;
+    LONG biWidth, biHeight;
+    WORD biPlanes, biBitCount;
+    DWORD biCompression, biSizeImage;
+    LONG biXPelsPerMeter, biYPelsPerMeter;
+    DWORD biClrUsed, biClrImportant;
+} BITMAPINFOHEADER, *LPBITMAPINFOHEADER;
+typedef struct { BYTE rgbBlue, rgbGreen, rgbRed, rgbReserved; } RGBQUAD;
+typedef struct { BITMAPINFOHEADER bmiHeader; RGBQUAD bmiColors[1]; } BITMAPINFO, *LPBITMAPINFO;
+#define BI_RGB 0L
+#define CBM_INIT 0x04L
+#define DIB_RGB_COLORS 0
+#define DIB_PAL_COLORS 1
+/* a bitmap in the device's format from a DIB (CBM_INIT: with its pixels) */
+HBITMAP CreateDIBitmap(HDC dc, const BITMAPINFOHEADER *bih, DWORD init, const void *bits, const BITMAPINFO *bmi, UINT usage);
+/* scan lines start..start+lines-1 of a bottom-up DIB, source rectangle (xsrc, ysrc) lower left */
+int SetDIBitsToDevice(HDC dc, int x, int y, int cx, int cy, int xsrc, int ysrc, UINT start, UINT lines,
+                      const void *bits, const BITMAPINFO *bmi, UINT usage);
 
 /* SHELL */
 UINT DragQueryFile(HANDLE drop, UINT i, LPSTR buf, UINT cb);

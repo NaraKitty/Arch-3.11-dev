@@ -125,6 +125,7 @@ void w16_dc_clip_iter_begin(HDC dc, Region *out);
 W16Bitmap *w16_bitmap_of(HBITMAP h);
 HBRUSH w16_sys_brush(int color_index);
 HPEN w16_sys_pen(int color_index);
+void w16_syscolors_realize(void); /* USER's start-up snapping of the WIN.INI colours (sys.c) */
 
 /* OEM bitmaps from the user's display driver (VGA.DRV) */
 W16Bitmap *w16_obm(int id);
@@ -140,7 +141,11 @@ struct W16Font {
     const uint8_t *fnt;  /* raw FNT (inside module data) */
     int v3;
     struct W16Font *next;
+    struct W16TT *tt;    /* a TrueType font (truetype.c) instead of a raster one */
 };
+W16Font *w16_tt_realize(const LOGFONT *lf); /* NULL: not a TrueType face, or no FreeType */
+void w16_tt_draw_text(HDC dc, W16Font *f, int x, int y, const char *s, int n, uint32_t fg, const int *dx,
+                      int charextra, const Region *clip, W16Bitmap *t);
 W16Font *w16_font_realize(const LOGFONT *lf);
 W16Font *w16_font_system(void);
 int w16_text_width(W16Font *f, const char *s, int n);
@@ -219,11 +224,14 @@ void w16_invalidate_window(HWND h, const RECT *screen_r, int erase, int nc);
 HWND w16_next_to_paint(HWND root);
 int w16_any_paint_pending(void);
 void w16_set_window_rect(HWND h, const RECT *rw, UINT swp);
+void w16_get_minmax_info(HWND h, MINMAXINFO *mm);       /* USER seg6:1A4F (sends WM_GETMINMAXINFO) */
+void w16_clamp_window_size(HWND h, int *cx, int *cy);    /* USER seg1:0000 */
 HWND w16_top_level(HWND h);
 HWND w16_window_under(HWND h, POINT pt); /* hit testing past an HTTRANSPARENT window */
 int w16_window_visible(HWND h); /* visible including ancestors */
 void w16_activate(HWND h, int how);
 void w16_send_paint_cascade(HWND h); /* UpdateWindow semantics */
+UINT w16_paint_msg(HWND h);          /* WM_PAINT, or WM_PAINTICON for an icon with a class icon */
 void w16_destroy_children(HWND h);
 
 /* non-client */
@@ -233,6 +241,7 @@ int w16_nc_hittest(HWND h, int x, int y);
 LRESULT w16_nc_lbuttondown(HWND h, int hit, int x, int y);
 void w16_sys_command(HWND h, UINT cmd, int x, int y);
 void w16_draw_caption(HWND h, HDC dc, int active);
+extern HWND w16_sysbox_inverted; /* system-menu box selected by the menu loop: drawn inverted */
 int w16_has_caption(DWORD style);
 void w16_draw_sb(HWND h, HDC dc, int bar, int pressed_part);
 void w16_get_sb_rect(HWND h, int bar, RECT *r); /* window-relative */
@@ -240,6 +249,12 @@ void w16_track_sb(HWND h, HWND notify, int bar, int x, int y, int ctl);
 void w16_draw_sb_ctl(HDC dc, const RECT *r, int vert, W16Scroll *s, int pressed, int enabled_win, HWND bg);
 int w16_sb_hit(const RECT *r, int vert, W16Scroll *s, int x, int y, RECT *part);
 void w16_iconic_paint(HWND h);
+/* USER's internal WINDOWPOS flags (WM_WINDOWPOSCHANGED): the client area kept its size / place */
+#define W16_SWP_NOCLIENTSIZE 0x0800
+#define W16_SWP_NOCLIENTMOVE 0x1000
+int w16_icon_title_rect(HWND h, RECT *r);   /* screen rectangle of an icon's title (0: not an icon) */
+void w16_invalidate_icon_title(HWND h);
+void w16_paint_icon_titles(HDC desktop_dc); /* the desktop's WM_PAINT draws the icon titles */
 void w16_minimize(HWND h);
 void w16_maximize(HWND h);
 void w16_restore(HWND h);

@@ -61,6 +61,7 @@ void w16_screen_init(int w, int h)
     if (c) ncolors = atoi(c) == 16 ? 16 : atoi(c) == 256 ? 256 : 1 << 24;
     c = getenv("W16_DAC");
     dac_ideal = c && !strcmp(c, "ideal");
+    w16_syscolors_realize(); /* (USER's start-up makes some WIN.INI colours solid, see sys.c) */
 }
 
 static uint32_t cref_to_rgb(COLORREF c) { return ((c & 0xFF) << 16) | (c & 0xFF00) | ((c >> 16) & 0xFF); }
@@ -99,6 +100,159 @@ uint32_t w16_invert_display_px(uint32_t d)
     return a | (~d & 0xFFFFFF);
 }
 
+/* ------------------------------------------------------------------ VGA.DRV colour matching
+ * On the 16-colour display, colours are matched and brushes dithered the way VGA.DRV does it:
+ * ColorInfo / RealizeObject (seg1:1956) find the nearest of its 16 colours along a primary,
+ * secondary or gray line chosen from the sorted channels; a brush colour it does not have is
+ * dithered over the corners of the cube cell the colour lies in (seg1:24A1) with an 8x8 ordered
+ * matrix. The driver's tables (its colours, levels, cells, ranks, matrix) are read from the
+ * user's VGA.DRV, code segment 1, at run time; without it a rougher approximation is used. */
+static const uint8_t *vgacs;    /* VGA.DRV seg1, NULL until checked or if unusable */
+static int vgacs_tried;
+
+static const uint8_t *vga_tables(void)
+{
+    if (!vgacs_tried) {
+        vgacs_tried = 1;
+        unsigned len = 0;
+        HINSTANCE m = w16_system_module("VGA.DRV");
+        const uint8_t *d = m ? w16_module_data(m, 1, &len) : NULL;
+        /* the code that uses the tables (seg1:22A1 "sub ax,ax; mov ch,dl") and the matrix */
+        if (d && len >= 0x22A5 && d[0x22A1] == 0x2B && d[0x22A2] == 0xC0 && d[0x22A3] == 0x8A && d[0x22A4] == 0xEA) {
+            int seen[64] = {0}, ok = 1;
+            for (int i = 0; i < 64; i++) {
+                int v = d[0x2261 + i];
+                if (v > 63 || seen[v]++) ok = 0;
+            }
+            for (int i = 0; i < 16 && ok; i++) {
+                const uint8_t *e = d + 0x3C + 3 * i;
+                uint32_t p = (uint32_t)e[0] << 16 | e[1] << 8 | e[2];
+                int found = 0;
+                for (int k = 0; k < 16; k++) found |= vga16[k] == p;
+                ok = found;
+            }
+            if (ok) vgacs = d;
+        }
+    }
+    return vgacs;
+}
+
+/* seg1:22A1: sorts three channel values (largest first); returns the swaps as 3 bits */
+static int vga_sort3(int *a, int *b, int *c)
+{
+    int bits = 0, t, cf;
+    cf = *a < *c; if (cf) { t = *a; *a = *c; *c = t; } bits = bits << 1 | cf;
+    cf = *b < *c; if (cf) { t = *b; *b = *c; *c = t; } bits = bits << 1 | cf;
+    cf = *a < *b; if (cf) { t = *a; *a = *b; *b = t; } bits = bits << 1 | cf;
+    return bits;
+}
+
+/* seg1:2323: a colour index for sorted channels (bit 0 the largest, bit 2 the smallest, bit 3
+ * intensity) back to the driver's R, G, B bit order */
+static int vga_unsort(int code, int perm)
+{
+    int dl = code & 1, dh = (code >> 1) & 1, ah = (code >> 2) & 1, t;
+    if (perm & 1) { t = dh; dh = dl; dl = t; }
+    if (perm & 2) { t = ah; ah = dh; dh = t; }
+    if (perm & 4) { t = ah; ah = dl; dl = t; }
+    return (code & ~7) | ah << 2 | dh << 1 | dl;
+}
+
+/* seg1:1956: the driver colour index nearest to R, G, B; also the sorted channels for the dither */
+static int vga_nearest(int R, int G, int B, int *perm, int *mx, int *md, int *mn)
+{
+    const uint8_t *cs = vgacs;
+    int a = R, b = G, c = B;
+    *perm = vga_sort3(&a, &b, &c);
+    *mx = a; *md = b; *mn = c;
+    if (a == 0) return 0;
+    int x = a - b, y = b - c, z = c;
+    const uint8_t *e = cs + 0x1944 + 3 * cs[0x193C + vga_sort3(&x, &y, &z)];
+    const uint8_t *lv = cs + (e[0] | e[1] << 8), *co = cs + (e[2] | e[3] << 8);
+    int n = e[4], dl = 0xFF, dh = 0xFF;
+    for (int cl = n, i = 0; cl > 0; cl--, i++) {
+        int d = lv[i] - a;
+        if (d < 0) d = -d;
+        if (d == 0) { dl = cl; break; }
+        if (d < dh) { dl = cl; dh = d; }
+    }
+    return vga_unsort(co[(n - dl) & 0xFF], *perm);
+}
+
+static uint32_t vga_index_rgb(int i)
+{
+    const uint8_t *e = vgacs + 0x3C + 3 * (i & 15);
+    return (uint32_t)e[0] << 16 | e[1] << 8 | e[2];
+}
+
+/* the solid colour the display shows for p (0xRRGGBB) */
+static uint32_t nearest_rgb(uint32_t p)
+{
+    if (!vga_tables()) return vga16[nearest16(p)];
+    int perm, a, b, c;
+    return vga_index_rgb(vga_nearest((p >> 16) & 255, (p >> 8) & 255, p & 255, &perm, &a, &b, &c));
+}
+
+/* seg1:24A1: the 8x8 pattern of driver colour indices for sorted channels mx >= md >= mn */
+static void vga_dither(int perm, int mx, int md, int mn, uint8_t pat[64])
+{
+    const uint8_t *cs = vgacs;
+    int comp[3] = {mx, md, mn}, s, k;
+    /* seg1:22BE: the cell - the first of four planes the colour is on the positive side of */
+    for (s = 0; s < 3; s++) {
+        const uint8_t *p = cs + 0x21DA + 12 * s;
+        int16_t sum = 0;
+        for (k = 0; k < 3; k++)
+            sum += (int16_t)((comp[k] - (int16_t)(p[2 * k] | p[2 * k + 1] << 8)) * (int16_t)(p[6 + 2 * k] | p[7 + 2 * k] << 8));
+        if (sum >= 0) break;
+    }
+    const uint8_t *t = cs + 0x220A + 16 * s;
+    /* seg1:22EB: channels scaled to 0..64, less the cell's corner, times its matrix = weights */
+    int sc[3], w[3];
+    for (k = 0; k < 3; k++) sc[k] = (((comp[k] >> 1) + (comp[k] & 1)) >> 1) - t[k];
+    for (int r = 0; r < 3; r++) {
+        int16_t acc = 0;
+        for (k = 0; k < 3; k++) acc += (int16_t)((int8_t)t[3 + 3 * r + k] * (int8_t)sc[k]);
+        w[r] = acc;
+    }
+    /* seg1:2364: (weight, corner) pairs of the non-zero weights, the cell's first corner taking the
+     * rest of 64 */
+    uint8_t pw[4], pc[4];
+    int n = 0, rest = (int16_t)(64 - w[0] - w[1] - w[2]);
+    if (rest) { pw[n] = (uint8_t)rest; pc[n++] = t[12]; }
+    for (k = 0; k < 3; k++)
+        if ((uint8_t)w[k]) { pw[n] = (uint8_t)w[k]; pc[n++] = t[13 + k]; }
+    for (k = 0; k < n; k++) pc[k] = (uint8_t)vga_unsort(cs[0x224A + pc[k]], perm);
+    /* seg1:23A5: in the driver's colour order (rank table), an entry taken is marked colour 8 */
+    if (n > 1) {
+        uint8_t tw[4], tc[4];
+        for (int o = 0; o < n; o++) {
+            int best = 0, br = 0xFF;
+            for (k = 0; k < n; k++)
+                if (cs[0x2251 + (pc[k] & 15)] <= br) { br = cs[0x2251 + (pc[k] & 15)]; best = k; }
+            tw[o] = pw[best];
+            tc[o] = pc[best];
+            pc[best] = 8;
+        }
+        memcpy(pw, tw, n);
+        memcpy(pc, tc, n);
+    }
+    /* seg1:2404: a pixel takes the first colour whose running weight passes its matrix value */
+    uint8_t prev[8] = {0}, cum = 0;
+    memset(pat, 0, 64);
+    for (int i = 0; i < n; i++) {
+        cum = (uint8_t)(cum + pw[i]);
+        for (int row = 0; row < 8; row++) {
+            uint8_t m = 0;
+            for (k = 0; k < 8; k++) m = (uint8_t)(m << 1 | (cs[0x2261 + row * 8 + k] < cum));
+            uint8_t fresh = m ^ prev[row];
+            prev[row] = m;
+            for (k = 0; k < 8; k++)
+                if (fresh & (0x80 >> k)) pat[row * 8 + k] = pc[i];
+        }
+    }
+}
+
 /* the solid colour a 16-colour display shows for c */
 COLORREF GetNearestColor(HDC dc, COLORREF c)
 {
@@ -113,10 +267,13 @@ uint32_t w16_rgb(COLORREF c)
         return vga16[c & 15];
     uint32_t p = cref_to_rgb(c & 0xFFFFFF);
     if (ncolors > 16) return p;
-    return vga16[nearest16(p)];
+    return nearest_rgb(p);
 }
 
-/* brush colours on a 16-colour device are dithered with an 8x8 ordered matrix */
+/* brush colours on a 16-colour device: VGA.DRV RealizeObject (seg1:292A) - white and black are
+ * solid; E0E0E0 with the 0x10 flag (the scroll bar colour, see SetSysColors) is its 50% white /
+ * light gray pattern; a colour the driver has is solid; others are dithered (cached per colour).
+ * x, y: the pixel's position in the 8x8 pattern. */
 static const int bayer8[8][8] = {
     {0, 32, 8, 40, 2, 34, 10, 42}, {48, 16, 56, 24, 50, 18, 58, 26},
     {12, 44, 4, 36, 14, 46, 6, 38}, {60, 28, 52, 20, 62, 30, 54, 22},
@@ -127,9 +284,32 @@ uint32_t w16_dither(COLORREF c, int x, int y)
 {
     uint32_t p = cref_to_rgb(c & 0xFFFFFF);
     if (ncolors > 16) return p;
+    if (vga_tables()) {
+        static struct { COLORREF c; int used; uint32_t px[64]; } cache[64];
+        static int next;
+        x &= 7;
+        y &= 7;
+        if (p == 0xFFFFFF || p == 0) return p;
+        if ((c & 0x10000000) && p == 0xE0E0E0) return ((x + y) & 1) ? 0xFFFFFF : vga_index_rgb(8);
+        for (int i = 0; i < 64; i++)
+            if (cache[i].used && cache[i].c == c) return cache[i].px[y * 8 + x];
+        int perm, a, b, d, idx = vga_nearest((p >> 16) & 255, (p >> 8) & 255, p & 255, &perm, &a, &b, &d);
+        int slot = next;
+        next = (next + 1) & 63;
+        cache[slot].c = c;
+        cache[slot].used = 1;
+        if (vga_index_rgb(idx) == p) {
+            for (int i = 0; i < 64; i++) cache[slot].px[i] = p;
+        } else {
+            uint8_t pat[64];
+            vga_dither(perm, a, b, d, pat);
+            for (int i = 0; i < 64; i++) cache[slot].px[i] = vga_index_rgb(pat[i]);
+        }
+        return cache[slot].px[y * 8 + x];
+    }
     int i = nearest16(p);
     if (vga16[i] == p) return p;
-    /* dither between the two nearest grey/colour levels per channel (approximation of VGA.DRV) */
+    /* no VGA.DRV: dither between the two nearest grey/colour levels per channel */
     int t = bayer8[y & 7][x & 7];
     int r = (p >> 16) & 255, g = (p >> 8) & 255, b = p & 255;
     int ch[3] = {r, g, b}, out[3];
@@ -278,51 +458,76 @@ HBITMAP CreateCompatibleBitmap(HDC dc, int w, int h)
 }
 HBITMAP CreateDiscardableBitmap(HDC dc, int w, int h) { return CreateCompatibleBitmap(dc, w, h); }
 
+/* A DIB header (BITMAPINFOHEADER, or the OS/2 BITMAPCOREHEADER) and its colour table, read byte by
+ * byte so that it may sit anywhere in resource data. Scan lines are bottom-up as in 3.1. */
+typedef struct {
+    int w, h, bpp, ncol, stride, flip;
+    size_t hdrsize;          /* header + colour table: where packed bits start */
+    uint32_t cols[256];      /* 0xRRGGBB */
+} DibInfo;
+
+static void dib_info(const uint8_t *d, DibInfo *di)
+{
+    memset(di, 0, sizeof *di);
+    uint32_t hs = d[0] | d[1] << 8 | d[2] << 16 | (uint32_t)d[3] << 24;
+    int quad;
+    if (hs == 12) {
+        di->w = d[4] | d[5] << 8; di->h = d[6] | d[7] << 8; di->bpp = d[10] | d[11] << 8; quad = 0;
+        di->ncol = di->bpp <= 8 ? 1 << di->bpp : 0;
+    } else {
+        di->w = (int32_t)(d[4] | d[5] << 8 | d[6] << 16 | (uint32_t)d[7] << 24);
+        di->h = (int32_t)(d[8] | d[9] << 8 | d[10] << 16 | (uint32_t)d[11] << 24);
+        di->bpp = d[14] | d[15] << 8;
+        int clr = d[32] | d[33] << 8;
+        di->ncol = clr ? clr : (di->bpp <= 8 ? 1 << di->bpp : 0);
+        quad = 1;
+    }
+    di->flip = di->h > 0;
+    if (di->h < 0) di->h = -di->h;
+    di->stride = ((di->w * di->bpp + 31) / 32) * 4;
+    const uint8_t *pal = d + hs;
+    for (int i = 0; i < di->ncol && i < 256; i++) {
+        const uint8_t *e = pal + i * (quad ? 4 : 3);
+        di->cols[i] = (e[2] << 16) | (e[1] << 8) | e[0];
+    }
+    di->hdrsize = hs + (size_t)di->ncol * (quad ? 4 : 3);
+}
+
+static uint32_t dib_px(const DibInfo *di, const uint8_t *row, int x)
+{
+    switch (di->bpp) {
+    case 1: return di->cols[(row[x / 8] >> (7 - (x & 7))) & 1];
+    case 4: return di->cols[(row[x / 2] >> ((x & 1) ? 0 : 4)) & 15];
+    case 8: return di->cols[row[x]];
+    case 24: return (row[x * 3 + 2] << 16) | (row[x * 3 + 1] << 8) | row[x * 3];
+    default: return 0;
+    }
+}
+
+static HBITMAP dib_to_bitmap(const DibInfo *di, const uint8_t *bits, int force_color)
+{
+    HBITMAP o = CreateBitmap(di->w, di->h, 1, 4, NULL);
+    W16Bitmap *b = &o->u.bmp;
+    for (int y = 0; y < di->h; y++) {
+        const uint8_t *row = bits + (size_t)(di->flip ? di->h - 1 - y : y) * di->stride;
+        for (int x = 0; x < di->w; x++) {
+            uint32_t p = dib_px(di, row, x);
+            b->px[y * di->w + x] = ncolors > 16 ? p : w16_rgb(rgb_to_cref(p));
+        }
+    }
+    if (di->bpp == 1 && !force_color && di->ncol == 2 &&
+        ((di->cols[0] == 0 && di->cols[1] == 0xFFFFFF) || (di->cols[0] == 0xFFFFFF && di->cols[1] == 0)))
+        b->mono = 1;
+    return o;
+}
+
 /* DIB (as stored in resources) -> bitmap */
 HBITMAP w16_bitmap_from_dib(const uint8_t *d, int len, int force_color)
 {
     (void)len;
-    uint32_t hs = d[0] | d[1] << 8 | d[2] << 16 | d[3] << 24;
-    int w, h, bpp, ncol, pal4;
-    if (hs == 12) {
-        w = d[4] | d[5] << 8; h = d[6] | d[7] << 8; bpp = d[10] | d[11] << 8; pal4 = 0;
-        ncol = bpp <= 8 ? 1 << bpp : 0;
-    } else {
-        w = (int32_t)(d[4] | d[5] << 8 | d[6] << 16 | d[7] << 24);
-        h = (int32_t)(d[8] | d[9] << 8 | d[10] << 16 | d[11] << 24);
-        bpp = d[14] | d[15] << 8;
-        int clr = d[32] | d[33] << 8;
-        ncol = clr ? clr : (bpp <= 8 ? 1 << bpp : 0);
-        pal4 = 1;
-    }
-    int flip = h > 0;
-    if (h < 0) h = -h;
-    const uint8_t *pal = d + hs;
-    const uint8_t *bits = pal + ncol * (pal4 ? 4 : 3);
-    int stride = ((w * bpp + 31) / 32) * 4;
-    HBITMAP o = CreateBitmap(w, h, 1, 4, NULL);
-    W16Bitmap *b = &o->u.bmp;
-    uint32_t cols[256];
-    for (int i = 0; i < ncol && i < 256; i++) {
-        const uint8_t *e = pal + i * (pal4 ? 4 : 3);
-        cols[i] = (e[2] << 16) | (e[1] << 8) | e[0];
-    }
-    for (int y = 0; y < h; y++) {
-        const uint8_t *row = bits + (size_t)(flip ? h - 1 - y : y) * stride;
-        for (int x = 0; x < w; x++) {
-            uint32_t p;
-            if (bpp == 1) p = cols[(row[x / 8] >> (7 - (x & 7))) & 1];
-            else if (bpp == 4) p = cols[(row[x / 2] >> ((x & 1) ? 0 : 4)) & 15];
-            else if (bpp == 8) p = cols[row[x]];
-            else if (bpp == 24) p = (row[x * 3 + 2] << 16) | (row[x * 3 + 1] << 8) | row[x * 3];
-            else p = 0;
-            b->px[y * w + x] = ncolors > 16 ? p : w16_rgb(rgb_to_cref(p));
-        }
-    }
-    if (bpp == 1 && !force_color && ncol == 2 &&
-        ((cols[0] == 0 && cols[1] == 0xFFFFFF) || (cols[0] == 0xFFFFFF && cols[1] == 0)))
-        b->mono = 1;
-    return o;
+    DibInfo di;
+    dib_info(d, &di);
+    return dib_to_bitmap(&di, d + di.hdrsize, force_color);
 }
 
 HBITMAP LoadBitmap(HINSTANCE h, LPCSTR name)
@@ -773,8 +978,9 @@ static void put_rop(HDC dc, Region *clip, int x, int y, uint32_t c, int rop)
 }
 
 /* brush colour at device pixel x,y: 3.1 GDI realizes a brush for the DC it is selected into, so the
- * pattern starts at the DC's origin plus its brush origin (measured on 3.11: MAIN.CPL's Edit Pattern
- * sample, filled with a pattern brush, repeats from the dialog's client origin) */
+ * pattern starts at the DC's origin plus its brush origin (VGA.DRV rotates the pattern by it,
+ * seg1:2B3C/2B63). Measured on 3.11: MAIN.CPL's Edit Pattern sample (a pattern brush) and Color's
+ * dithered sample both repeat from the dialog's client origin. */
 static uint32_t brush_px(HDC dc, HBRUSH b, int x, int y)
 {
     int bx = (x - dc->ox - dc->brushorgx) & 7, by = (y - dc->oy - dc->brushorgy) & 7;
@@ -921,6 +1127,18 @@ int FrameRect(HDC dc, LPCRECT r, HBRUSH b)
     w16_fill_rect_dev(dc, &(RECT){d.right - 1, d.top, d.right, d.bottom}, b);
     return 1;
 }
+/* GDI FillRgn: the region is in logical coordinates of the DC */
+BOOL FillRgn(HDC dc, HRGN rgn, HBRUSH b)
+{
+    if (!dc || !rgn || rgn->kind != OBJ_RGN) return FALSE;
+    b = brush_arg(b);
+    for (int i = 0; i < rgn->u.rgn.n; i++) {
+        RECT d;
+        lp_rect(dc, &rgn->u.rgn.r[i], &d);
+        w16_fill_rect_dev(dc, &d, b);
+    }
+    return TRUE;
+}
 void InvertRect(HDC dc, LPCRECT r)
 {
     RECT d;
@@ -979,6 +1197,33 @@ static const uint8_t pen_pattern[5][8] = {
     {1, 1, 1, 0, 1, 0, 1, 0}, /* dashdotdot */
 };
 
+/* The pixels of a line as VGA.DRV's polyline code (seg6:02C9 and the slice set-up at seg6:0773) picks
+ * them: the end points are ordered left to right; along the major axis (the longer delta M, the
+ * other being m) pixel i sits floor((2 i m + M - 1 + up) / 2M) off the first point's minor
+ * coordinate, up = 1 when the ordered line climbs (y decreasing). So an exact half rounds away from
+ * the left point only on rising lines: measured on the hands of real 3.11's Clock, whose
+ * ties differ from a symmetric Bresenham. n = 0..M runs from (x0,y0) to (x1,y1) as given. */
+static void line_px(int x0, int y0, int x1, int y1, int n, int M, int *x, int *y)
+{
+    int i = n;
+    if (x0 > x1) { /* ordered: pixel n counts from the other end */
+        int t = x0; x0 = x1; x1 = t;
+        t = y0; y0 = y1; y1 = t;
+        i = M - n;
+    }
+    int dx = x1 - x0, dy = y1 - y0, up = dy < 0;
+    int ady = up ? -dy : dy;
+    if (ady > dx) {
+        int off = (int)(((long long)2 * i * dx + M - 1 + up) / (2LL * M));
+        *x = x0 + off;
+        *y = y0 + (up ? -i : i);
+    } else {
+        int off = (int)(((long long)2 * i * ady + M - 1 + up) / (2LL * M));
+        *x = x0 + i;
+        *y = y0 + (up ? -off : off);
+    }
+}
+
 static void draw_line_dev(HDC dc, Region *clip, int x0, int y0, int x1, int y1, int last)
 {
     HPEN p = dc->pen;
@@ -989,24 +1234,20 @@ static void draw_line_dev(HDC dc, Region *clip, int x0, int y0, int x1, int y1, 
     int style = p->u.pen.style;
     if (style > PS_DASHDOTDOT) style = PS_SOLID;
     if (w > 1) style = PS_SOLID;
-    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
-    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
-    int err = dx + dy, n = 0;
-    for (;;) {
-        if (x0 == x1 && y0 == y1 && !last) break;
+    int M = max(abs(x1 - x0), abs(y1 - y0));
+    for (int n = 0; n <= M; n++) {
+        if (n == M && !last) break;
+        int x, y;
+        if (M) line_px(x0, y0, x1, y1, n, M, &x, &y);
+        else x = x0, y = y0;
         if (w == 1) {
-            if (pen_pattern[style][n & 7]) put_rop(dc, clip, x0, y0, c, dc->rop2);
-            else if (dc->bkmode == OPAQUE) put_rop(dc, clip, x0, y0, bk, dc->rop2);
+            if (pen_pattern[style][n & 7]) put_rop(dc, clip, x, y, c, dc->rop2);
+            else if (dc->bkmode == OPAQUE) put_rop(dc, clip, x, y, bk, dc->rop2);
         } else {
             int h = w / 2;
-            for (int yy = y0 - h; yy < y0 - h + w; yy++)
-                for (int xx = x0 - h; xx < x0 - h + w; xx++) put_rop(dc, clip, xx, yy, c, dc->rop2);
+            for (int yy = y - h; yy < y - h + w; yy++)
+                for (int xx = x - h; xx < x - h + w; xx++) put_rop(dc, clip, xx, yy, c, dc->rop2);
         }
-        n++;
-        if (x0 == x1 && y0 == y1) break;
-        int e2 = 2 * err;
-        if (e2 >= dy) { err += dy; x0 += sx; }
-        if (e2 <= dx) { err += dx; y0 += sy; }
     }
 }
 
@@ -1362,6 +1603,60 @@ BOOL PatBlt(HDC dc, int x, int y, int w, int h, DWORD rop)
     if (h < 0) { y += h; h = -h; }
     blit(dc, x, y, w, h, NULL, NULL, 0, 0, w, h, rop);
     return TRUE;
+}
+
+/* ------------------------------------------------------------------ DIBs */
+/* GDI CreateDIBitmap: a bitmap in the format of the device behind dc - colour for the screen, and
+ * monochrome only for a memory DC holding a monochrome bitmap when the DIB is black and white. With
+ * CBM_INIT the DIB's pixels are converted (DIB_RGB_COLORS; DIB_PAL_COLORS is not supported). */
+HBITMAP CreateDIBitmap(HDC dc, const BITMAPINFOHEADER *bih, DWORD init, const void *bits, const BITMAPINFO *bmi, UINT usage)
+{
+    if (!bih) return NULL;
+    DibInfo di;
+    int mono = dc && dc->is_mem && (!dc->target || dc->target->mono);
+    if (!(init & CBM_INIT) || !bits || !bmi || usage != DIB_RGB_COLORS) {
+        dib_info((const uint8_t *)bih, &di);
+        return CreateBitmap(di.w, di.h, 1, mono ? 1 : 4, NULL);
+    }
+    dib_info((const uint8_t *)bmi, &di);
+    return dib_to_bitmap(&di, bits, !mono);
+}
+
+/* GDI SetDIBitsToDevice: bits holds scan lines start .. start + lines - 1 of a bottom-up DIB (line 0
+ * is the bottom one); the source rectangle has its lower-left corner at (xsrc, ysrc) and is copied to
+ * the cx x cy rectangle at (x, y), so DIB line j lands on row y + ysrc + cy - 1 - j. A program can
+ * draw one band of a tall bitmap by pointing bits into it (WINMINE's digits and faces do). */
+int SetDIBitsToDevice(HDC dc, int x, int y, int cx, int cy, int xsrc, int ysrc, UINT start, UINT lines,
+                      const void *bits, const BITMAPINFO *bmi, UINT usage)
+{
+    if (!dc || !bits || !bmi || usage != DIB_RGB_COLORS || cx <= 0 || cy <= 0) return 0;
+    DibInfo di;
+    dib_info((const uint8_t *)bmi, &di);
+    w16_lp_to_dp(dc, &x, &y);
+    Region e;
+    w16_dc_clip_iter_begin(dc, &e);
+    rgn_and(&e, &(RECT){x, y, x + cx, y + cy});
+    W16Bitmap *t = tgt(dc);
+    for (int i = 0; i < e.n; i++) {
+        RECT a = e.r[i];
+        a.left = max(a.left, 0); a.top = max(a.top, 0);
+        a.right = min(a.right, t->w); a.bottom = min(a.bottom, t->h);
+        for (int yy = a.top; yy < a.bottom; yy++) {
+            int j = ysrc + cy - 1 - (yy - y);
+            if (j < (int)start || j >= (int)(start + lines) || j >= di.h) continue;
+            const uint8_t *row = (const uint8_t *)bits + (size_t)(j - start) * di.stride;
+            for (int xx = a.left; xx < a.right; xx++) {
+                int sx = xsrc + (xx - x);
+                if (sx < 0 || sx >= di.w) continue;
+                uint32_t p = dib_px(&di, row, sx);
+                if (ncolors <= 16) p = w16_rgb(rgb_to_cref(p));
+                t->px[yy * t->w + xx] = to_target(dc, p);
+            }
+        }
+    }
+    rgn_free(&e);
+    mark_dirty(dc);
+    return (int)lines;
 }
 
 /* ------------------------------------------------------------------ PNG screenshot (tests) */

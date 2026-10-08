@@ -1,0 +1,48 @@
+# Color applet: the palette, Application Workspace given another basic colour (Tab, Up, Space),
+# Tab x4 to "Save Scheme" (the colour grids want characters, so mnemonics do not work from them),
+# the Save Scheme dialog (27), "test" typed over the proposed name, Enter: CONTROL.INI gets the
+# scheme at once; Esc then cancels the Color dialog, so WIN.INI and [current] stay as they were.
+# Same keys as arch311-ref/scn/color-save.scn; compare in 16 colours (W16_COLORS=16). The reference
+# caught the Save Scheme edit's caret off, so frames 04 and 05 are shot without it.
+# regress: W16_COLORS=16 sh tools/run-cp-test.sh "$TEST" "$OUT"
+# compare: color-save/02.png 02.png active ignore 320 240 332 260
+# compare: color-save/03.png 03.png active ignore 320 240 332 260
+# compare: color-save/04.png 04.png active ignore 320 240 332 260
+# compare: color-save/05.png 05.png active ignore 320 240 332 260
+# compare: color-save/06.png 06.png active ignore 320 240 332 260
+# ini: CONTROL.INI [color schemes] test=C0C0C0,400000,FFFFFF,0,FFFFFF,0,800000,FFFFFF,FFFFFF,C0C0C0,C0C0C0,0,C0C0C0,C0C0C0,808080,0,C0C0C0,800000,FFFFFF,0,FFFFFF
+# ini: CONTROL.INI current color schemes=Windows Default
+# ini: WIN.INI colors AppWorkspace=
+sleep 400
+shot shots/01.png
+key enter
+key tab
+key space
+key down
+key tab
+key up
+key space
+sleep 400
+shot shots/02.png
+key tab
+key tab
+key tab
+key tab
+sleep 400
+shot shots/03.png
+key space
+sleep 400
+shot shots/04.png
+key t
+key e
+key s
+key t
+sleep 400
+shot shots/05.png
+key enter
+sleep 400
+shot shots/06.png
+key esc
+sleep 400
+shot shots/07.png
+quit

@@ -36,7 +36,7 @@ typedef struct {
 } Applet;
 
 static Applet applets[] = {
-    {24, 48, 600, 0, TRUE, 5000, FALSE},   /* Color */
+    {24, 48, 600, 0, TRUE, 5000, TRUE},    /* Color */
     {26, 50, 602, 2, TRUE, 5002, FALSE},   /* Fonts */
     {28, 52, 604, 4, TRUE, 5004, TRUE},    /* Ports */
     {30, 54, 606, 6, TRUE, 5006, TRUE},    /* Mouse */
@@ -258,12 +258,14 @@ HFILE OpenFileFromWinDir(LPCSTR file, OFSTRUCT *of, UINT style)
 }
 
 /* ------------------------------------------------------------------ seg3:0733: run applet <id>
- * Not ported yet: 0 Color = CreateDialog 100 with seg6:0DC8, then the modal loop seg3:06AE;
- * 1 Printers = dialog 1, seg20:1302 (activates the open one, [0x16], instead when there is one);
- * 2 Fonts = dialog 2, seg9:0CBC. */
+ * Not ported yet: 1 Printers = dialog 1, seg20:1302 (activates the open one, [0x16], instead when
+ * there is one); 2 Fonts = dialog 2, seg9:0CBC. */
 static void RunApplet(HWND hwnd, int id)
 {
     switch (id) {
+    case 0:
+        ColorRun(hwnd);     /* CreateDialog 100 with seg6:0DC8, then the loop seg3:06AE */
+        break;
     case 3:
         DialogBox(hInstMain, MAKEINTRESOURCE(3), hwnd, IntlDlgProc);
         break;
@@ -360,7 +362,7 @@ LRESULT Main_CPlApplet(HWND hwndCPl, UINT msg, LPARAM lParam1, LPARAM lParam2)
         return 0;
     }
     case CPL_EXIT:
-        if (--cInit == 0) { /* seg3:0371 frees GDI objects that ported applets keep */ }
+        if (--cInit == 0) ColorExit();     /* seg3:0371 frees the GDI objects applets keep */
         return 0;
     }
     /* messages 100 (Printers for Print Manager) and 101 (seg3:0010 for Setup) are private

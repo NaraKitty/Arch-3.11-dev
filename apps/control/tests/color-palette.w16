@@ -1,0 +1,34 @@
+# Color applet: "Color Palette >>" (Tab, Space), then the Screen Element combo (Down: Application
+# Workspace), the Basic Colors grid (Tab: focus rectangle; Right Right Down) and Space on the focused
+# box. Same keys as arch311-ref/scn/color-palette.scn (the rig's run timed out before its last
+# frame); compare in 16 colours (W16_COLORS=16).
+# regress: W16_COLORS=16 sh tools/run-cp-test.sh "$TEST" "$OUT"
+# compare: color-palette/02.png 02.png active
+# compare: color-palette/03.png 03.png active ignore 320 240 332 260
+# compare: color-palette/04.png 04.png active ignore 320 240 332 260
+# compare: color-palette/05.png 05.png active ignore 320 240 332 260
+# compare: color-palette/06.png 06.png active ignore 320 240 332 260
+sleep 400
+shot shots/01.png
+key enter
+sleep 400
+shot shots/02.png
+key tab
+key space
+sleep 400
+shot shots/03.png
+key down
+sleep 400
+shot shots/04.png
+key tab
+sleep 400
+shot shots/05.png
+key right
+key right
+key down
+sleep 400
+shot shots/06.png
+key space
+sleep 400
+shot shots/07.png
+quit
