@@ -445,6 +445,63 @@ void move(HWND p, int dx, int dy)
     for (HWND c = p->child; c; c = c->next) move(c, dx, dy);
 }
 
+/* USER seg6:1A4F: the MINMAXINFO of a window - USER's defaults (seg6:18E0), the window's
+ * WM_GETMINMAXINFO, then USER's corrections (seg6:19A8). The icon window is 4 borders around the icon
+ * (seg3:242F); a window without a sizing frame maximizes 2 borders over each screen edge; tracking
+ * goes up to the screen plus a sizing frame each side. UNTESTED against real 3.11: the corrections
+ * (they only matter when WM_GETMINMAXINFO lowers the minimum tracking size; USER's caption button
+ * width there, half of OBM_CLOSE, is SM_CXSIZE here), and USER takes ptMaxPosition from the
+ * window's checkpoint once it has one, which libw16 does not keep. */
+void w16_get_minmax_info(HWND h, MINMAXINFO *mm)
+{
+    int cxb = GetSystemMetrics(SM_CXBORDER), cyb = GetSystemMetrics(SM_CYBORDER);
+    int cxf = GetSystemMetrics(SM_CXFRAME), cyf = GetSystemMetrics(SM_CYFRAME);
+    int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
+    POINT icon = {GetSystemMetrics(SM_CXICON) + 4 * cxb, GetSystemMetrics(SM_CYICON) + 4 * cyb};
+    DWORD st = h->style;
+    mm->ptReserved = icon;
+    if (st & WS_THICKFRAME) {
+        mm->ptMaxSize = (POINT){sw + 2 * cxf, sh + 2 * cyf};
+        mm->ptMaxPosition = (POINT){-cxf, -cyf};
+    } else {
+        mm->ptMaxSize = (POINT){sw + 4 * cxb, sh + 4 * cyb};
+        mm->ptMaxPosition = (POINT){-cxb, -cyb};
+    }
+    if (st & (WS_BORDER | WS_DLGFRAME))
+        mm->ptMinTrackSize = (POINT){GetSystemMetrics(SM_CXMINTRACK), GetSystemMetrics(SM_CYMINTRACK)};
+    else
+        mm->ptMinTrackSize = (POINT){cxb, cyb};
+    mm->ptMaxTrackSize = (POINT){sw + 2 * cxf, sh + 2 * cyf};
+    SendMessage(h, WM_GETMINMAXINFO, 0, (LPARAM)mm);
+    if (st & WS_MINIMIZEBOX) mm->ptReserved = icon;
+    if ((st & WS_CAPTION) == WS_CAPTION) {
+        /* room for the caption's boxes and the sizing frame */
+        int n = !!(st & WS_SYSMENU) + !!(st & WS_MAXIMIZEBOX) + !!(st & WS_MINIMIZEBOX);
+        mm->ptMinTrackSize.x = max(mm->ptMinTrackSize.x, n * GetSystemMetrics(SM_CXSIZE) + 2 * cxf);
+        mm->ptMinTrackSize.y = max(mm->ptMinTrackSize.y, GetSystemMetrics(SM_CYMINTRACK));
+    } else {
+        int dx = (st & WS_THICKFRAME) ? cxf : cxb, dy = (st & WS_THICKFRAME) ? cyf : cyb;
+        mm->ptMinTrackSize.x = max(mm->ptMinTrackSize.x, 2 * dx);
+        mm->ptMinTrackSize.y = max(mm->ptMinTrackSize.y, 2 * dy);
+    }
+}
+
+/* USER seg1:0000: a new window size kept within the window's MINMAXINFO - for an overlapped window or
+ * one with a sizing frame; an icon between ptReserved and ptMaxSize, any other window between the
+ * tracking sizes. CreateWindow (seg8:06D9, before WM_NCCREATE and with WS_MINIMIZE still in the style)
+ * and DefWindowProc's WM_WINDOWPOSCHANGING (seg1:609A) use it. Measured on real 3.11: WINMINE's
+ * 30 x 24 board asks for a window 491 high and, created minimized, gets 484 (480 + 4 borders). */
+void w16_clamp_window_size(HWND h, int *cx, int *cy)
+{
+    if ((h->style & (WS_POPUP | WS_CHILD)) && !(h->style & WS_THICKFRAME)) return;
+    MINMAXINFO mm;
+    w16_get_minmax_info(h, &mm);
+    POINT lo = mm.ptMinTrackSize, hi = mm.ptMaxTrackSize;
+    if (h->style & WS_MINIMIZE) lo = mm.ptReserved, hi = mm.ptMaxSize;
+    *cx = max(min(*cx, hi.x), lo.x);
+    *cy = max(min(*cy, hi.y), lo.y);
+}
+
 BOOL SetWindowPos(HWND h, HWND after, int x, int y, int cx, int cy, UINT fl)
 {
     if (!w16_valid(h)) return FALSE;
@@ -668,19 +725,11 @@ HWND CreateWindowEx(DWORD ex, LPCSTR cls, LPCSTR title, DWORD style, int x, int 
     }
     RECT pr = {0, 0, 0, 0};
     if (h->parent != w16_desktop) pr = h->parent->rc;
-    /* WM_GETMINMAXINFO for top-level sizable windows */
-    if (h->parent == w16_desktop && (style & (WS_THICKFRAME | WS_CAPTION))) {
-        MINMAXINFO mm = {{0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}};
-        int f = GetSystemMetrics(SM_CXFRAME);
-        mm.ptMaxSize.x = w16_screen.w + 2 * f;
-        mm.ptMaxSize.y = w16_screen.h + 2 * f;
-        mm.ptMaxPosition.x = mm.ptMaxPosition.y = -f;
-        mm.ptMinTrackSize.x = GetSystemMetrics(SM_CXMINTRACK);
-        mm.ptMinTrackSize.y = GetSystemMetrics(SM_CYMINTRACK);
-        mm.ptMaxTrackSize.x = mm.ptMaxSize.x;
-        mm.ptMaxTrackSize.y = mm.ptMaxSize.y;
-    }
-    h->rw = (RECT){pr.left + x, pr.top + y, pr.left + x + cx, pr.top + y + cy};
+    /* the size within the window's limits: WM_GETMINMAXINFO comes before WM_NCCREATE (seg8:06D9, into
+     * locals; the CREATESTRUCT USER passes is its own parameter frame) */
+    int wcx = cx, wcy = cy;
+    w16_clamp_window_size(h, &wcx, &wcy);
+    h->rw = (RECT){pr.left + x, pr.top + y, pr.left + x + wcx, pr.top + y + wcy};
     if (h->parent == w16_desktop) OffsetRect(&h->rw, byte_align_dx(h), 0);
     h->restore = h->rw;
     h->style &= ~(WS_VISIBLE | WS_MINIMIZE | WS_MAXIMIZE);

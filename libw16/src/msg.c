@@ -1079,6 +1079,12 @@ LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
         return (LRESULT)w16_sys_brush(COLOR_WINDOW);
     }
+    case WM_WINDOWPOSCHANGING: {
+        /* USER seg1:609A: a new size within the window's MINMAXINFO limits */
+        WINDOWPOS *wpos = (WINDOWPOS *)lp;
+        if (!(wpos->flags & SWP_NOSIZE)) w16_clamp_window_size(h, &wpos->cx, &wpos->cy);
+        return 0;
+    }
     case WM_WINDOWPOSCHANGED: {
         /* WM_MOVE / WM_SIZE when the client area moved / changed size (SetWindowPos's flags) */
         WINDOWPOS *wpos = (WINDOWPOS *)lp;

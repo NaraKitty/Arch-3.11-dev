@@ -219,6 +219,8 @@ void w16_invalidate_window(HWND h, const RECT *screen_r, int erase, int nc);
 HWND w16_next_to_paint(HWND root);
 int w16_any_paint_pending(void);
 void w16_set_window_rect(HWND h, const RECT *rw, UINT swp);
+void w16_get_minmax_info(HWND h, MINMAXINFO *mm);       /* USER seg6:1A4F (sends WM_GETMINMAXINFO) */
+void w16_clamp_window_size(HWND h, int *cx, int *cy);    /* USER seg1:0000 */
 HWND w16_top_level(HWND h);
 HWND w16_window_under(HWND h, POINT pt); /* hit testing past an HTTRANSPARENT window */
 int w16_window_visible(HWND h); /* visible including ancestors */
