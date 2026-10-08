@@ -89,7 +89,7 @@ for t in "${tests[@]}"; do
     while read -r file sect kv; do
         key=${kv%%=*} val=${kv#*=}
         got=$(awk -v s="$sect" -v k="$key" '{ sub(/\r$/, "") }
-            /^\[/ { ins = tolower($0) == "[" tolower(s) "]"; next }
+            /^\[/ { h = $0; sub(/[ \t]+$/, "", h); ins = tolower(h) == "[" tolower(s) "]"; next }
             ins { i = index($0, "="); if (i && tolower(substr($0, 1, i - 1)) == tolower(k)) { print substr($0, i + 1); exit } }' \
             "$o/ini/$file" 2>/dev/null)
         if [ "$got" = "$val" ]; then echo "PASS $n: $file [$sect] $key=$val"
