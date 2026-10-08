@@ -19,8 +19,11 @@ agents can continue.
 6. Append to ADRs in `docs/DECISIONS.md`; do not silently change decisions.
 
 ## Current state
-**Latest (session 3): Notepad runs end to end on Linux** (`make -C apps`, then
-`tools/run-app-test.sh apps/build/notepad apps/notepad/tests/smoke.w16`). See the session 3 log below.
+**Latest (session 6): Notepad and the Control Panel run natively on libw16 (C + SDL2)** - CONTROL.EXE
+with MAIN.CPL's Mouse, Keyboard, Date & Time and Ports, SND.CPL's Sound, and arch311's own Network and
+Volume applets - pixel-identical to real 3.11 wherever compared. Build: `make -C apps`. Regression
+against the real-3.11 reference rig (see session 6): `ARCH311_REF=<rig folder> tools/regress.sh` runs
+every test with a `# regress:` line and checks its `# compare:` frames and `# ini:` values (~30 s).
 The session-1 notes that follow are historical; `docs/`, `tools/extract_media.py`, `make-profile.sh`
 etc. are referenced but were never committed - `tools/rip` replaced the extraction tooling.
 
@@ -373,3 +376,12 @@ selection when the focus leaves (seg33 kill-focus helper). SLKeyDown (seg28:0A93
 F4, Page Up/Down and Up/Down to the combo; other single-line edits move Up/Down as Left/Right and ignore
 Page Up/Down. SLInsertText (seg28:0719): without ES_AUTOHSCROLL a single-line edit accepts only what fits
 beside the rest of the text (EN_MAXTEXT for the rest). Ports frames unchanged (pixel-identical dialogs).
+tools/regress.sh: one command for the whole regression against real 3.11 (WSL: `ARCH311_REF=/mnt/c/Users/
+pikac/arch311-ref tools/regress.sh [-j N] [-o OUT] [-n] [TESTS...]`). A test opts in with a `# regress:`
+line (its command, "$TEST" and "$OUT" quoted), names reference frames with `# compare: REF.png SHOT.png
+[active | x0 y0 x1 y1] [ignore x0 y0 x1 y1]... [max N]` and INI results with `# ini: FILE SECTION
+KEY=VALUE`. `shot`/`shotcaret` now also append the active window's rectangle to shots/rects.txt, so
+"active" crops both frames to the window under test (the Control Panel behind it and the rig's mouse
+pointer, which sits at 320,240, stay out). First run: 30 checks in 30 s, all PASS (Ports both
+scenarios, Sound with and without a wave device, Keyboard, Mouse, Notepad hello; INI values for Ports
+and Sound). New applet tests should carry these lines; I merge branches only with the run green.
