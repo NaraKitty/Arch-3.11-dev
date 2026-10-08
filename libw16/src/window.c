@@ -779,6 +779,7 @@ HWND CreateWindow(LPCSTR cls, LPCSTR title, DWORD style, int x, int y, int cx, i
 
 static void destroy_rec(HWND h)
 {
+    w16_clipboard_on_destroy(h);
     SendMessage(h, WM_DESTROY, 0, 0);
     for (HWND c = h->child; c;) {
         HWND n = c->next;
@@ -795,6 +796,7 @@ static void free_rec(HWND h)
         c = n;
     }
     SendMessage(h, WM_NCDESTROY, 0, 0);
+    w16_clipboard_on_free(h);
     w16_timers_on_destroy(h);
     w16_caret_on_destroy(h);
     if (w16_focus == h) w16_focus = NULL;

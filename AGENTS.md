@@ -54,6 +54,9 @@ NOTHING BOOTS YET.
 | T-DOS-01 | MS-DOS Prompt starts the built-in DOSBox (C: = arch311's C: drive, 3.11's prompt banner) | ADR-006; needs DOSBox installed |
 | T-WM-APPS | Test real Linux apps under arch311-wm + Qt/GTK styles: Krita first (owner), a GTK app, a CEF window | docs/WM.md; needs an X server (Xvfb) and the apps installed |
 | T-THEME-DARK | Light/Dark toggle in the theme manager: sets only the freedesktop/GTK/Qt colour-scheme preference for Linux apps, never the arch311 theme's look | After the theme manager and the other themes' colours (docs/THEMES.md) |
+| T-MEDIA-01 | MP3 and MP4 players (owner supplies the 3.11 programs): UI decompiled 1:1, playback through libVLC | ADR-007; needs libvlc installed |
+| T-PM-LINUX | Program Manager: Krita item in Accessories (3.11-style icon), Media group with the players | ADR-008; after the Program Manager port |
+| T-ASSOC | Preferred applications: WIN.INI [Extensions] + Associate dialog kept, players default for their formats, synced with xdg-mime | ADR-008 |
 | T-TERM-01 | Port TERMINAL.EXE with a pseudo-terminal back end: the Linux terminal in 3.11's Terminal look | ADR-006 |
 
 ## Known quirks and findings

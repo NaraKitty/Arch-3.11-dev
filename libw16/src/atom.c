@@ -114,3 +114,19 @@ ATOM GlobalAddAtom(LPCSTR name) { return add(&global_atoms, name); }
 ATOM GlobalDeleteAtom(ATOM atom) { return del(&global_atoms, atom); }
 ATOM GlobalFindAtom(LPCSTR name) { return look(&global_atoms, name); }
 UINT GlobalGetAtomName(ATOM atom, LPSTR buf, int cb) { return name_of(&global_atoms, atom, buf, cb); }
+
+BOOL InitAtomTable(int n) { (void)n; return TRUE; }
+
+/* USER's own table: RegisterWindowMessage and RegisterClipboardFormat (USER seg1:8214) both AddAtom
+ * with USER's data segment, so a message and a clipboard format of the same name get the same value;
+ * GetClipboardFormatName reads it back (seg39:004B) and SetClipboardData/EmptyClipboard raise and drop
+ * a registered format's count (KERNEL GetAtomHandle, DeleteAtom) */
+static AtomTable user_atoms;
+ATOM w16_user_atom_add(LPCSTR name) { return add(&user_atoms, name); }
+ATOM w16_user_atom_delete(ATOM atom) { return del(&user_atoms, atom); }
+UINT w16_user_atom_name(ATOM atom, LPSTR buf, int cb) { return name_of(&user_atoms, atom, buf, cb); }
+void w16_user_atom_ref(ATOM atom)
+{
+    int i = atom - MAXINTATOM;
+    if (atom >= MAXINTATOM && i < user_atoms.n && user_atoms.e[i].refs) user_atoms.e[i].refs++;
+}
