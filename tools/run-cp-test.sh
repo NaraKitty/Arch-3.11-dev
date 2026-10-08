@@ -12,6 +12,8 @@
 #   WINDOWS and SYSTEM exactly as in its pristine install, so directory listings match real 3.11;
 #   ARCH311_REF_INI=1 also starts from that install's WIN.INI, SYSTEM.INI and CONTROL.INI, so the
 #   files after the run compare byte for byte with a reference run's (arch311-ref/run-NAME).
+# - ARCH311_INI_DIR=<folder>: its *.INI files are the starting ones (after the above), e.g. a WIN.INI
+#   changed the way a reference run's -WinIni changes it.
 # ARCH311_SIMULATE (default 1), ARCH311_WAVEDEVS (default 0, the rig's DOSBox has no sound card) and
 # ARCH311_CLOCK pass through.
 set -e
@@ -40,6 +42,9 @@ if [ -n "$ref" ] && [ -d "$ref/c-pristine/WINDOWS" ]; then
     fi
 else
     for f in "$files"/*; do ln -s "$f" "$fx/c/WINDOWS/"; done
+fi
+if [ -n "${ARCH311_INI_DIR:-}" ]; then
+    for f in "$ARCH311_INI_DIR"/*.INI; do [ -f "$f" ] && cp "$f" "$fx/config/arch311/"; done
 fi
 printf 'A=%s\nC=%s\n' "$fx/a" "$fx/c" > "$fx/config/arch311/drives"
 status=0

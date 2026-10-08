@@ -770,10 +770,12 @@ static void put_rop(HDC dc, Region *clip, int x, int y, uint32_t c, int rop)
     *p = to_target(dc, rop2_apply(rop, c, *p));
 }
 
-/* brush colour at device pixel x,y */
+/* brush colour at device pixel x,y: 3.1 GDI realizes a brush for the DC it is selected into, so the
+ * pattern starts at the DC's origin plus its brush origin (measured on 3.11: MAIN.CPL's Edit Pattern
+ * sample, filled with a pattern brush, repeats from the dialog's client origin) */
 static uint32_t brush_px(HDC dc, HBRUSH b, int x, int y)
 {
-    int bx = (x - dc->brushorgx) & 7, by = (y - dc->brushorgy) & 7;
+    int bx = (x - dc->ox - dc->brushorgx) & 7, by = (y - dc->oy - dc->brushorgy) & 7;
     switch (b->u.brush.style) {
     case BS_SOLID: return w16_dither(b->u.brush.color, bx, by);
     case BS_HATCHED: {

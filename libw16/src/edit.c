@@ -38,6 +38,37 @@ static int smax(Edit *e) { return max(e->anchor, e->caret); }
 
 static void notify(HWND h, int code) { Edit *e = h->ctl; if (!e || !e->quiet) w16_notify_parent(h, code); }
 
+/* USER seg2:03A4: a font's average character as dialog base units measure it (the alphabet's
+ * extent for proportional fonts) */
+static int ave_char_width(HDC dc)
+{
+    TEXTMETRIC tm;
+    GetTextMetrics(dc, &tm);
+    if (!(tm.tmPitchAndFamily & 1)) return tm.tmAveCharWidth;
+    static const char abc[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    return ((int)(LOWORD(GetTextExtent(dc, abc, 52)) / 26) + 1) / 2;
+}
+
+/* the caret as the edit gets the focus: a multiline edit's is 2 px wide and a line high; a
+ * single-line edit's (USER seg28:1224) is 1 px wide when its font's average character is narrower
+ * than the system font's, else 2, and a line plus one high (measured on 3.11 in the Desktop
+ * applet's combo box edits: 1 x 14 px with 8 pt Helv) */
+static void make_caret(HWND h, Edit *e)
+{
+    if (e->multi) {
+        CreateCaret(h, NULL, 2, e->lh);
+        return;
+    }
+    HDC dc = GetDC(h);
+    HGDIOBJ of = SelectObject(dc, GetStockObject(SYSTEM_FONT));
+    int sys = ave_char_width(dc);
+    SelectObject(dc, h->font ? h->font : GetStockObject(SYSTEM_FONT));
+    int w = ave_char_width(dc);
+    SelectObject(dc, of);
+    ReleaseDC(h, dc);
+    CreateCaret(h, NULL, w < sys ? 1 : 2, e->lh + 1);
+}
+
 /* ------------------------------------------------------------------ measuring */
 static int tab_stop(Edit *e, int x)
 {
@@ -206,8 +237,13 @@ static void draw_line(HWND h, HDC dc, int l, HBRUSH bg, char *t)
     int ss = smin(e), se = smax(e);
     int showsel = (e->focus || e->nohidesel) && ss != se;
     int x0 = e->fmt.left - e->xoff + line_indent(h, e, t, l);
+    /* a single-line edit fills each run of text down to a pixel below its line (USER seg28:03F0
+     * fills its formatting rectangle inflated by one, which the edit's clip leaves a line plus one
+     * high): measured on 3.11, the selection band of the Desktop applet's Delay edit and of its
+     * combo boxes' edits is 14 px with 8 pt Helv, from the top of the text */
+    int ext = e->multi ? 0 : 1;
     int sv = SaveDC(dc);
-    IntersectClipRect(dc, lr.left, lr.top, lr.right, lr.bottom);
+    IntersectClipRect(dc, lr.left, lr.top, lr.right, lr.bottom + ext);
     COLORREF fg = GetTextColor(dc);
     int x = 0;
     for (int i = s; i < end;) {
@@ -216,13 +252,11 @@ static void draw_line(HWND h, HDC dc, int l, HBRUSH bg, char *t)
         while (j < end && (showsel && j >= ss && j < se) == sel) j++;
         /* draw run [i, j) */
         int rx = x;
-        for (int k = i; k < j; k++) {
-            int w = ch_w(e, t[k], x);
-            if (sel) {
-                RECT hr = {x0 + x, y, x0 + x + w, y + e->lh};
-                FillRect(dc, &hr, w16_sys_brush(COLOR_HIGHLIGHT));
-            }
-            x += w;
+        for (int k = i; k < j; k++) x += ch_w(e, t[k], x);
+        if (sel) {
+            /* (a single-line edit's run is as wide as GetTextExtent says: the bold overhang too) */
+            RECT hr = {x0 + rx, y, x0 + x + (ext && e->f ? e->f->bold_sim : 0), y + e->lh + ext};
+            FillRect(dc, &hr, w16_sys_brush(COLOR_HIGHLIGHT));
         }
         SetBkMode(dc, TRANSPARENT);
         SetTextColor(dc, sel ? GetSysColor(COLOR_HIGHLIGHTTEXT) : fg);
@@ -264,12 +298,13 @@ static void paint(HWND h, HDC dc)
     SetRect(&m, r.left, e->fmt.top, e->fmt.left, r.bottom); FillRect(dc, &m, bg);
     SetRect(&m, e->fmt.right, e->fmt.top, r.right, r.bottom); FillRect(dc, &m, bg);
     if (h->style & WS_DISABLED) SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
-    char *t = txt(e);
     int n = e->multi ? vis_lines(e) + 1 : 1;
-    for (int i = 0; i < n; i++) draw_line(h, dc, e->top + i, bg, t);
-    untxt(e);
+    /* below the lines first: a single-line edit's selection reaches a pixel below its line */
     int last_y = e->fmt.top + n * e->lh;
     if (last_y < r.bottom) { SetRect(&m, e->fmt.left, last_y, e->fmt.right, r.bottom); FillRect(dc, &m, bg); }
+    char *t = txt(e);
+    for (int i = 0; i < n; i++) draw_line(h, dc, e->top + i, bg, t);
+    untxt(e);
     SelectObject(dc, of);
 }
 
@@ -614,7 +649,7 @@ LRESULT w16_edit_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     }
     case WM_SETFOCUS:
         e->focus = 1;
-        CreateCaret(h, NULL, 2, e->lh);
+        make_caret(h, e);
         place_caret(h);
         ShowCaret(h);
         if (e->anchor != e->caret && !e->nohidesel) redraw(h);
@@ -674,6 +709,13 @@ LRESULT w16_edit_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         if (e->mdown) { e->mdown = 0; ReleaseCapture(); KillTimer(h, edit_timer_id); }
         return 0;
     case WM_KEYDOWN: {
+        /* a combo box's edit leaves the list keys to the combo, which selects the next item and
+         * shows it here (measured on 3.11: Down in the Desktop applet's wallpaper box) */
+        if ((wp == VK_UP || wp == VK_DOWN || wp == VK_PRIOR || wp == VK_NEXT || wp == VK_F4) && h->id == 1001 &&
+            w16_valid(h->parent) && !strcasecmp(h->parent->cls->name, "COMBOBOX")) {
+            SendMessage(h->parent, WM_KEYDOWN, wp, lp);
+            return 0;
+        }
         int shift = (w16_keystate[VK_SHIFT] & 0x80) != 0, ctrl = (w16_keystate[VK_CONTROL] & 0x80) != 0;
         char *t = txt(e);
         int l = line_of(e, e->caret);

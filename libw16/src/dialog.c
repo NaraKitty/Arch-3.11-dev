@@ -303,8 +303,15 @@ LRESULT DefDlgProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         if (d && LOWORD(wp) != WA_INACTIVE) {
             if (d->focus && w16_valid(d->focus) && IsChild(h, d->focus)) SetFocus(d->focus);
             else { HWND f = GetNextDlgTabItem(h, NULL, FALSE); if (f) SetFocus(f); }
-        } else if (d && w16_focus && IsChild(h, w16_focus))
+            if (w16_focus && IsChild(h, w16_focus)) set_default_button(h, w16_focus);
+        } else if (d && w16_focus && IsChild(h, w16_focus)) {
             d->focus = w16_focus;
+            /* a focused push button stops being the default while another window is active, and
+             * the dialog's default does not take over (measured on 3.11: "Edit Pattern..." behind
+             * the Edit Pattern dialog, and the Desktop's OK, both have the thin border) */
+            if (SendMessage(w16_focus, WM_GETDLGCODE, 0, 0) & DLGC_DEFPUSHBUTTON)
+                SendMessage(w16_focus, BM_SETSTYLE, BS_PUSHBUTTON, TRUE);
+        }
         return 0;
     case WM_SETFOCUS:
         if (d && d->focus && w16_valid(d->focus)) SetFocus(d->focus);
@@ -494,7 +501,16 @@ static void activate_ctl(HWND dlg, HWND c)
         return;
     }
     LRESULT code = SendMessage(c, WM_GETDLGCODE, 0, 0);
-    if (code & (DLGC_BUTTON | DLGC_DEFPUSHBUTTON | DLGC_UNDEFPUSHBUTTON | DLGC_RADIOBUTTON)) {
+    if (code & (DLGC_DEFPUSHBUTTON | DLGC_UNDEFPUSHBUTTON)) {
+        /* a push button's mnemonic flashes it and sends its command; the focus stays where it is
+         * (measured on 3.11: "a" for the Edit Pattern dialog's Add with the focus on OK leaves OK
+         * focused) */
+        SendMessage(c, BM_SETSTATE, TRUE, 0);
+        SendMessage(c, BM_SETSTATE, FALSE, 0);
+        SendMessage(dlg, WM_COMMAND, GetDlgCtrlID(c), W16_CMD_LPARAM(c, BN_CLICKED));
+        return;
+    }
+    if (code & (DLGC_BUTTON | DLGC_RADIOBUTTON)) {
         SetFocus(c);
         SendMessage(c, WM_KEYDOWN, VK_SPACE, 0); /* click */
         SendMessage(c, WM_KEYUP, VK_SPACE, 0);
@@ -518,6 +534,20 @@ BOOL IsDialogMessage(HWND dlg, LPMSG m)
             if (code & (DLGC_WANTTAB | DLGC_WANTALLKEYS)) break;
             {
                 HWND n = GetNextDlgTabItem(dlg, f, (w16_keystate[VK_SHIFT] & 0x80) != 0);
+                /* a group of radio buttons is entered at its checked button (measured on 3.11: Tab
+                 * into the Desktop applet's Center / Tile pair lands on the checked Tile, which is
+                 * not a tab stop) */
+                if (n && (SendMessage(n, WM_GETDLGCODE, 0, 0) & DLGC_RADIOBUTTON) && !SendMessage(n, BM_GETCHECK, 0, 0)) {
+                    HWND g = n;
+                    for (int k = 0; k < 64; k++) {
+                        g = GetNextDlgGroupItem(dlg, g, FALSE);
+                        if (!g || g == n) break;
+                        if ((SendMessage(g, WM_GETDLGCODE, 0, 0) & DLGC_RADIOBUTTON) && SendMessage(g, BM_GETCHECK, 0, 0)) {
+                            n = g;
+                            break;
+                        }
+                    }
+                }
                 if (n) {
                     SetFocus(n);
                     if (SendMessage(n, WM_GETDLGCODE, 0, 0) & DLGC_HASSETSEL) SendMessage(n, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));

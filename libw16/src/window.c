@@ -1349,7 +1349,7 @@ static void paint_desktop(HDC dc)
 {
     RECT clip;
     if (GetClipBox(dc, &clip) == NULLREGION) return;
-    SetBrushOrg(dc, 0, 0);
+    SetBrushOrg(dc, -dc->ox, -dc->oy);    /* (0, 0) on the screen */
     if (wallpaper_style & 1) {
         tile_wallpaper(dc, wallpaper_x, wallpaper_y);
         return;
@@ -1373,7 +1373,10 @@ static void paint_desktop(HDC dc)
 void w16_paint_desktop(HDC dc, const RECT *r)
 {
     if (!wallpaper) {
+        /* the pattern lines up with the desktop's (USER fills with the brush aligned to the parent) */
+        DWORD org = SetBrushOrg(dc, -dc->ox, -dc->oy);
         FillRect(dc, r, w16_sys_brush(COLOR_BACKGROUND));
+        SetBrushOrg(dc, (SHORT)LOWORD(org), (SHORT)HIWORD(org));
         return;
     }
     DWORD org = SetViewportOrg(dc, -dc->ox, -dc->oy);
