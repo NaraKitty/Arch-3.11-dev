@@ -1,7 +1,10 @@
 /* EDIT control (single and multi-line), 3.1 behaviour and look.
- * Measured on 3.11: multi-line formatting rect starts avgw/2 from the left and 2 px from the
- * top; caret is 2 px wide and one line tall; tab stops every 8 average characters; the
- * text buffer is a local-memory handle (EM_GETHANDLE / EM_SETHANDLE work as in Win16). */
+ * Geometry as USER's edit code has it (seg26-seg30): a WS_BORDER edit takes the style off and draws
+ * its own one-pixel frame, the formatting rect is inset from that frame (SLSize/MLSize) and drawing
+ * is clipped as ECSetEditClip clips it; the single-line control keeps 3.1's first-visible-character
+ * scrolling, extents, hit testing and caret. Multi-line: caret 2 px wide and one line tall; tab
+ * stops every 8 average characters. The text buffer is a local-memory handle (EM_GETHANDLE /
+ * EM_SETHANDLE work as in Win16). */
 #include "w16int.h"
 #include <ctype.h>
 
@@ -13,9 +16,15 @@ typedef struct {
     int multi, wrap;
     int *ls;                  /* line starts */
     int nl, capl;
-    int top, xoff;            /* first visible line; horizontal pixel offset */
+    int top, xoff;            /* first visible line; horizontal pixel offset (multi-line) */
+    int scr;                  /* single-line: first visible character (ichScreenStart) */
     W16Font *f;
     int lh, avgw;
+    int avew, cxsys, cysys;   /* USER's average width of the font; the system font's width, height */
+    int overhang, fixed;      /* tmOverhang; a fixed-pitch font */
+    int border;               /* created with WS_BORDER: draws its own frame */
+    int nofmt;                /* multi-line: too small to format (caret hidden) */
+    int pww;                  /* password character width */
     RECT fmt;
     int modified;
     HLOCAL undo;              /* snapshot for one-level undo */
@@ -144,11 +153,111 @@ static int line_indent(HWND h, Edit *e, const char *t, int l)
     return (h->style & ES_CENTER) ? (fw - w + 1) / 2 : fw - w;
 }
 
+/* ------------------------------------------------------------------ single-line geometry (seg28) */
+/* GetTextExtent in the edit's font: the advance widths plus the overhang, once per string */
+static int text_ext(Edit *e, const char *s, int n)
+{
+    return n > 0 ? w16_text_width(e->f, s, n) + e->overhang : 0;
+}
+
+/* the single-line caret (seg28:1224): one pixel wide when the font's average character is
+ * narrower than the system font's, else two; one pixel taller than the line */
+static int sl_caret_w(Edit *e) { return e->avew < e->cxsys ? 1 : 2; }
+
+/* ECCchInWidth (seg26:025C): how many characters of s[0..n) fit in w pixels, counted from the
+ * start or, backward, from the end */
+static int cch_in_width(Edit *e, const char *s, int n, int w, int forward)
+{
+    if (w <= 0 || n <= 0) return 0;
+    if (e->fixed) return min(n, w / e->avew);
+    if (e->pw) return min(n, w / e->pww);
+    int lo = 0, hi = n + 1;
+    while (hi - 1 > lo) {
+        int mid = lo + max(1, (hi - lo) / 2);
+        if (text_ext(e, forward ? s : s + n - mid, mid) > w) hi = mid;
+        else lo = mid;
+    }
+    return lo;
+}
+
+/* SLIchToLeftXPos (seg28:0047): the x of a character position; the text starts at the formatting
+ * rect's left edge less the overhang, so positions after the first are measured with
+ * GetTextExtent */
+static int sl_x(Edit *e, const char *t, int ich)
+{
+    if (ich >= e->scr && ich - e->scr > 1000) return 30000;
+    if (ich < e->scr && e->scr - ich > 1000) return -30000;
+    if (e->fixed) return (ich - e->scr) * e->avew + e->fmt.left;
+    if (e->pw) return (ich - e->scr) * e->pww + e->fmt.left;
+    int w;
+    if (ich >= e->scr) {
+        w = text_ext(e, t + e->scr, ich - e->scr);
+        if (w < 0 || w > 31000) w = 30000;
+    } else
+        w = -text_ext(e, t + ich, e->scr - ich);
+    return e->fmt.left - e->overhang + w;
+}
+
+/* SLMouseToIch (seg28:0EEE): left of the formatting rect, the character before the first visible
+ * one; right of it, the one after the last; else the last position whose extent less half an
+ * average character is left of x */
+static int sl_hit(Edit *e, const char *t, int x)
+{
+    if (x <= e->fmt.left) return e->scr ? e->scr - 1 : 0;
+    if (x > e->fmt.right) {
+        int i = e->scr + cch_in_width(e, t + e->scr, e->len - e->scr, e->fmt.right - e->fmt.left, 1);
+        return e->len <= i ? e->len : i + 1;
+    }
+    if (e->pw) { /* sic: counted from the start of the text, not from the first visible character */
+        int n = (x - e->fmt.left) / e->pww;
+        return n > e->len ? e->len : n;
+    }
+    if (e->len == 0) return 0;
+    int lo = 0, hi = e->len - e->scr + 1;
+    while (hi - 1 > lo) {
+        int mid = lo + max(1, (hi - lo) / 2);
+        if (text_ext(e, t + e->scr, mid) - e->avew / 2 > x - e->fmt.left) hi = mid;
+        else lo = mid;
+    }
+    return lo + e->scr;
+}
+
+/* SLScrollText (seg28:061D), ES_AUTOHSCROLL only: a caret at or before the first visible character
+ * brings a quarter of the width of the text before it into view; a caret past the right edge
+ * scrolls three quarters of a width in, but never so far that the text ends before the edge */
+static int sl_scroll(HWND h)
+{
+    Edit *e = ed(h);
+    if (!(h->style & ES_AUTOHSCROLL)) return 0;
+    char *t = txt(e);
+    int fw = e->fmt.right - e->fmt.left, ns = e->scr;
+    if (e->caret <= e->scr)
+        ns = e->caret - cch_in_width(e, t, e->caret, fw / 4, 0);
+    else {
+        int n = cch_in_width(e, t + e->scr, e->caret - e->scr, fw, 0);
+        if (e->caret - e->scr > n) {
+            ns = e->caret - 3 * n / 4;
+            int m = cch_in_width(e, t + e->scr, e->len - e->scr, fw, 0);
+            if (e->len - m < ns) ns = e->len - m;
+        }
+    }
+    untxt(e);
+    if (ns == e->scr) return 0;
+    e->scr = ns;
+    return 1;
+}
+
 /* client coordinates of a character position */
 static void pos_xy(HWND h, int pos, int *x, int *y)
 {
     Edit *e = ed(h);
     char *t = txt(e);
+    if (!e->multi) {
+        *x = sl_x(e, t, pos);
+        *y = e->fmt.top;
+        untxt(e);
+        return;
+    }
     int l = line_of(e, pos);
     int w = seg_width(e, t, e->ls[l], pos) + line_indent(h, e, t, l);
     untxt(e);
@@ -159,7 +268,13 @@ static void pos_xy(HWND h, int pos, int *x, int *y)
 static int xy_pos(HWND h, int x, int y)
 {
     Edit *e = ed(h);
-    int l = e->multi ? e->top + (y - e->fmt.top) / e->lh : 0;
+    if (!e->multi) {
+        char *t = txt(e);
+        int p = sl_hit(e, t, x);
+        untxt(e);
+        return p;
+    }
+    int l = e->top + (y - e->fmt.top) / e->lh;
     if (y < e->fmt.top && e->multi) l = e->top - 1;
     if (l < 0) l = 0;
     if (l >= e->nl) l = e->nl - 1;
@@ -251,7 +366,118 @@ static void draw_line(HWND h, HDC dc, int l, HBRUSH bg, char *t)
     RestoreDC(dc, sv);
 }
 
-static void paint(HWND h, HDC dc)
+/* DrawFrame(hdc, rc, 1, DF_WINDOWFRAME): the edit's own border, in the window-frame colour */
+static void draw_frame(HDC dc, const RECT *r)
+{
+    int cx = GetSystemMetrics(SM_CXBORDER), cy = GetSystemMetrics(SM_CYBORDER);
+    HBRUSH b = w16_sys_brush(COLOR_WINDOWFRAME);
+    RECT s;
+    SetRect(&s, r->left, r->top, r->right, r->top + cy); FillRect(dc, &s, b);
+    SetRect(&s, r->left, r->bottom - cy, r->right, r->bottom); FillRect(dc, &s, b);
+    SetRect(&s, r->left, r->top + cy, r->left + cx, r->bottom - cy); FillRect(dc, &s, b);
+    SetRect(&s, r->right - cx, r->top + cy, r->right, r->bottom - cy); FillRect(dc, &s, b);
+}
+
+/* ECSetEditClip (seg26:0A36): the client rect, inset as a single-line formatting rect is when the
+ * edit has a border; a multi-line edit's is also cut to its formatting rect */
+static void edit_clip(HWND h, HDC dc)
+{
+    Edit *e = ed(h);
+    RECT r;
+    GetClientRect(h, &r);
+    if (e->border) InflateRect(&r, -(min(e->avew, e->cxsys) / 2), -(min(e->lh, e->cysys) / 4));
+    if (e->multi) IntersectRect(&r, &r, &e->fmt);
+    IntersectClipRect(dc, r.left, r.top, r.right, r.bottom);
+}
+
+/* SLDrawLine (seg28:0280): characters [ich, ich + n). The run's rect starts at the formatting
+ * rect's left edge plus the extent of the visible text before it less the overhang, spans the
+ * run's own extent (overhang included) and is filled a pixel taller above and below (the clip trims
+ * it) before the text is drawn opaque at its top left. */
+static void sl_draw_line(HWND h, HDC dc, const char *t, int ich, int n, int sel)
+{
+    Edit *e = ed(h);
+    if (ich < e->scr) {
+        if (ich + n < e->scr) return;
+        n -= e->scr - ich;
+        ich = e->scr;
+    }
+    RECT r = e->fmt;
+    if (ich > e->scr) r.left += e->pw ? e->pww * (ich - e->scr) : text_ext(e, t + e->scr, ich - e->scr) - e->overhang;
+    r.right = r.left + (e->pw ? e->pww * n : text_ext(e, t + ich, n));
+    SetBkMode(dc, OPAQUE);
+    HBRUSH br;
+    COLORREF otext = 0, obk = 0;
+    int restore = 0;
+    if (sel) {
+        br = w16_sys_brush(COLOR_HIGHLIGHT);
+        obk = SetBkColor(dc, GetSysColor(COLOR_HIGHLIGHT));
+        otext = SetTextColor(dc, GetSysColor(COLOR_HIGHLIGHTTEXT));
+        restore = 1;
+    } else
+        br = w16_ctl_color(h, dc, CTLCOLOR_EDIT);
+    if (h->style & WS_DISABLED) {
+        COLORREF g = GetSysColor(COLOR_GRAYTEXT);
+        if (g) { otext = SetTextColor(dc, g); restore = 1; }
+    }
+    InflateRect(&r, 0, 1);
+    FillRect(dc, &r, br);
+    InflateRect(&r, 0, -1);
+    if (e->pw)
+        for (int i = 0; i < n; i++) TextOut(dc, r.left + i * e->pww, r.top, &e->pw, 1);
+    else
+        TextOut(dc, r.left, r.top, t + ich, n);
+    if (restore) SetTextColor(dc, otext);
+    if (sel) SetBkColor(dc, obk);
+}
+
+/* SLDrawText (seg28:04E1): the characters that fit, in runs of one selection state (no selection
+ * shows without the focus unless ES_NOHIDESEL), then the rest of the formatting rect, a pixel
+ * taller above and below, in the control's brush */
+static void sl_draw_text(HWND h, HDC dc)
+{
+    Edit *e = ed(h);
+    if (!w16_window_visible(h)) return;
+    int sv = SaveDC(dc);
+    edit_clip(h, dc);
+    char *t = txt(e);
+    int n = cch_in_width(e, t + e->scr, e->len - e->scr, e->fmt.right - e->fmt.left, 1);
+    int end = e->scr + n, ss = smin(e), se = smax(e);
+    int nosel = ss == se || (!e->focus && !e->nohidesel);
+    for (int i = e->scr; i < end;) {
+        int sel = 0, k = end;
+        if (!nosel) {
+            if (i < ss) k = min(ss, end);
+            else if (i < se) { sel = 1; k = min(se, end); }
+        }
+        sl_draw_line(h, dc, t, i, k - i, sel);
+        i = k;
+    }
+    RECT r = e->fmt;
+    if (n) r.left += e->pw ? e->pww * n : text_ext(e, t + e->scr, n);
+    untxt(e);
+    if (r.right > r.left) {
+        SetBkMode(dc, OPAQUE);
+        InflateRect(&r, 0, 1);
+        FillRect(dc, &r, w16_ctl_color(h, dc, CTLCOLOR_EDIT));
+    }
+    RestoreDC(dc, sv);
+}
+
+/* SLPaint (seg28:1151): the client in the control's brush, the frame, the text */
+static void sl_paint(HWND h, HDC dc)
+{
+    Edit *e = ed(h);
+    HGDIOBJ of = SelectObject(dc, h->font ? h->font : GetStockObject(SYSTEM_FONT));
+    RECT r;
+    GetClientRect(h, &r);
+    FillRect(dc, &r, w16_ctl_color(h, dc, CTLCOLOR_EDIT));
+    if (e->border) draw_frame(dc, &r);
+    sl_draw_text(h, dc);
+    SelectObject(dc, of);
+}
+
+static void ml_paint(HWND h, HDC dc)
 {
     Edit *e = ed(h);
     HGDIOBJ of = SelectObject(dc, h->font ? h->font : GetStockObject(SYSTEM_FONT));
@@ -263,14 +489,27 @@ static void paint(HWND h, HDC dc)
     SetRect(&m, r.left, r.top, r.right, e->fmt.top); FillRect(dc, &m, bg);
     SetRect(&m, r.left, e->fmt.top, e->fmt.left, r.bottom); FillRect(dc, &m, bg);
     SetRect(&m, e->fmt.right, e->fmt.top, r.right, r.bottom); FillRect(dc, &m, bg);
+    SetRect(&m, e->fmt.left, e->fmt.bottom, e->fmt.right, r.bottom); FillRect(dc, &m, bg);
+    /* MLPaint (seg30:0ED8) frames the window rect, so scroll bars cover the frame's edge */
+    if (e->border) {
+        RECT w = {0, 0, h->rw.right - h->rw.left, h->rw.bottom - h->rw.top};
+        draw_frame(dc, &w);
+    }
+    int sv = SaveDC(dc);
+    edit_clip(h, dc);
     if (h->style & WS_DISABLED) SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
     char *t = txt(e);
-    int n = e->multi ? vis_lines(e) + 1 : 1;
+    int n = vis_lines(e) + 1;
     for (int i = 0; i < n; i++) draw_line(h, dc, e->top + i, bg, t);
     untxt(e);
-    int last_y = e->fmt.top + n * e->lh;
-    if (last_y < r.bottom) { SetRect(&m, e->fmt.left, last_y, e->fmt.right, r.bottom); FillRect(dc, &m, bg); }
+    RestoreDC(dc, sv);
     SelectObject(dc, of);
+}
+
+static void paint(HWND h, HDC dc)
+{
+    if (ed(h)->multi) ml_paint(h, dc);
+    else sl_paint(h, dc);
 }
 
 static void redraw(HWND h)
@@ -288,7 +527,10 @@ static void place_caret(HWND h)
     Edit *e = ed(h);
     if (!e->focus) return;
     int x, y;
+    if (e->multi && e->nofmt) { SetCaretPos(-20000, -20000); return; }
     pos_xy(h, e->caret, &x, &y);
+    /* SLSetCaretPosition (seg28:0000): never past the formatting rect's right edge */
+    if (!e->multi) x = min(x, e->fmt.right - sl_caret_w(e));
     SetCaretPos(x, y);
 }
 
@@ -296,6 +538,7 @@ static void place_caret(HWND h)
 static int ensure_visible(HWND h)
 {
     Edit *e = ed(h);
+    if (!e->multi) return sl_scroll(h);
     int changed = 0;
     int l = line_of(e, e->caret);
     if (e->multi) {
@@ -409,7 +652,7 @@ static void set_text(HWND h, const char *s)
     e->len = n;
     e->anchor = e->caret = 0;
     e->top = 0;
-    e->xoff = 0;
+    e->xoff = e->scr = 0;
     e->modified = 0;
     if (e->undo) { LocalFree(e->undo); e->undo = NULL; }
     refresh(h, 1);
@@ -486,6 +729,9 @@ static void paste(HWND h)
 }
 
 /* ------------------------------------------------------------------ geometry */
+/* ECSetFont (seg27:02C9): line height, USER's average width, overhang and pitch of the font; the
+ * system font (hFont 0, as every edit gets at creation) also sets the system metrics the border
+ * insets use */
 static void set_font(HWND h, HFONT f)
 {
     Edit *e = ed(h);
@@ -494,33 +740,45 @@ static void set_font(HWND h, HFONT f)
     SelectObject(dc, f ? f : GetStockObject(SYSTEM_FONT));
     e->f = w16_dc_font(dc);
     TEXTMETRIC tm;
-    GetTextMetrics(dc, &tm);
+    e->avew = w16_ave_char_width(dc, &tm);
     ReleaseDC(h, dc);
     e->lh = tm.tmHeight;
+    e->overhang = tm.tmOverhang;
+    e->fixed = !(tm.tmPitchAndFamily & 1);
+    if (!f) { e->cxsys = e->avew; e->cysys = e->lh; }
     e->avgw = tm.tmAveCharWidth - (e->f->bold_sim ? 1 : 0);
     if (e->avgw < 1) e->avgw = 1;
+    /* ECSetPasswordChar: the extent of the character, at least 1 */
+    if (e->pw) e->pww = max(1, text_ext(e, &e->pw, 1));
 }
 
+/* SLSize (seg29:0000) and MLSize (seg30:1FF9): the client rect, inset when the edit has a border
+ * by half an average character and a quarter of a line - for a single-line edit no more than the
+ * system font's, for a multi-line edit the system font's own. A single-line rect is at most one
+ * line tall; a multi-line rect is a whole number of lines, and one too small for a character and
+ * a line stays as it was with the caret hidden. A borderless multi-line edit (Notepad's) formats
+ * right at its client edge. */
 static void calc_fmt(HWND h)
 {
     Edit *e = ed(h);
     RECT r;
     GetClientRect(h, &r);
-    if (e->multi) {
-        /* a borderless multiline edit (Notepad's) formats right at its client edge: measured on
-         * real 3.11, Notepad's text starts exactly at the edit window's origin */
-        if (h->style & WS_BORDER) {
-            r.left += e->avgw / 2;
-            r.top += 2;
-            r.right -= e->avgw / 2;
+    if (r.left == r.right || r.top == r.bottom) {
+        if (e->fmt.left != e->fmt.right) {
+            if (e->multi) e->nofmt = 1;
+            return;
         }
+        SetRect(&r, 0, 0, e->multi ? e->avew * 10 : 10, e->multi ? e->lh : 10);
+    }
+    if (e->multi) {
+        if (e->border) InflateRect(&r, -(e->cxsys / 2), -(e->cysys / 4));
+        int n = (r.bottom - r.top) / e->lh;
+        if (r.right - r.left < e->avew || n == 0) { e->nofmt = 1; return; }
+        e->nofmt = 0;
+        r.bottom = r.top + n * e->lh;
     } else {
-        int pad = (h->style & WS_BORDER) ? e->avgw / 2 : 0;
-        int vpad = (h->style & WS_BORDER) ? max(0, (r.bottom - r.top - e->lh) / 2) : 0;
-        r.left += pad;
-        r.right -= pad;
-        r.top += vpad;
-        r.bottom = r.top + e->lh;
+        if (e->border) InflateRect(&r, -(min(e->avew, e->cxsys) / 2), -(min(e->lh, e->cysys) / 4));
+        r.bottom = min(r.top + e->lh, r.bottom);
     }
     e->fmt = r;
 }
@@ -541,6 +799,9 @@ LRESULT w16_edit_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         e->hbuf = LocalAlloc(LMEM_MOVEABLE | LMEM_ZEROINIT, 256);
         e->pw = (h->style & ES_PASSWORD) && !e->multi ? '*' : 0;
         e->nohidesel = (h->style & ES_NOHIDESEL) != 0;
+        /* seg27:0056: a WS_BORDER edit takes the style off and draws its own frame inside its
+         * client area, so its insets count from the window's edge */
+        if (h->style & WS_BORDER) { e->border = 1; h->style &= ~WS_BORDER; }
         set_font(h, NULL);
         DefWindowProc(h, m, wp, lp);
         return TRUE;
@@ -587,6 +848,7 @@ LRESULT w16_edit_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         set_font(h, (HFONT)wp);
         calc_fmt(h);
         build_lines(h);
+        /* ECSetFont: a focused edit gets a 2-px caret one line tall, single-line ones too */
         if (e->focus) { DestroyCaret(); CreateCaret(h, NULL, 2, e->lh); place_caret(h); ShowCaret(h); }
         if (lp) InvalidateRect(h, NULL, TRUE);
         return 0;
@@ -614,7 +876,8 @@ LRESULT w16_edit_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     }
     case WM_SETFOCUS:
         e->focus = 1;
-        CreateCaret(h, NULL, 2, e->lh);
+        if (e->multi) CreateCaret(h, NULL, 2, e->lh);              /* seg30:1DBF */
+        else CreateCaret(h, NULL, sl_caret_w(e), e->lh + 1);      /* seg28:1224 */
         place_caret(h);
         ShowCaret(h);
         if (e->anchor != e->caret && !e->nohidesel) redraw(h);
@@ -890,7 +1153,7 @@ LRESULT w16_edit_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         untxt(e);
         e->anchor = e->caret = 0;
         e->top = 0;
-        e->xoff = 0;
+        e->xoff = e->scr = 0;
         e->modified = 0;
         if (e->undo) { LocalFree(e->undo); e->undo = NULL; }
         refresh(h, 1);
@@ -970,7 +1233,11 @@ LRESULT w16_edit_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         build_lines(h);
         return TRUE;
     }
-    case EM_SETPASSWORDCHAR: e->pw = (char)wp; InvalidateRect(h, NULL, TRUE); return 0;
+    case EM_SETPASSWORDCHAR:
+        e->pw = (char)wp;
+        if (e->pw) e->pww = max(1, text_ext(e, &e->pw, 1));
+        InvalidateRect(h, NULL, TRUE);
+        return 0;
     case EM_GETPASSWORDCHAR: return (unsigned char)e->pw;
     case EM_GETTHUMB: return GetScrollPos(h, SB_VERT);
     case EM_SETWORDBREAK: case EM_SETWORDBREAKPROC: case EM_GETWORDBREAKPROC: return 0;

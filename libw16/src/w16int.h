@@ -144,6 +144,7 @@ struct W16Font {
 W16Font *w16_font_realize(const LOGFONT *lf);
 W16Font *w16_font_system(void);
 int w16_text_width(W16Font *f, const char *s, int n);
+int w16_ave_char_width(HDC dc, TEXTMETRIC *tm); /* USER's average width (GetDialogBaseUnits) */
 void w16_draw_text_dev(HDC dc, W16Font *f, int x, int y, const char *s, int n, uint32_t fg,
                        const int *dx, int charextra);
 void w16_fonts_init(void);
