@@ -1,0 +1,30 @@
+# Calculator, standard view: more results digit for digit (products, differences, sums of
+# fractions, long typed numbers) - continued from calc-std2
+# ini: WIN.INI SciCalc layout=
+shot
+type 987654321
+key kp_multiply
+type 123456789=
+shot
+type 0.1
+key kp_multiply
+type 0.1=
+shot
+type 1.1
+key kp_multiply
+type 1.1=
+shot
+type 1.01-1=
+shot
+type 3.3-1.1=
+shot
+type 0.7
+key kp_plus
+type 0.1=
+shot
+type 0.123456789
+key kp_multiply
+type 10=
+shot
+type 99999999999999
+shot

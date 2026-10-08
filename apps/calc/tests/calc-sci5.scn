@@ -1,0 +1,38 @@
+# Calculator, scientific view: powers, inverse trigonometry, square, Hyp (continued from calc-sci4)
+# ini: WIN.INI SciCalc layout=0
+shot
+key alt
+type vs
+shot
+type 2
+key f9
+type y3=
+shot
+type 0.5is
+shot
+type 0.5io
+shot
+type 1
+key f9
+type it
+shot
+type 0.000123v
+shot
+type 123456789v
+shot
+type v
+key f3
+type p
+key kp_divide
+type 2=
+type s
+shot
+key f2
+type 5ho
+shot
+type 0.1ht
+shot
+type 100
+key f9
+type ht
+shot
