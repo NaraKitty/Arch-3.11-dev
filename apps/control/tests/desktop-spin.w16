@@ -1,0 +1,67 @@
+# Desktop: Fast Alt+Tab off, Blank Screen saver, delay 7, spacing 80, Wrap Title off, blink rate three
+# steps faster, granularity 2, border 5, OK (WIN.INI / SYSTEM.INI, the Control Panel's frame 5 px).
+# Same keys as arch311-ref/scn/desktop-spin.scn; the spin arrows themselves: desktop-arrows.w16.
+# Run: ARCH311_REF=<rig> ARCH311_REF_INI=1 tools/run-cp-test.sh apps/control/tests/desktop-spin.w16 OUT Desktop
+# The rig caught no frames from the typed delay to OK. After OK the real Control Panel has the 5 px
+# border (window -2,-2 to 432,242); only the desktop around it is compared. The rig's pointer is then
+# on that border and shows the vertical sizing arrow (315,230 to 327,250).
+# regress: ARCH311_REF_INI=1 sh tools/run-cp-test.sh "$TEST" "$OUT" Desktop
+# compare: desk-spin/02.png 01-desktop.png active ignore 320 240 332 260 ignore 338 334 350 354
+# compare: desk-spin/03.png 02-fastoff.png active ignore 320 240 332 260 ignore 338 334 350 354
+# compare: desk-spin/04.png 03-saver.png active ignore 320 240 332 260 ignore 338 334 350 354
+# compare: desk-spin/05.png 04-delay.png active ignore 320 240 332 260 ignore 338 334 350 354
+# compare: desk-spin/06.png 09-ok.png 0 242 640 480 ignore 314 228 328 252
+# compare: desk-spin/06.png 09-ok.png 432 0 640 242
+# ini: WIN.INI windows BorderWidth=5
+# ini: WIN.INI windows CursorBlinkRate=470
+# ini: WIN.INI windows ScreenSaveActive=1
+# ini: WIN.INI windows ScreenSaveTimeOut=420
+# ini: WIN.INI windows CoolSwitch=0
+# ini: WIN.INI Desktop GridGranularity=2
+# ini: WIN.INI Desktop IconSpacing=80
+# ini: WIN.INI Desktop IconTitleWrap=0
+# ini: WIN.INI Desktop TileWallPaper=1
+# ini: SYSTEM.INI boot SCRNSAVE.EXE=C:\WINDOWS\SCRNSAVE.SCR
+sleep 600
+shot shots/01-desktop.png
+key tab
+key tab
+key space
+sleep 200
+shot shots/02-fastoff.png
+key tab
+key down
+sleep 200
+shot shots/03-saver.png
+key tab
+sleep 200
+shotcaret shots/04-delay.png
+type 7
+sleep 200
+shotcaret shots/05-delay7.png
+key tab
+key tab
+key tab
+key tab
+key tab
+type 80
+sleep 200
+shotcaret shots/06-spacing.png
+key tab
+key space
+key tab
+key right
+key right
+key right
+sleep 200
+shot shots/07-blink.png
+key tab
+type 2
+key tab
+type 5
+sleep 200
+shotcaret shots/08-border.png
+key enter
+sleep 800
+shot shots/09-ok.png
+quit
