@@ -1,0 +1,13 @@
+# Desktop (MAIN.CPL dialog 8) just opened, then Cancel. Same keys as arch311-ref/scn/desktop-open.scn.
+# Desktop is the third icon here (Ports, Mouse, Desktop, ...); real 3.11 has it fifth (index 4).
+# Run: ARCH311_REF=<rig> ARCH311_REF_INI=1 tools/run-cp-test.sh apps/control/tests/desktop.w16 OUT
+sleep 600
+key right
+key right
+key enter
+sleep 600
+shotcaret shots/01-desktop.png
+key esc
+sleep 300
+shot shots/02-closed.png
+quit

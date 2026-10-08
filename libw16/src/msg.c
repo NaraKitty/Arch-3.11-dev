@@ -144,7 +144,7 @@ BOOL CreateCaret(HWND h, HBITMAP bm, int w, int ht)
     caret.gray = bm == (HBITMAP)1;
     caret.h = h; caret.w = w ? w : GetSystemMetrics(SM_CXBORDER); caret.ht = ht ? ht : GetSystemMetrics(SM_CYBORDER);
     caret.hide = 1; caret.on = 0; caret.created = 1;
-    caret.blink = GetProfileInt("windows", "CursorBlinkRate", 530);
+    /* (the blink time is USER's, from WIN.INI at the start and SetCaretBlinkTime since) */
     return TRUE;
 }
 void DestroyCaret(void) { caret_off(); caret.h = NULL; caret.created = 0; }
@@ -975,7 +975,7 @@ LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         HDC dc = (HDC)wp;
         RECT r;
         GetClientRect(h, &r);
-        FillRect(dc, &r, w16_sys_brush(COLOR_BACKGROUND));
+        w16_paint_desktop(dc, &r);
         return 1;
     }
     case WM_QUERYDRAGICON: return (LRESULT)h->cls->wc.hIcon;

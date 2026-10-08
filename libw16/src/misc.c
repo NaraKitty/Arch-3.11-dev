@@ -205,9 +205,122 @@ UINT GetDoubleClickTime(void) { return w16_dblclk_time; }
 /* returns the previous setting; the buttons are swapped as SDL reports them (msg.c) */
 BOOL SwapMouseButton(BOOL swap) { BOOL was = w16_swap_buttons; w16_swap_buttons = swap != 0; return was; }
 
+/* USER seg41:0E91: a setting in WIN.INI as USER writes it ("%d" of a 16-bit int) */
+static BOOL spi_write(LPCSTR section, LPCSTR key, int v)
+{
+    char t[8];
+    wsprintf(t, "%d", (SHORT)v);
+    return WriteProfileString(section, key, t);
+}
+
+/* the settings of the Desktop applet, as USER seg41:0ED6 keeps and writes them: SPIF_UPDATEINIFILE
+ * writes the key to "Windows" or "Desktop" (USER's spelling), SPIF_SENDWININICHANGE then tells every
+ * window with that section name, only when something was written */
+static BOOL spi_desktop(UINT action, UINT param, void *pv, UINT winini)
+{
+    static const char szWindows[] = "Windows", szDesktop[] = "Desktop";
+    const char *section = szWindows;
+    BOOL wrote = FALSE, update = (winini & SPIF_UPDATEINIFILE) != 0;
+    int v = (SHORT)param;
+    switch (action) {
+    case SPI_SETBORDER: {
+        /* 1..50; nothing changes or is written when the width stays */
+        int old = w16_border_width;
+        w16_border_width = v < 1 ? 1 : v > 50 ? 50 : v;
+        if (old == w16_border_width) return TRUE;
+        w16_border_changed(old);
+        if (update) wrote = spi_write(szWindows, "BorderWidth", v);   /* the value asked for */
+        break;
+    }
+    case SPI_ICONHORIZONTALSPACING:
+        if (pv) {
+            *(int *)pv = w16_icon_spacing;
+            return TRUE;
+        }
+        if (!param) return TRUE;
+        w16_icon_spacing = (UINT)GetSystemMetrics(SM_CXICON) < (WORD)param ? (WORD)param : GetSystemMetrics(SM_CXICON);
+        section = szDesktop;
+        if (update) wrote = spi_write(szDesktop, "IconSpacing", w16_icon_spacing);
+        break;
+    case SPI_GETSCREENSAVETIMEOUT:
+        if (pv) *(int *)pv = w16_screen_save < 0 ? -w16_screen_save : w16_screen_save;
+        return TRUE;
+    case SPI_SETSCREENSAVETIMEOUT:
+        /* (USER restarts its idle count; arch311 has no screen saver to start yet) */
+        w16_screen_save = w16_screen_save < 0 ? -v : v;
+        if (update) wrote = spi_write(szWindows, "ScreenSaveTimeOut", v);
+        break;
+    case SPI_GETSCREENSAVEACTIVE:
+        if (pv) *(BOOL *)pv = w16_screen_save > 0;
+        return TRUE;
+    case SPI_SETSCREENSAVEACTIVE:
+        if ((param && w16_screen_save < 0) || (!param && w16_screen_save > 0)) w16_screen_save = -w16_screen_save;
+        if (update) wrote = spi_write(szWindows, "ScreenSaveActive", param != 0);
+        break;
+    case SPI_GETGRIDGRANULARITY:
+        if (pv) *(int *)pv = w16_grid / 8;
+        return TRUE;
+    case SPI_SETGRIDGRANULARITY:
+        w16_grid = (SHORT)(param << 3);
+        if (w16_grid < 1) w16_grid = 1;
+        section = szDesktop;
+        if (update) wrote = spi_write(szDesktop, "GridGranularity", v);
+        break;
+    case SPI_SETDESKWALLPAPER:
+        if (!w16_set_desk_wallpaper(pv)) return FALSE;
+        section = szDesktop;
+        if (update && pv != (void *)-1) wrote = WriteProfileString(szDesktop, "Wallpaper", pv ? pv : "(None)");
+        w16_desktop_redraw();
+        break;
+    case SPI_SETDESKPATTERN:
+        if (v == -1 && pv) return FALSE;
+        if (!w16_set_desk_pattern(v == -1 ? (LPCSTR)-1 : pv)) return FALSE;
+        section = szDesktop;
+        if (update) wrote = WriteProfileString(szDesktop, "Pattern", pv);   /* (NULL removes it, as in USER) */
+        break;
+    case SPI_GETICONTITLEWRAP:
+        if (pv) *(int *)pv = w16_icon_title_wrap;
+        return TRUE;
+    case SPI_SETICONTITLEWRAP:
+        /* turning it on when it is on writes nothing */
+        if (w16_icon_title_wrap && param) return TRUE;
+        w16_icon_title_wrap = param != 0;
+        /* (USER lays the minimised windows' titles out again; libw16 icon titles do not wrap yet) */
+        section = szDesktop;
+        if (update) wrote = spi_write(szDesktop, "IconTitleWrap", w16_icon_title_wrap);
+        break;
+    case SPI_GETFASTTASKSWITCH:
+        if (pv) *(int *)pv = w16_fast_switch;
+        return TRUE;
+    case SPI_SETFASTTASKSWITCH:
+        w16_fast_switch = param == 1;
+        if (update) wrote = spi_write(szWindows, "CoolSwitch", w16_fast_switch);
+        break;
+    default:
+        return FALSE;
+    }
+    if (wrote && (winini & SPIF_SENDWININICHANGE)) SendMessage(HWND_BROADCAST, WM_WININICHANGE, 0, (LPARAM)section);
+    return TRUE;
+}
+
 BOOL SystemParametersInfo(UINT action, UINT param, void *pv, UINT winini)
 {
     switch (action) {
+    case SPI_SETBORDER:
+    case SPI_ICONHORIZONTALSPACING:
+    case SPI_GETSCREENSAVETIMEOUT:
+    case SPI_SETSCREENSAVETIMEOUT:
+    case SPI_GETSCREENSAVEACTIVE:
+    case SPI_SETSCREENSAVEACTIVE:
+    case SPI_GETGRIDGRANULARITY:
+    case SPI_SETGRIDGRANULARITY:
+    case SPI_SETDESKWALLPAPER:
+    case SPI_SETDESKPATTERN:
+    case SPI_GETICONTITLEWRAP:
+    case SPI_SETICONTITLEWRAP:
+    case SPI_GETFASTTASKSWITCH:
+    case SPI_SETFASTTASKSWITCH:
+        return spi_desktop(action, param, pv, winini);
     case SPI_GETBEEP:
         if (pv) *(BOOL *)pv = w16_beep;
         return TRUE;
@@ -263,9 +376,6 @@ BOOL SystemParametersInfo(UINT action, UINT param, void *pv, UINT winini)
     case SPI_SETMOUSEBUTTONSWAP:
         SwapMouseButton(param != 0);
         if (winini & SPIF_UPDATEINIFILE) WriteProfileString("windows", "SwapMouseButtons", param ? "yes" : "no");
-        return TRUE;
-    case SPI_ICONHORIZONTALSPACING:
-        if (pv) *(int *)pv = GetProfileInt("desktop", "IconSpacing", 75);
         return TRUE;
     case SPI_GETICONTITLELOGFONT: {
         /* WIN.INI [desktop] IconTitleFaceName / IconTitleSize / IconTitleStyle, 3.1 defaults */

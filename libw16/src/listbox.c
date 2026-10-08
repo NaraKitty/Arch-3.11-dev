@@ -819,6 +819,7 @@ LRESULT w16_combobox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     case CB_DELETESTRING: return SendMessage(c->list, LB_DELETESTRING, wp, lp);
     case CB_RESETCONTENT: SendMessage(c->list, LB_RESETCONTENT, 0, 0); if (!c->edit) { free(h->text); h->text = strdup(""); InvalidateRect(h, NULL, FALSE); } return 0;
     case CB_GETCOUNT: return SendMessage(c->list, LB_GETCOUNT, 0, 0);
+    case CB_DIR: return w16_dir_add(c->list, (UINT)wp, (LPCSTR)lp, 0);
     case CB_GETCURSEL: return SendMessage(c->list, LB_GETCURSEL, 0, 0);
     case CB_SETCURSEL: { LRESULT r = SendMessage(c->list, LB_SETCURSEL, wp, 0); cb_text_from_list(h); return r; }
     case CB_GETLBTEXT: return SendMessage(c->list, LB_GETTEXT, wp, lp);

@@ -11,6 +11,7 @@
 
 int w16_debug;
 int w16_border_width = 3;
+int w16_icon_spacing = 75, w16_icon_title_wrap = 1, w16_grid = 1, w16_fast_switch = 1, w16_screen_save;
 int w16_kbd_speed = 31, w16_kbd_delay = 2;
 UINT w16_dblclk_time = 500;
 int w16_swap_buttons;
@@ -382,9 +383,19 @@ void w16_sys_init(void)
     char b[64];
     const char *dbg = getenv("W16_DEBUG");
     w16_debug = dbg && *dbg && *dbg != '0';
+    /* USER's start (seg3:1290, 1E09-1E95, 20FC, 226C) */
     w16_border_width = GetProfileInt("windows", "BorderWidth", 3);
     if (w16_border_width < 1) w16_border_width = 1;
-    if (w16_border_width > 49) w16_border_width = 49;
+    if (w16_border_width > 50) w16_border_width = 50;
+    w16_fast_switch = GetProfileInt("windows", "CoolSwitch", 1);
+    w16_grid = (SHORT)(GetProfileInt("Desktop", "GridGranularity", 0) << 3);
+    if (!w16_grid) w16_grid = 1;
+    w16_icon_spacing = GetProfileInt("Desktop", "IconSpacing", 96 * 75 / 96);   /* LOGPIXELSX * 75 / 96 */
+    if ((UINT)32 > (UINT)w16_icon_spacing) w16_icon_spacing = 32;           /* SM_CXICON */
+    w16_icon_title_wrap = GetProfileInt("Desktop", "IconTitleWrap", 1);
+    w16_screen_save = GetProfileInt("windows", "ScreenSaveTimeOut", 0);
+    if (!GetProfileInt("windows", "ScreenSaveActive", 0) && w16_screen_save > 0) w16_screen_save = -w16_screen_save;
+    SetCaretBlinkTime(GetProfileInt("windows", "CursorBlinkRate", 500));   /* seg3:1182 */
     w16_kbd_speed = GetProfileInt("windows", "KeyboardSpeed", 31);
     w16_kbd_delay = GetProfileInt("windows", "KeyboardDelay", 2);
     if (w16_kbd_speed < 0 || w16_kbd_speed > 31) w16_kbd_speed = 31;

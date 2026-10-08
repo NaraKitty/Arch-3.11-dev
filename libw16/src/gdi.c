@@ -399,6 +399,11 @@ HBRUSH w16_sys_brush(int i)
 {
     static HBRUSH b[W16_NUM_SYSCOLORS];
     static COLORREF c[W16_NUM_SYSCOLORS];
+    /* the desktop pattern takes the place of COLOR_BACKGROUND's brush (USER seg41:090C) */
+    if (i == COLOR_BACKGROUND) {
+        HBRUSH p = w16_desktop_pattern_brush();
+        if (p) return p;
+    }
     if (!b[i] || c[i] != w16_syscolor[i]) {
         if (b[i]) { b[i]->stock = 0; DeleteObject(b[i]); }
         b[i] = CreateSolidBrush(w16_syscolor[i]);

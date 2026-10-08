@@ -1368,6 +1368,19 @@ static void paint_desktop(HDC dc)
     RestoreDC(dc, -1);
 }
 
+/* the desktop behind a window (USER seg1:5881, WM_ICONERASEBKGND): the wallpaper in screen
+ * coordinates, else the desktop brush */
+void w16_paint_desktop(HDC dc, const RECT *r)
+{
+    if (!wallpaper) {
+        FillRect(dc, r, w16_sys_brush(COLOR_BACKGROUND));
+        return;
+    }
+    DWORD org = SetViewportOrg(dc, -dc->ox, -dc->oy);
+    paint_desktop(dc);
+    SetViewportOrg(dc, (SHORT)LOWORD(org), (SHORT)HIWORD(org));
+}
+
 /* USER seg41:0D6E: a new border width grows or shrinks each sizable window around its client area
  * (a minimised one's restored rectangle), then everything is drawn again */
 static void border_resize(HWND h, int dx, int dy)
