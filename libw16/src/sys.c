@@ -288,21 +288,48 @@ static int ini_get(const char *path, LPCSTR app, LPCSTR key, LPSTR out, int cb, 
     return found;
 }
 
-/* KERNEL's WriteProfileString as measured on 3.11 (Desktop applet, WIN.INI [Desktop]): a key that is
- * there keeps its own spelling and only the value after its '=' changes ("Wallpaper=" stays when
- * MAIN.CPL writes "WallPaper"); a new key goes after the last line of its section that is not
- * blank; a new section goes at the end after an empty line. key NULL removes the section, val NULL
- * the key. */
-static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
+/* KERNEL seg1:6864: a string written to a profile ends at its first control character (0..0x0D)
+ * and loses its trailing blanks (3.1 even cuts the caller's buffer there): MAIN.CPL's keyboard
+ * layout "kbdgr.dll " is written as "kbdgr.dll" (measured) */
+static char *ini_cut(const char *s)
+{
+    size_t n = 0;
+    while ((unsigned char)s[n] > 0x0D) n++;
+    while (n && s[n - 1] == ' ') n--;
+    char *c = malloc(n + 1);
+    memcpy(c, s, n);
+    c[n] = 0;
+    return c;
+}
+
+/* "key=value" at `at` in out (a buffer with room), after a line break if the text before lacks one */
+static void ini_insert(char *out, size_t at, const char *key, const char *val)
+{
+    char line[2100];
+    int lead = at && out[at - 1] != '\n';
+    snprintf(line, sizeof line, "%s%s=%s\r\n", lead ? "\r\n" : "", key, val);
+    size_t n = strlen(line);
+    memmove(out + at + n, out + at, strlen(out + at) + 1);
+    memcpy(out + at, line, n);
+}
+
+/* KERNEL's WriteProfileString (seg1:6CEC), as measured on 3.11: a key that is there keeps its line up
+ * to the '=' - its own spelling too ("Wallpaper=" stays when MAIN.CPL writes "WallPaper", USER's
+ * "LANGUAGE.DLL" rewrote SYSTEM.INI's "language.dll=" line) - and only the value changes; a new key
+ * goes after the last line of its section that is not blank; a new section goes at the end after an
+ * empty line (at the top of an empty file without one: Clock's CLOCK.INI). key NULL removes the
+ * section, val NULL the key. */
+static int ini_set(const char *path, LPCSTR app0, LPCSTR key0, LPCSTR val0)
 {
     char *d = read_all(path);
     if (!d)
         d = strdup("");
+    char *app = ini_cut(app0), *key = key0 ? ini_cut(key0) : NULL, *val = val0 ? ini_cut(val0) : NULL;
     size_t cap = strlen(d) + strlen(app) + (key ? strlen(key) : 0) + (val ? strlen(val) : 0) + 64;
     char *out = malloc(cap);
     out[0] = 0;
     int in = 0, done = 0, sawsec = 0;
-    size_t after_last = 0;   /* in out: the end of the section's last line that is not blank */
+    size_t sec_end = 0;   /* where the section's last non-blank line (or its header) ends in out */
     char *p = d;
     while (*p) {
         char *nl = strchr(p, '\n');
@@ -314,11 +341,7 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
         trim(t);
         if (t[0] == '[') {
             if (in && !done && key && val) {
-                /* the new key after the section's last line */
-                char line[2048];
-                snprintf(line, sizeof line, "%s=%s\r\n", key, val);
-                memmove(out + after_last + strlen(line), out + after_last, strlen(out + after_last) + 1);
-                memcpy(out + after_last, line, strlen(line));
+                ini_insert(out, sec_end, key, val);
                 done = 1;
             }
             char *e = strchr(t, ']');
@@ -326,13 +349,6 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
             in = !done && !strcasecmp(t + 1, app);
             if (in) sawsec = 1;
             if (in && !key) { p += n; continue; } /* delete whole section */
-            if (in) {
-                strncat(out, p, n);
-                if (!nl) strcat(out, "\r\n");
-                after_last = strlen(out);
-                p += n;
-                continue;
-            }
         } else if (in) {
             if (!key) { p += n; continue; }
             char *eq = strchr(t, '=');
@@ -341,44 +357,34 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
                 trim(t);
                 if (!strcasecmp(t, key)) {
                     if (val && !done) {
-                        /* the line up to its '=' stays */
-                        size_t pre = (size_t)(strchr(p, '=') - p) + 1;
+                        /* the line up to its '=', the value, the line's own ending */
+                        size_t pre = strchr(p, '=') - p + 1, end = n;
+                        while (end > pre && (p[end - 1] == '\n' || p[end - 1] == '\r')) end--;
                         strncat(out, p, pre);
                         strcat(out, val);
-                        strcat(out, "\r\n");
-                        after_last = strlen(out);
+                        strncat(out, p + end, n - end);
+                        if (end == n) strcat(out, "\r\n");
+                        sec_end = strlen(out);
                     }
                     done = 1;
                     p += n;
                     continue;
                 }
             }
-            if (t[0]) {
-                strncat(out, p, n);
-                if (!nl) strcat(out, "\r\n");
-                after_last = strlen(out);
-                p += n;
-                continue;
-            }
         }
         strncat(out, p, n);
         p += n;
+        if (in && t[0]) sec_end = strlen(out);
     }
-    if (!done && key && val) {
-        if (!sawsec) {
-            /* a new section follows a blank line, except at the top of an empty file (real 3.11's
-             * Clock created CLOCK.INI as "[Clock]\r\nMaximized=0\r\n...") */
-            size_t L = strlen(out);
-            if (L && out[L - 1] != '\n') strcat(out, "\r\n");
-            strcat(out, L ? "\r\n[" : "["); strcat(out, app); strcat(out, "]\r\n");
-            strcat(out, key); strcat(out, "="); strcat(out, val); strcat(out, "\r\n");
-        } else {
-            /* the section ends the file */
-            char line[2048];
-            snprintf(line, sizeof line, "%s=%s\r\n", key, val);
-            memmove(out + after_last + strlen(line), out + after_last, strlen(out + after_last) + 1);
-            memcpy(out + after_last, line, strlen(line));
-        }
+    if (in && !done && key && val) {   /* the section is the file's last one */
+        ini_insert(out, sec_end, key, val);
+        done = 1;
+    }
+    if (!done && key && val && !sawsec) {
+        size_t L = strlen(out);
+        if (L && out[L - 1] != '\n') strcat(out, "\r\n");
+        strcat(out, L ? "\r\n[" : "["); strcat(out, app); strcat(out, "]\r\n");
+        strcat(out, key); strcat(out, "="); strcat(out, val); strcat(out, "\r\n");
     }
     FILE *f = fopen(path, "wb");
     if (f) {
@@ -387,6 +393,9 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
     }
     free(out);
     free(d);
+    free(app);
+    free(key);
+    free(val);
     return f != NULL;
 }
 

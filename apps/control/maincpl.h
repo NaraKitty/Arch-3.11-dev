@@ -41,6 +41,7 @@ int AdjustArrowWidth(HWND h);                      /* seg2:0000 */
 BOOL KeyboardDlgProc(HWND, UINT, WPARAM, LPARAM);  /* seg15:0000, dialog 5 */
 void MouseRun(HWND hwnd);                          /* seg3:097F, dialog 6 (seg16) */
 BOOL DateTimeDlgProc(HWND, UINT, WPARAM, LPARAM);  /* seg8:077C, dialog 7 */
+BOOL IntlDlgProc(HWND, UINT, WPARAM, LPARAM);      /* seg12:194D, dialog 3 */
 BOOL DesktopDlgProc(HWND, UINT, WPARAM, LPARAM);   /* seg18:1419, dialog 8 */
 BOOL RegisterArrowClass(HINSTANCE hInst);          /* seg2:060E, "cpArrow" */
 void ColorRun(HWND hwnd);                          /* seg3:0756, dialog 100 (seg6) modeless */

@@ -50,40 +50,43 @@ static HICON from_dib(const uint8_t *d, int cursor)
     return ic;
 }
 
+/* USER's choice of image from a group directory (GetIconId, seg12:052B). An icon (seg12:040C): the
+ * one at the icon size with the display's colour count (16 on VGA); else, at that size, the one with
+ * the most colours under it; else, at any size, the most colours not over it; else the first. The
+ * VGA driver's own icons need this: IDI_ASTERISK has an 8-colour image with a bright blue disc before
+ * the 16-colour one with the dark blue disc 3.11 shows. A cursor (seg12:04F7): the first of the
+ * cursor size, else the first. */
+static int pick_image(const uint8_t *d, int n, int cursor)
+{
+    if (cursor) {
+        for (int i = 0; i < n; i++) {
+            const uint8_t *e = d + 6 + i * 14;
+            if (u16(e) == GetSystemMetrics(SM_CXCURSOR) && u16(e + 2) / 2 == GetSystemMetrics(SM_CYCURSOR)) return i;
+        }
+        return 0;
+    }
+    int bits = GetDeviceCaps(NULL, BITSPIXEL) * GetDeviceCaps(NULL, PLANES);
+    int disp = bits >= 16 ? 32000 : 1 << bits;
+    int fewer = 0, ifewer = 0, any = 0, iany = 0;
+    for (int i = 0; i < n; i++) {
+        const uint8_t *e = d + 6 + i * 14;
+        int colors = e[2], w = e[0] ? e[0] : 256, h = e[1] ? e[1] : 256;
+        if (colors <= disp && any < colors) { any = colors; iany = i; }
+        if (w != GetSystemMetrics(SM_CXICON) || h != GetSystemMetrics(SM_CYICON)) continue;
+        if (colors == disp) return i;
+        if (colors < disp && fewer < colors) { fewer = colors; ifewer = i; }
+    }
+    return fewer ? ifewer : any ? iany : 0;
+}
+
 static HICON load_group(HINSTANCE m, LPCSTR name, int cursor)
 {
     const W16Res *g = w16_find_res(m, name, cursor ? RT_GROUP_CURSOR : RT_GROUP_ICON);
     if (!g) return NULL;
     const uint8_t *d = w16_res_data(m, g);
-    int n = u16(d + 4), best = -1, bestscore = -1;
-    if (!cursor) {
-        /* an icon: the image nearest the 32x32 icon size, then the one whose colour count is
-         * nearest the VGA display's 16 (VGA.DRV's OIC_NOTE has an 8-colour image in bright blue
-         * and a 16-colour one in dark blue; 3.11 shows the dark blue one) */
-        int bestd = 1 << 30, bestc = 1 << 30;
-        for (int i = 0; i < n; i++) {
-            const uint8_t *e = d + 6 + i * 14;
-            int w = e[0] ? e[0] : 256, h = e[1] ? e[1] : 256, dd = abs(32 - w) + abs(32 - h);
-            if (dd < bestd) bestd = dd;
-        }
-        for (int i = 0; i < n; i++) {
-            const uint8_t *e = d + 6 + i * 14;
-            int w = e[0] ? e[0] : 256, h = e[1] ? e[1] : 256, bpp = u16(e + 6);
-            if (abs(32 - w) + abs(32 - h) != bestd) continue;
-            int ncol = e[2] ? e[2] : (bpp && bpp < 8 ? 1 << bpp : 256);
-            if (abs(16 - ncol) < bestc) { bestc = abs(16 - ncol); best = u16(e + 12); }
-        }
-        n = 0;
-    }
-    for (int i = 0; i < n; i++) {
-        const uint8_t *e = d + 6 + i * 14;
-        int w, h, bpp, id = u16(e + 12);
-        w = u16(e); h = u16(e + 2) / 2; bpp = u16(e + 6);
-        /* VGA: prefer 32x32 at <=4 bpp, like the display driver's cursor selection */
-        int score = (w == 32 && h == 32 ? 100 : 0) + (bpp <= 4 ? bpp * 4 : 1);
-        if (score > bestscore) { bestscore = score; best = id; }
-    }
-    if (best < 0) return NULL;
+    int n = u16(d + 4);
+    if (n <= 0) return NULL;
+    int best = u16(d + 6 + pick_image(d, n, cursor) * 14 + 12);
     const W16Res *r = w16_find_res(m, MAKEINTRESOURCE(best), cursor ? RT_CURSOR : RT_ICON);
     if (!r) return NULL;
     HICON ic = from_dib(w16_res_data(m, r), cursor);

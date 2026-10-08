@@ -1,0 +1,12 @@
+# USER's MessageBox against real 3.11: COMMDLG's overwrite question (string 257 with the path, caption
+# 385, MB_YESNO | MB_ICONEXCLAMATION | MB_DEFBUTTON2: No is the default and has the focus) as
+# Notepad's File > Save As asks it for C:\WINDOWS\SETUP.TXT (arch311-ref/scn/cdlg-save.scn, second
+# box); Enter answers the default, No.
+# regress: sh tools/run-app-test.sh apps/build/mbox "$TEST" "$OUT" 0x134 COMMDLG.DLL:385 COMMDLG.DLL:257 'C:\WINDOWS\SETUP.TXT'
+# compare: cdlg-save/07.png 01-box.png active ignore 320 240 332 260
+# ini: MBOX.INI mbox result=7
+sleep 400
+shot shots/01-box.png
+key enter
+sleep 300
+quit

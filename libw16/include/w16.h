@@ -1372,6 +1372,15 @@ UINT _lread(HFILE f, void *buf, UINT n);
 UINT _lwrite(HFILE f, const void *buf, UINT n);
 LONG _llseek(HFILE f, LONG off, int origin);
 HFILE _lclose(HFILE f);
+/* LZEXPAND (uncompressed files only, see lzexpand.c) */
+#define LZERROR_BADINHANDLE (-1)
+#define LZERROR_BADOUTHANDLE (-2)
+#define LZERROR_READ (-3)
+#define LZERROR_WRITE (-4)
+HFILE LZOpenFile(LPCSTR name, OFSTRUCT *of, UINT style);
+LONG LZSeek(HFILE f, LONG off, int origin);
+int LZRead(HFILE f, void *buf, int cb);
+void LZClose(HFILE f);
 /* "C:\\FOO\\BAR.TXT" <-> "/home/user/FOO/BAR.TXT" (drive map in ~/.config/arch311/drives) */
 int w16_dos_to_host(LPCSTR dos, char *host, size_t cb);
 int w16_host_to_dos(const char *host, LPSTR dos, size_t cb);
@@ -1650,6 +1659,7 @@ HICON CreateIcon(HINSTANCE inst, int w, int h, BYTE planes, BYTE bpp, const void
 #define SPI_SETBORDER 0x0006
 #define SPI_GETKEYBOARDSPEED 0x000A
 #define SPI_SETKEYBOARDSPEED 0x000B
+#define SPI_SETLANGDRIVER 0x000C
 #define SPI_ICONHORIZONTALSPACING 0x000D
 #define SPI_GETSCREENSAVETIMEOUT 0x000E
 #define SPI_SETSCREENSAVETIMEOUT 0x000F

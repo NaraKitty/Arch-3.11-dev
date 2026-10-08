@@ -1,0 +1,42 @@
+# International > Number Format (dialog 17): a blank 1000 separator, 3 decimal digits, no leading
+# zero, OK, then OK in International (tab from Change... to OK) - WIN.INI [intl] is written, the
+# blank as " ". Same keys as arch311-ref/scn/intl-number.scn after opening. Run as intl.w16
+# (ARCH311_REF_INI=1, ARCH311_CLOCK="2026-10-08 09:30:24", applet International).
+# The first frame keeps the caret: 3.11's 1-px caret shows in its selected separator.
+# regress: ARCH311_REF_INI=1 ARCH311_CLOCK="2026-10-08 09:30:24" sh tools/run-cp-test.sh "$TEST" "$OUT" International
+# compare: intl-number/02.png 01-open.png active ignore 320 240 332 260
+# compare: intl-number/03.png 02-number.png active ignore 320 240 332 260
+# compare: intl-number/04.png 03-changed.png active ignore 320 240 332 260
+# compare: intl-number/05.png 04-sample.png active ignore 320 240 332 260
+# ini: WIN.INI intl sThousand=" "
+# ini: WIN.INI intl sDecimal=.
+# ini: WIN.INI intl iDigits=3
+# ini: WIN.INI intl iLzero=0
+sleep 900
+shot shots/01-open.png
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key enter
+sleep 600
+shotcaret shots/02-number.png
+key space
+key tab
+key tab
+type 3
+key tab
+key left
+sleep 300
+shot shots/03-changed.png
+key enter
+sleep 500
+shot shots/04-sample.png
+key tab
+key enter
+sleep 400
+quit
