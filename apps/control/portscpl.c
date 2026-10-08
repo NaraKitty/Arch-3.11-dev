@@ -53,19 +53,8 @@ static LPSTR StrStrOrEnd(LPSTR s, char c)
     return p ? p : s + lstrlen(s);
 }
 
-/* seg4:019E: leading and trailing blanks (spaces only) removed in place */
-static void StripBlanks(LPSTR s)
-{
-    LPSTR p = s;
-    while (*p == ' ') p++;
-    if (p != s) memmove(s, p, lstrlen(p) + 1);
-    p = s + lstrlen(s);
-    if (p != s) {
-        p--;
-        while (*p == ' ') p--;
-        p[1] = 0;
-    }
-}
+/* (seg4:019E, the blanks trimmer, is TrimSpaces in main_cpl.c) */
+#define StripBlanks TrimSpaces
 
 /* seg1:184F: unsigned decimal, stops at the first non-digit, 16-bit */
 static WORD StrToUInt(LPCSTR s)
@@ -75,17 +64,7 @@ static WORD StrToUInt(LPCSTR s)
     return n;
 }
 
-/* seg4:0210: decimal itoa (no sign) */
-static void IntToStr(int n, LPSTR buf)
-{
-    LPSTR p = buf;
-    do {
-        *p++ = (char)(n % 10 + '0');
-        n /= 10;
-    } while (n > 0);
-    *p = 0;
-    for (LPSTR a = buf, b = p - 1; a < b; a++, b--) { char t = *a; *a = *b; *b = t; }
-}
+/* (seg4:0210, the decimal itoa, is IntToStr in main_cpl.c) */
 
 /* ------------------------------------------------------------------ seg9:05A9 */
 /* "System Setting Change": lParam is the string id of the first sentence (1002 ports, 1001 TrueType) */

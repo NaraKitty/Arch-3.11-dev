@@ -144,7 +144,7 @@ BOOL CreateCaret(HWND h, HBITMAP bm, int w, int ht)
     caret.gray = bm == (HBITMAP)1;
     caret.h = h; caret.w = w ? w : GetSystemMetrics(SM_CXBORDER); caret.ht = ht ? ht : GetSystemMetrics(SM_CYBORDER);
     caret.hide = 1; caret.on = 0; caret.created = 1;
-    caret.blink = GetProfileInt("windows", "CursorBlinkRate", 530);
+    /* (the blink time is USER's, from WIN.INI at the start and SetCaretBlinkTime since) */
     return TRUE;
 }
 void DestroyCaret(void) { caret_off(); caret.h = NULL; caret.created = 0; }
@@ -455,7 +455,7 @@ static void mouse_event(UINT base)
         }
         hit = (int)SendMessage(h, WM_NCHITTEST, 0, MAKELPARAM(p.x, p.y));
         while (hit == HTTRANSPARENT && h->parent && h->parent != w16_desktop) {
-            h = h->parent;
+            h = w16_window_under(h, p);
             hit = (int)SendMessage(h, WM_NCHITTEST, 0, MAKELPARAM(p.x, p.y));
         }
     }
@@ -844,6 +844,28 @@ static int fetch(LPMSG out, HWND h, UINT first, UINT last, int remove, int *wait
     return 0;
 }
 
+/* the program ended with script lines left (the Control Panel closes after an applet opened by
+ * name): what its windows uncovered is painted and the remaining shots are taken of the screen it
+ * leaves (a wallpaper the applet set); input lines have nothing left to go to */
+void w16_script_finish(void)
+{
+    if (!script) return;
+    char line[512];
+    while (fgets(line, sizeof line, script)) {
+        char *c = line, cmd[32], arg[480] = "";
+        while (*c == ' ' || *c == '\t') c++;
+        c[strcspn(c, "\r\n")] = 0;
+        if (!*c || *c == '#' || sscanf(c, "%31s %479[^\n]", cmd, arg) < 1) continue;
+        if (strcmp(cmd, "shot") && strcmp(cmd, "shotcaret")) continue;
+        MSG m;
+        int wait = 0;
+        for (int i = 0; i < 1000 && fetch(&m, NULL, WM_PAINT, WM_PAINT, 1, &wait); i++) DispatchMessage(&m);
+        w16_screenshot(arg);
+    }
+    fclose(script);
+    script = NULL;
+}
+
 BOOL GetMessage(LPMSG m, HWND h, UINT first, UINT last)
 {
     for (;;) {
@@ -1009,7 +1031,7 @@ LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         HDC dc = (HDC)wp;
         RECT r;
         GetClientRect(h, &r);
-        FillRect(dc, &r, w16_sys_brush(COLOR_BACKGROUND));
+        w16_paint_desktop(dc, &r);
         return 1;
     }
     case WM_QUERYDRAGICON: return (LRESULT)h->cls->wc.hIcon;
