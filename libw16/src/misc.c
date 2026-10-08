@@ -4,19 +4,7 @@
 #include <unistd.h>
 
 /* ------------------------------------------------------------------ clipboard */
-static HWND clip_owner, clip_open;
-static HGLOBAL clip_text;
-
-BOOL OpenClipboard(HWND h) { if (clip_open) return FALSE; clip_open = h ? h : (HWND)1; return TRUE; }
-BOOL CloseClipboard(void) { clip_open = NULL; return TRUE; }
-BOOL EmptyClipboard(void)
-{
-    if (clip_text) GlobalFree(clip_text);
-    clip_text = NULL;
-    clip_owner = clip_open;
-    return TRUE;
-}
-
+/* the clipboard itself is USER's, in clipbrd.c */
 /* cp1252 <-> UTF-8 for the host clipboard */
 static const unsigned short cp1252_hi[32] = {
     0x20AC, 0x81, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x8D, 0x017D, 0x8F,
@@ -59,56 +47,6 @@ char *w16_utf8_to_ansi(const char *s)
     return o;
 }
 
-HANDLE SetClipboardData(UINT fmt, HANDLE data)
-{
-    if (fmt != CF_TEXT && fmt != CF_OEMTEXT) return data; /* other formats: kept by the app only (TODO T-CLIP-02) */
-    if (clip_text && clip_text != data) GlobalFree(clip_text);
-    clip_text = data;
-    if (data && SDL_WasInit(SDL_INIT_VIDEO)) {
-        char *s = GlobalLock(data);
-        char *u = w16_ansi_to_utf8(s ? s : "");
-        SDL_SetClipboardText(u);
-        free(u);
-        GlobalUnlock(data);
-    }
-    return data;
-}
-
-HANDLE GetClipboardData(UINT fmt)
-{
-    if (fmt != CF_TEXT && fmt != CF_OEMTEXT) return NULL;
-    if (SDL_WasInit(SDL_INIT_VIDEO) && SDL_HasClipboardText()) {
-        char *u = SDL_GetClipboardText();
-        char *a = w16_utf8_to_ansi(u ? u : "");
-        SDL_free(u);
-        /* the Linux clipboard uses LF; Windows text uses CRLF */
-        size_t n = 0;
-        for (char *p = a; *p; p++) n += (*p == '\n') ? 2 : 1;
-        HGLOBAL g = GlobalAlloc(GHND, n + 1);
-        char *d = GlobalLock(g);
-        for (char *p = a; *p; p++) {
-            if (*p == '\n' && (p == a || p[-1] != '\r')) *d++ = '\r';
-            *d++ = *p;
-        }
-        *d = 0;
-        GlobalUnlock(g);
-        free(a);
-        if (clip_text) GlobalFree(clip_text);
-        clip_text = g;
-    }
-    return clip_text;
-}
-
-BOOL IsClipboardFormatAvailable(UINT fmt)
-{
-    if (fmt != CF_TEXT && fmt != CF_OEMTEXT) return FALSE;
-    if (SDL_WasInit(SDL_INIT_VIDEO)) return SDL_HasClipboardText() || clip_text != NULL;
-    return clip_text != NULL;
-}
-UINT EnumClipboardFormats(UINT fmt) { return (fmt == 0 && IsClipboardFormatAvailable(CF_TEXT)) ? CF_TEXT : 0; }
-int CountClipboardFormats(void) { return IsClipboardFormatAvailable(CF_TEXT) ? 1 : 0; }
-HWND SetClipboardViewer(HWND h) { (void)h; return NULL; }
-BOOL ChangeClipboardChain(HWND h, HWND n) { (void)h; (void)n; return TRUE; }
 
 /* ------------------------------------------------------------------ external programs */
 static void spawn(const char *const argv[])

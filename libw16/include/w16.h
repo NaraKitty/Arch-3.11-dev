@@ -1156,6 +1156,56 @@ typedef struct {
 #define CF_OEMTEXT 7
 #define CF_DIB 8
 #define CF_PALETTE 9
+#define CF_PENDATA 10
+#define CF_RIFF 11
+#define CF_WAVE 12
+#define CF_OWNERDISPLAY 0x0080
+#define CF_DSPTEXT 0x0081
+#define CF_DSPBITMAP 0x0082
+#define CF_DSPMETAFILEPICT 0x0083
+#define CF_PRIVATEFIRST 0x0200
+#define CF_PRIVATELAST 0x02FF
+#define CF_GDIOBJFIRST 0x0300
+#define CF_GDIOBJLAST 0x03FF
+#define WM_VSCROLLCLIPBOARD 0x030A
+#define WM_SIZECLIPBOARD 0x030B
+#define WM_ASKCBFORMATNAME 0x030C
+#define WM_HSCROLLCLIPBOARD 0x030E
+UINT RegisterClipboardFormat(LPCSTR name);
+int GetClipboardFormatName(UINT fmt, LPSTR buf, int cb);
+HWND GetClipboardOwner(void);
+HWND GetClipboardViewer(void);
+HWND GetOpenClipboardWindow(void);
+int GetPriorityClipboardFormat(UINT *list, int n);
+
+/* metafiles: in 3.1 a memory metafile's handle is the global handle of its bits */
+typedef HGLOBAL HMETAFILE;
+typedef struct { short mm, xExt, yExt; HMETAFILE hMF; } METAFILEPICT;
+typedef METAFILEPICT *LPMETAFILEPICT;
+HMETAFILE SetMetaFileBits(HGLOBAL h);
+HGLOBAL GetMetaFileBits(HMETAFILE h);
+BOOL DeleteMetaFile(HMETAFILE h);
+BOOL IsValidMetaFile(HMETAFILE h);
+BOOL PlayMetaFile(HDC dc, HMETAFILE h);
+
+/* palettes */
+typedef struct { BYTE peRed, peGreen, peBlue, peFlags; } PALETTEENTRY;
+typedef struct { WORD palVersion, palNumEntries; PALETTEENTRY palPalEntry[1]; } LOGPALETTE;
+HPALETTE CreatePalette(const LOGPALETTE *lp);
+UINT GetPaletteEntries(HPALETTE p, UINT start, UINT n, PALETTEENTRY *out);
+HPALETTE SelectPalette(HDC dc, HPALETTE p, BOOL bkgnd);
+UINT RealizePalette(HDC dc);
+int UpdateColors(HDC dc);
+
+/* tasks: one per program */
+typedef void *HTASK;
+HTASK GetCurrentTask(void);
+BOOL InitAtomTable(int n);
+
+/* bitmap bits */
+HBITMAP CreateBitmapIndirect(const BITMAP *bm);
+LONG GetBitmapBits(HBITMAP b, LONG cb, void *out);
+LONG SetBitmapBits(HBITMAP b, DWORD cb, const void *in);
 
 /* memory */
 #define GMEM_FIXED 0x0000
