@@ -158,10 +158,19 @@ static void raise_w(HWND h)
 }
 
 /* ------------------------------------------------------------------ visible regions */
+/* USER's IsVisible (internal): the children of a minimised window are not shown - an MDI child's icon
+ * shows its class icon, not its edit window (measured: SysEdit's children minimised on real 3.11) */
+static int in_icon(HWND h)
+{
+    for (HWND p = h->parent; p && p != w16_desktop; p = p->parent)
+        if (p->style & WS_MINIMIZE) return 1;
+    return 0;
+}
+
 void w16_calc_visrgn(HWND h, int window, int clipchildren, Region *out)
 {
     rgn_clear(out);
-    if (!w16_window_visible(h)) return;
+    if (!w16_window_visible(h) || in_icon(h)) return;
     rgn_set(out, window ? &h->rw : &h->rc);
     rgn_and(out, &(RECT){0, 0, w16_screen.w, w16_screen.h});
     for (HWND p = h->parent; p && p != w16_desktop; p = p->parent) rgn_and(out, &p->rc);
@@ -179,7 +188,7 @@ void w16_calc_visrgn(HWND h, int window, int clipchildren, Region *out)
 /* ------------------------------------------------------------------ invalidation */
 void w16_invalidate_window(HWND h, const RECT *sr, int erase, int nc)
 {
-    if (!w16_valid(h) || !w16_window_visible(h) || h->redraw_off) return;
+    if (!w16_valid(h) || !w16_window_visible(h) || h->redraw_off || in_icon(h)) return;
     RECT r = sr ? *sr : h->rw, t;
     if (!IntersectRect(&t, &r, &h->rw)) return;
     /* parts outside the client area need WM_NCPAINT */
@@ -261,6 +270,7 @@ static HWND find_paint(HWND h)
     for (HWND c = h; c; c = c->next) {
         if (!(c->style & WS_VISIBLE)) continue;
         if (needs_paint(c)) return c;
+        if (c->style & WS_MINIMIZE) continue; /* its children are not shown */
         HWND k = find_paint(c->child);
         if (k) return k;
     }
@@ -293,7 +303,8 @@ void w16_send_paint_cascade(HWND h)
         }
         if (w16_valid(h) && needs_paint(h) && rgn_empty(&h->upd)) h->need_ncpaint = 0;
     }
-    for (HWND c = h->child; c; c = c->next) w16_send_paint_cascade(c);
+    if (w16_valid(h) && !(h->style & WS_MINIMIZE))
+        for (HWND c = h->child; c; c = c->next) w16_send_paint_cascade(c);
 }
 
 BOOL UpdateWindow(HWND h)

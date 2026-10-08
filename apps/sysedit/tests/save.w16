@@ -1,0 +1,16 @@
+# SysEdit: after File > Save the caret is back at the start of the file (SaveFile hands the edit its
+# buffer again with EM_SETHANDLE): an x typed after saving lands before "rem arch311"
+# reference: scn/mdi-save.scn (frame 02)
+# regress: sh apps/sysedit/tests/sysedit.sh "$TEST" "$OUT" mdi-save
+# compare: mdi-save/02.png 02.png active ignore 316 228 333 261
+sleep 500
+type rem arch311
+key enter
+key alt
+key f
+key s
+sleep 300
+key x
+sleep 300
+shotcaret shots/02.png
+quit

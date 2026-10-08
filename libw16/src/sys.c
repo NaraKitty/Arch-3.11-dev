@@ -165,6 +165,7 @@ const char *w16_config_dir(void)
     return d;
 }
 
+static int ini_no_seed; /* set while the target of a rename is mapped (profile_host) */
 static void ini_path(LPCSTR file, char *out, size_t cb)
 {
     const char *base = file;
@@ -185,7 +186,7 @@ static void ini_path(LPCSTR file, char *out, size_t cb)
         *c = toupper((unsigned char)*c);
     snprintf(out, cb, "%s/%s", w16_config_dir(), up);
     /* first use of WIN.INI / SYSTEM.INI: seed from the user's setup templates */
-    if (access(out, F_OK) != 0 && (!strcmp(up, "WIN.INI") || !strcmp(up, "SYSTEM.INI") ||
+    if (!ini_no_seed && access(out, F_OK) != 0 && (!strcmp(up, "WIN.INI") || !strcmp(up, "SYSTEM.INI") ||
                                    !strcmp(up, "CONTROL.INI"))) {
         char src[1200];
         const char *tmpl = !strcmp(up, "WIN.INI") ? "WIN.SRC" : !strcmp(up, "SYSTEM.INI") ? "SYSTEM.SRC" : "CONTROL.SRC";
@@ -911,8 +912,10 @@ static void dos_resolve(LPCSTR in, char *out, size_t cb)
 /* 3.1 keeps the profiles in the Windows directory: <windir>\NAME.INI is the file Get/Write(Private)-
  * ProfileString use (in the config directory here), so programs that read or rewrite WIN.INI and
  * SYSTEM.INI as files (DRIVERS.CPL adds [386Enh] device= lines that way) see the same data. Only
- * profiles that exist (WIN, SYSTEM and CONTROL.INI are seeded on first use) */
-static int profile_host(const char *full, char *host, size_t cb)
+ * profiles that exist (WIN, SYSTEM and CONTROL.INI are seeded on first use, unless seed is 0: the
+ * target of a rename) - 1; 2 when the name is a profile's that does not exist (its settings path in
+ * host: a new profile is created among the settings when the drive has no such file either) */
+static int profile_host(const char *full, char *host, size_t cb, int seed)
 {
     char win[260], path[1200];
     GetWindowsDirectory(win, sizeof win);
@@ -921,18 +924,20 @@ static int profile_host(const char *full, char *host, size_t cb)
     if (strncasecmp(full, win, n) || full[n] != '\\' || strchr(name, '\\') || (l = strlen(name)) < 5 ||
         strcasecmp(name + l - 4, ".INI"))
         return 0;
+    ini_no_seed = !seed;
     ini_path(name, path, sizeof path);
-    if (access(path, F_OK)) return 0;
+    ini_no_seed = 0;
     snprintf(host, cb, "%s", path);
-    return 1;
+    return access(path, F_OK) ? 2 : 1;
 }
 
-int w16_dos_to_host(LPCSTR dos, char *host, size_t cb)
+static int dos_to_host(LPCSTR dos, char *host, size_t cb, int seed)
 {
     load_drives();
-    char full[520];
+    char full[520], ini[1200];
     dos_resolve(dos, full, sizeof full);
-    if (profile_host(full, host, cb)) return 0;
+    int prof = profile_host(full, ini, sizeof ini, seed);
+    if (prof == 1) { snprintf(host, cb, "%s", ini); return 0; }
     char drv = full[0];
     const char *root = NULL, *rest = full + 2;
     for (int i = 0; i < ndrives; i++)
@@ -958,9 +963,12 @@ int w16_dos_to_host(LPCSTR dos, char *host, size_t cb)
     for (char *r = tmp; *r; r++) if (!(r[0] == '/' && r[1] == '/')) *w++ = *r;
     *w = 0;
     ci_resolve(tmp);
-    snprintf(host, cb, "%s", tmp);
+    if (prof == 2 && access(tmp, F_OK)) snprintf(host, cb, "%s", ini); /* a new profile: in the settings */
+    else snprintf(host, cb, "%s", tmp);
     return 0;
 }
+
+int w16_dos_to_host(LPCSTR dos, char *host, size_t cb) { return dos_to_host(dos, host, cb, 1); }
 
 int w16_host_to_dos(const char *host, LPSTR dos, size_t cb)
 {
@@ -1242,7 +1250,8 @@ int w16_dos_rename(LPCSTR from, LPCSTR to)
 {
     char a[2048], b[2048];
     struct stat st;
-    if (w16_dos_to_host(from, a, sizeof a) || w16_dos_to_host(to, b, sizeof b)) return 3;
+    /* the target is not seeded: SysEdit renames WIN.INI away and its new copy into its place */
+    if (w16_dos_to_host(from, a, sizeof a) || dos_to_host(to, b, sizeof b, 0)) return 3;
     if (stat(a, &st)) return missing_error(a);
     if (access(b, F_OK) == 0) return 5;                /* DOS does not replace an existing file */
     if (rename(a, b) == 0) return 0;
