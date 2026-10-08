@@ -4,6 +4,8 @@
 # message 208; 1 and OK. WIN.INI after: ScreenSaveTimeOut=240, IconSpacing=74, GridGranularity=1,
 # BorderWidth=1. UNTESTED against real 3.11 (no mouse in the rig); the arrow positions are the port's.
 # Run: ARCH311_REF=<rig> ARCH311_REF_INI=1 tools/run-cp-test.sh apps/control/tests/desktop-arrows.w16 OUT Desktop
+# No reference frames or INI values (see above): regress only checks that the run ends normally.
+# regress: ARCH311_REF_INI=1 sh tools/run-cp-test.sh "$TEST" "$OUT" Desktop
 sleep 600
 shot shots/01-desktop.png
 click 169 216

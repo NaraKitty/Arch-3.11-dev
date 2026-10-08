@@ -1,6 +1,13 @@
 # Desktop (MAIN.CPL dialog 8) just opened, then Cancel. Same keys as arch311-ref/scn/desktop-open.scn
 # (which first walks the real Control Panel's icons to Desktop).
 # Run: ARCH311_REF=<rig> ARCH311_REF_INI=1 tools/run-cp-test.sh apps/control/tests/desktop.w16 OUT Desktop
+# The rig's mouse pointer sits at 320,240 and the cursor blink sample (340,336) blinks on its own
+# timer, so both are left out; after the applet closes the port's Control Panel closes too (real
+# 3.11's stays, 0,0-430,240), so only the desktop around it is compared.
+# regress: ARCH311_REF_INI=1 sh tools/run-cp-test.sh "$TEST" "$OUT" Desktop
+# compare: desk-open/02.png 01-desktop.png active ignore 320 240 332 260 ignore 338 334 350 354
+# compare: desk-open/03.png 02-closed.png 0 240 640 480 ignore 320 240 332 260
+# compare: desk-open/03.png 02-closed.png 430 0 640 240
 sleep 600
 shotcaret shots/01-desktop.png
 key esc

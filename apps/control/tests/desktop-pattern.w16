@@ -1,6 +1,21 @@
 # Desktop: pattern Boxes, wallpaper winlogo.bmp (tab lands on the checked Tile), OK: the desktop shows
 # the tiled wallpaper. Same keys as arch311-ref/scn/desktop-pattern.scn.
 # Run: ARCH311_REF=<rig> ARCH311_REF_INI=1 tools/run-cp-test.sh apps/control/tests/desktop-pattern.w16 OUT Desktop
+# The rig caught no frame between the opened dialog and the wallpaper field (so 02-boxes has none);
+# pointer and blink sample left out, and after OK only the desktop around the Control Panel.
+# regress: ARCH311_REF_INI=1 sh tools/run-cp-test.sh "$TEST" "$OUT" Desktop
+# compare: desk-pattern/02.png 01-desktop.png active ignore 320 240 332 260 ignore 338 334 350 354
+# compare: desk-pattern/03.png 03-wallpaper.png active ignore 320 240 332 260 ignore 338 334 350 354
+# compare: desk-pattern/04.png 04-winlogo.png active ignore 320 240 332 260 ignore 338 334 350 354
+# compare: desk-pattern/05.png 05-tile.png active ignore 320 240 332 260 ignore 338 334 350 354
+# compare: desk-pattern/06.png 06-ok.png 0 240 640 480 ignore 320 240 332 260
+# compare: desk-pattern/06.png 06-ok.png 430 0 640 240
+# ini: WIN.INI windows CoolSwitch=1
+# ini: WIN.INI Desktop Pattern=127 65 65 65 65 65 127 0
+# ini: WIN.INI Desktop Wallpaper=winlogo.bmp
+# ini: WIN.INI Desktop IconSpacing=75
+# ini: WIN.INI Desktop TileWallPaper=1
+# ini: SYSTEM.INI boot SCRNSAVE.EXE=(None)
 sleep 600
 shot shots/01-desktop.png
 key down

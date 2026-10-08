@@ -3,6 +3,17 @@
 # focused "Edit Pattern..." again, as on 3.11 (CONTROL.INI [Patterns] Mine=).
 # Same keys as arch311-ref/scn/desktop-editpat.scn.
 # Run: ARCH311_REF=<rig> ARCH311_REF_INI=1 tools/run-cp-test.sh apps/control/tests/desktop-editpat.w16 OUT Desktop
+# The rig caught no frame with OK focused (06-okfocus).
+# regress: ARCH311_REF_INI=1 sh tools/run-cp-test.sh "$TEST" "$OUT" Desktop
+# compare: desk-editpat/02.png 01-desktop.png active ignore 320 240 332 260 ignore 338 334 350 354
+# compare: desk-editpat/03.png 02-editbutton.png active ignore 320 240 332 260 ignore 338 334 350 354
+# compare: desk-editpat/04.png 03-editpattern.png active ignore 320 240 332 260
+# compare: desk-editpat/05.png 04-critters.png active ignore 320 240 332 260
+# compare: desk-editpat/06.png 05-mine.png active ignore 320 240 332 260
+# compare: desk-editpat/07.png 07-added.png active ignore 320 240 332 260
+# compare: desk-editpat/08.png 08-back.png active ignore 320 240 332 260 ignore 338 334 350 354
+# compare: desk-editpat/09.png 09-again.png active ignore 320 240 332 260
+# ini: CONTROL.INI Patterns Mine=0 80 114 32 0 5 39 2
 sleep 600
 shot shots/01-desktop.png
 key down
