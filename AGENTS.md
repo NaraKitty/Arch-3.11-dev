@@ -635,3 +635,42 @@ SetSysModalWindow), the International Help buttons, error box 808 and the valida
 MB_DEFBUTTON2 (real COMMDLG: No is the default, cdlg-save/07) - for the COMMDLG port. Rig: the recorder
 (WinCap) sometimes hangs - run captures one per call in the foreground; Git Bash's grep hides CRs,
 check line endings in WSL.
+
+### Session 11 (Oct 8, MDI worktree) - USER's MDI (seg15/seg20) in libw16; SYSEDIT.EXE port
+libw16/src/mdi.c ports USER's MDI: the "MDIClient" class (system class, 16 extra bytes,
+COLOR_APPWORKSPACE), every WM_MDI* message (CREATE, DESTROY, ACTIVATE, NEXT, MAXIMIZE, RESTORE,
+TILE, CASCADE, ICONARRANGE, GETACTIVE, SETMENU), DefFrameProc, DefMDIChildProc, TranslateMDISysAccel
+(Ctrl+F4, Ctrl+F6, Alt+-), ArrangeIconicWindows / CascadeChildWindows / TileChildWindows,
+CalcChildScroll / ScrollChildren, the Window menu list (separator, up to 9 children, "&More
+Windows..." with USER's dialog 9), the frame title "Frame - [Child]" while a child is maximised, and
+a maximised child's system menu (bar bitmap 1) and restore button (bitmap 2, MF_HELP) in the frame's
+menu bar. 16-bit packing that 64-bit pointers change is documented in w16.h's MDI section
+(WM_MDIACTIVATE lParam = two w16_hwnd16 handles, WM_MDIGETACTIVE's maximised flag through
+*(BOOL *)lParam, WM_MDISETMENU through W16MDISETMENU, WM_NEXTMENU through MDINEXTMENU).
+Child windows: MinMaximize (seg6:1A72) for WS_CHILD (w16_min_maximize: CHECKPOINT in parent client
+coordinates, USER's icon slots seg4:0000, #32772 icon title windows for child icons, WM_QUERYOPEN,
+SW_MINIMIZE below the last same-owner sibling), ShowWindow for children never activates or reorders,
+SetWindowPos without SWP_NOACTIVATE sends a child WM_CHILDACTIVATE, CreateWindow's child order
+(MinMaximize, WM_PARENTNOTIFY, show: seg8:0843-089B), DeferWindowPos (applied in order), WM_PARENTNOTIFY
+for button-downs, child captions follow WM_NCACTIVATE (w16_caption_active) and show min/max boxes,
+SC_KEYMENU / WM_SYSCHAR / WM_MENUCHAR as USER (Alt then '-' reaches the active child's system menu
+through DefFrameProc), the children of a minimised window are not shown (IsVisible), a window sent
+down the z-order lets the siblings now above it repaint. Icons of another size are shrunk to 32 x 32
+(BLACKONWHITE; SYSEDIT's child icon is 64 x 64 mono). Multi-line EM_SETHANDLE sends no EN_CHANGE.
+KERNEL: GetTempFileName (seg3:056A), w16_dos_rename / w16_dos_getattr; C:\WINDOWS\*.INI that exists
+nowhere is created among the settings and a rename target is not seeded (SysEdit saves WIN.INI by
+renaming).
+apps/sysedit: SYSEDIT.EXE (resources from the ripped EXE at run time): the four files, editing,
+Save with .SYD backups and a temporary file, Search, the (unreachable) Open dialog, Print (UNTESTED).
+Verified against real 3.11 (new captures mdi-tile/next/min/max/edit/save, scenario files in
+arch311-ref/scn): apps/sysedit/tests open, tile, next, min, max, edit, save, keys - every frame 0 px
+apart outside the mouse pointer; edit.w16 and save.w16 also compare the files left on C: (AUTOEXEC.BAT,
+AUTOEXEC.SYD, WIN.INI, WIN.SYD) byte for byte with what 3.11 wrote.
+UNTESTED against 3.11: everything by mouse (caption clicks, icon dragging, WM_PARENTNOTIFY), More
+Windows (SysEdit has 4 children), the visible effect of CalcChildScroll/ScrollChildren (libw16 has no
+keyboard Move/Size), the desktop variants of Tile/Cascade (seg15:07C6, not ported), WM_NEXTMENU (answered
+by DefFrameProc and DefMDIChildProc, but libw16's menu loop never sends it yet: Left/Right between the frame
+menu and the child system menu), WM_MENUCHAR's HIWORD(lParam) menu handle (0 here). New files on C:
+get lower-case Linux names (ci_resolve), so a saved C:\AUTOEXEC.BAT becomes autoexec.bat (TODO:
+keep the case of a file a rename replaces?). For Program Manager / File Manager: create the client
+with CLIENTCREATESTRUCT and pass WM_COMMAND / WM_SIZE / WM_MENUCHAR on to DefFrameProc as 3.1 does.
