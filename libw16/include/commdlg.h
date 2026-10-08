@@ -173,6 +173,17 @@ BOOL GetSaveFileName(OPENFILENAME *ofn);
 HWND FindText(FINDREPLACE *fr);
 HWND ReplaceText(FINDREPLACE *fr);
 BOOL PrintDlg(PRINTDLG *pd);
+/* arch311: the port a CUPS device URI is shown on wherever 3.1 shows ports (Print Setup, the
+ * Printers applet): parallel:/dev/lpN is LPT(N+1):, serial:/dev/ttySN COM(N+1): as on a PC, any other
+ * URI its scheme upper-cased with a colon (USB:, IPP:, SOCKET:, SMB:, FILE:); one without a scheme
+ * is WIN.INI's NullPort ("None") */
+void w16_printer_port(LPCSTR uri, LPSTR port, int cb);
+/* arch311: where Print and Print Setup take the printers from. By default libw16 asks CUPS itself
+ * (lpstat); a program with its own CUPS layer (the Control Panel, whose ARCH311_SIMULATE sample
+ * queues the dialog must show as well) sets fn, which fills up to max name/port pairs, returns how
+ * many and sets *def to the default printer's index (-1: none). NULL restores the default. */
+typedef int (*W16PRINTERENUMPROC)(char (*name)[64], char (*port)[64], int max, int *def);
+void w16_set_printer_enum(W16PRINTERENUMPROC fn);
 DWORD CommDlgExtendedError(void);
 int GetFileTitle(LPCSTR file, LPSTR title, UINT cb);
 

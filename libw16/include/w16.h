@@ -1249,6 +1249,17 @@ void *LocalLock(HLOCAL h);
 BOOL LocalUnlock(HLOCAL h);
 HLOCAL LocalFree(HLOCAL h);
 UINT LocalSize(HLOCAL h);
+/* KERNEL atoms (the local table) and USER's global atom table: counted strings, compared without
+ * case; "#nnn" and MAKEINTATOM(n) are integer atoms (n < 0xC000) */
+#define MAKEINTATOM(i) ((LPCSTR)(uintptr_t)(WORD)(i))
+ATOM AddAtom(LPCSTR name);
+ATOM DeleteAtom(ATOM atom);
+ATOM FindAtom(LPCSTR name);
+UINT GetAtomName(ATOM atom, LPSTR buf, int cb);
+ATOM GlobalAddAtom(LPCSTR name);
+ATOM GlobalDeleteAtom(ATOM atom);
+ATOM GlobalFindAtom(LPCSTR name);
+UINT GlobalGetAtomName(ATOM atom, LPSTR buf, int cb);
 int lstrlen(LPCSTR s);
 LPSTR lstrcpy(LPSTR d, LPCSTR s);
 LPSTR lstrcat(LPSTR d, LPCSTR s);
@@ -1520,6 +1531,7 @@ BOOL GetWindowPlacement(HWND h, WINDOWPLACEMENT *wp);
 typedef struct W16DlgTemplate W16DlgTemplate;
 W16DlgTemplate *w16_dlgt_new(DWORD style, int x, int y, int cx, int cy, LPCSTR caption, int pt, LPCSTR face);
 void w16_dlgt_add(W16DlgTemplate *t, LPCSTR cls, LPCSTR text, int id, DWORD style, int x, int y, int cx, int cy);
+void w16_dlgt_item(W16DlgTemplate *t, int cls, const char *text, int len, int id, DWORD style, int x, int y, int cx, int cy);
 const void *w16_dlgt_data(W16DlgTemplate *t);
 void w16_dlgt_free(W16DlgTemplate *t);
 BOOL DestroyIcon(HICON i);

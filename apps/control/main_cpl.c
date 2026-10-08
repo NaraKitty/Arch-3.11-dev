@@ -37,7 +37,7 @@ static Applet applets[] = {
     {30, 54, 606, 6, TRUE, 5006, TRUE},    /* Mouse */
     {32, 56, 608, 8, TRUE, 5008, FALSE},   /* Desktop */
     {29, 53, 605, 5, TRUE, 5005, TRUE},    /* Keyboard */
-    {25, 49, 601, 1, TRUE, 5001, FALSE},   /* Printers */
+    {25, 49, 601, 1, TRUE, 5001, TRUE},    /* Printers */
     {27, 51, 603, 3, TRUE, 5003, FALSE},   /* International */
     {31, 55, 607, 7, TRUE, 5007, TRUE},    /* Date/Time */
     {34, 58, 610, 10, TRUE, 5010, TRUE},   /* Network */
@@ -116,12 +116,14 @@ int DoDialogBoxParam(int id, HWND hwnd, DLGPROC proc, DWORD dwHelp, LPARAM lPara
 
 /* ------------------------------------------------------------------ seg3:0733: run applet <id>
  * Not ported yet: 0 Color = CreateDialog 100 with seg6:0DC8, then the modal loop seg3:06AE;
- * 1 Printers = dialog 1, seg20:1302 (activates the open one, [0x16], instead when there is one);
  * 2 Fonts = dialog 2, seg9:0CBC; 3 International = dialog 3, seg12:194D; 8 Desktop = dialog 8,
  * seg18:1419. */
 static void RunApplet(HWND hwnd, int id)
 {
     switch (id) {
+    case 1:
+        PrintersRun(hwnd);
+        break;
     case 4:
         DialogBox(hInstMain, MAKEINTRESOURCE(4), hwnd, PortsDlgProc);
         break;

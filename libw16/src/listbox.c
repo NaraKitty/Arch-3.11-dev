@@ -19,6 +19,8 @@ typedef struct {
     int redraw_off;
     int want_h;       /* height asked for inside the border; whole items of it are shown */
     int fitting;      /* fit_height is resizing the window */
+    int fit_h;        /* the client height fit_height gave it last */
+    int vbar;         /* created with WS_VSCROLL: the bar comes back when the items do not fit */
 } Lb;
 
 static Lb *lbd(HWND h) { return (Lb *)h->ctl; }
@@ -44,10 +46,8 @@ static void lb_notify(HWND h, int code)
 static void update_sb(HWND h)
 {
     Lb *l = lbd(h);
-    if (!(h->style & WS_VSCROLL)) {
-        if (!(h->style & LBS_DISABLENOSCROLL) && l->n > visible_items(h) && (h->style & 0x00200000)) {}
-        return;
-    }
+    /* the style bit goes while SetScrollRange hides the bar; USER's list remembers it had one */
+    if (!l->vbar) return;
     int vis = visible_items(h);
     int mx = max(0, l->n - vis);
     if (mx == 0 && !(h->style & LBS_DISABLENOSCROLL)) {
@@ -205,6 +205,7 @@ static void fit_height(HWND h)
     RECT r;
     GetClientRect(h, &r);
     int want = l->want_h / l->ih * l->ih;
+    if (want > 0) l->fit_h = want;
     if (want <= 0 || want == r.bottom) return;
     RECT pr = h->parent && h->parent != w16_desktop ? h->parent->rc : (RECT){0, 0, 0, 0};
     l->fitting = 1;
@@ -221,6 +222,7 @@ LRESULT w16_listbox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         l = calloc(1, sizeof *l);
         h->ctl = l;
         l->cursel = -1;
+        l->vbar = (h->style & WS_VSCROLL) != 0;
         HDC dc = GetDC(NULL);
         SelectObject(dc, GetStockObject(SYSTEM_FONT));
         TEXTMETRIC tm;
@@ -290,11 +292,16 @@ LRESULT w16_listbox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     case WM_GETFONT: return (LRESULT)h->font;
     case WM_SIZE:
         if (!l->fitting) {
-            /* resized from outside: that height is the one to fit */
+            /* resized from outside: that height is the one to fit. CreateWindow's own WM_SIZE (and
+             * the one a hidden window gets when shown) only reports the last fit, which was made
+             * for the system font: the height asked for stays (3.11: MAIN.CPL Printers' lists of
+             * 72 and 111 px show 5 and 8 items of 13 px, not 4 and 7) */
             RECT r;
             GetClientRect(h, &r);
-            l->want_h = r.bottom;
-            fit_height(h);
+            if (r.bottom != l->fit_h) {
+                l->want_h = r.bottom;
+                fit_height(h);
+            }
         }
         update_sb(h);
         return 0;

@@ -707,11 +707,47 @@ HWND ReplaceText(FINDREPLACE *fr) { return find_dialog(fr, DLG_REPLACE); }
 typedef struct { char name[64], port[64]; } Printer;
 static Printer printers[32];
 static int nprinters, def_printer = -1;
+static W16PRINTERENUMPROC printer_enum;
+
+void w16_set_printer_enum(W16PRINTERENUMPROC fn) { printer_enum = fn; }
+
+void w16_printer_port(LPCSTR uri, LPSTR port, int cb)
+{
+    const char *dev = NULL, *pre = NULL;
+    if (!strncmp(uri, "parallel:/dev/lp", 16)) { dev = uri + 16; pre = "LPT"; }
+    else if (!strncmp(uri, "serial:/dev/ttyS", 16)) { dev = uri + 16; pre = "COM"; }
+    if (dev && *dev >= '0' && *dev <= '9') {
+        int n = 0;
+        const char *d = dev;
+        while (*d >= '0' && *d <= '9' && n < 1000) n = n * 10 + (*d++ - '0');
+        if (!*d || *d == '?') { snprintf(port, cb, "%s%d:", pre, n + 1); return; }
+    }
+    size_t k = 0;
+    if (isalpha((unsigned char)uri[0]))
+        while (isalnum((unsigned char)uri[k]) || uri[k] == '+' || uri[k] == '-' || uri[k] == '.') k++;
+    if (k && uri[k] == ':') {
+        snprintf(port, cb, "%.*s:", (int)k, uri);
+        AnsiUpper(port);
+    } else
+        GetProfileString("windows", "NullPort", "None", port, cb);
+}
 
 static void enum_printers(void)
 {
     nprinters = 0;
     def_printer = -1;
+    if (printer_enum) {
+        char name[32][64], port[32][64];
+        nprinters = printer_enum(name, port, 32, &def_printer);
+        if (nprinters < 0) nprinters = 0;
+        for (int i = 0; i < nprinters; i++) {
+            snprintf(printers[i].name, sizeof printers[i].name, "%s", name[i]);
+            snprintf(printers[i].port, sizeof printers[i].port, "%s", port[i]);
+        }
+        if (def_printer >= nprinters) def_printer = -1;
+        if (def_printer < 0 && nprinters) def_printer = 0;
+        return;
+    }
     char def[64] = "", line[300];
     FILE *p = popen("lpstat -d 2>/dev/null", "r");
     if (p) {
@@ -727,9 +763,7 @@ static void enum_printers(void)
         if (sscanf(line, "device for %63[^:]: %199s", name, uri) != 2) continue;
         Printer *pr = &printers[nprinters];
         snprintf(pr->name, sizeof pr->name, "%s", name);
-        char *s = strstr(uri, "://");
-        snprintf(pr->port, sizeof pr->port, "%.*s:", s ? (int)(s - uri) : 3, s ? uri : "LPT");
-        AnsiUpper(pr->port);
+        w16_printer_port(uri, pr->port, sizeof pr->port);
         if (!strcmp(name, def)) def_printer = nprinters;
         nprinters++;
     }
