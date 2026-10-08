@@ -168,11 +168,56 @@ typedef struct {
 #define DMPAPER_ENV_10 20
 #define DMPAPER_ENV_DL 27
 
+/* ChooseFont (COMMDLG.DLL ordinal 15) */
+typedef struct {
+    DWORD lStructSize;
+    HWND hwndOwner;
+    HDC hDC;
+    LOGFONT *lpLogFont;
+    int iPointSize;
+    DWORD Flags;
+    COLORREF rgbColors;
+    LPARAM lCustData;
+    UINT (*lpfnHook)(HWND, UINT, WPARAM, LPARAM);
+    LPCSTR lpTemplateName;
+    HINSTANCE hInstance;
+    LPSTR lpszStyle;
+    UINT nFontType;
+    int nSizeMin;
+    int nSizeMax;
+} CHOOSEFONT, *LPCHOOSEFONT;
+
+#define CF_SCREENFONTS 0x00000001L
+#define CF_PRINTERFONTS 0x00000002L
+#define CF_BOTH (CF_SCREENFONTS | CF_PRINTERFONTS)
+#define CF_SHOWHELP 0x00000004L
+#define CF_ENABLEHOOK 0x00000008L
+#define CF_ENABLETEMPLATE 0x00000010L
+#define CF_ENABLETEMPLATEHANDLE 0x00000020L
+#define CF_INITTOLOGFONTSTRUCT 0x00000040L
+#define CF_USESTYLE 0x00000080L
+#define CF_EFFECTS 0x00000100L
+#define CF_APPLY 0x00000200L
+#define CF_ANSIONLY 0x00000400L
+#define CF_NOVECTORFONTS 0x00000800L
+#define CF_NOSIMULATIONS 0x00001000L
+#define CF_LIMITSIZE 0x00002000L
+#define CF_FIXEDPITCHONLY 0x00004000L
+#define CF_WYSIWYG 0x00008000L
+#define CF_FORCEFONTEXIST 0x00010000L
+#define CF_SCALABLEONLY 0x00020000L
+#define CF_TTONLY 0x00040000L
+#define CF_NOFACESEL 0x00080000L
+#define CF_NOSTYLESEL 0x00100000L
+#define CF_NOSIZESEL 0x00200000L
+
 BOOL GetOpenFileName(OPENFILENAME *ofn);
 BOOL GetSaveFileName(OPENFILENAME *ofn);
 HWND FindText(FINDREPLACE *fr);
 HWND ReplaceText(FINDREPLACE *fr);
 BOOL PrintDlg(PRINTDLG *pd);
+/* not ported yet: returns FALSE as if the user cancelled (see commdlg.c) */
+BOOL ChooseFont(CHOOSEFONT *cf);
 DWORD CommDlgExtendedError(void);
 int GetFileTitle(LPCSTR file, LPSTR title, UINT cb);
 

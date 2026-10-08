@@ -1,0 +1,4 @@
+# Clock with no CLOCK.INI (3.11 starts it digital, seconds and date on) - as arch311-ref/scn/clock-def.scn
+sleep 300
+shot shots/01-default.png
+quit

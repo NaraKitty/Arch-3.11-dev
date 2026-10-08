@@ -1,0 +1,4 @@
+# one frame of the Clock as CLOCK.INI sets it up (clock.sh passes the CLOCK.INI lines)
+sleep 300
+shot shots/01.png
+quit

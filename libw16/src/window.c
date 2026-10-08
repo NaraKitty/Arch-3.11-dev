@@ -998,6 +998,9 @@ int GetWindowText(HWND h, LPSTR buf, int cb)
 int GetWindowTextLength(HWND h) { return w16_valid(h) ? (int)SendMessage(h, WM_GETTEXTLENGTH, 0, 0) : 0; }
 void SetWindowText(HWND h, LPCSTR s) { if (w16_valid(h)) SendMessage(h, WM_SETTEXT, 0, (LPARAM)s); }
 
+/* GWL_ID / GWW_ID of a window that is not a child is its menu handle: USER keeps a top-level window's
+ * menu in the ID field (Clock removes and restores its menu bar with SetWindowWord(GWW_ID)). A menu
+ * handle needs the pointer-sized w16_Get/SetWindowPtr here. */
 intptr_t w16_GetWindowPtr(HWND h, int i)
 {
     if (!w16_valid(h)) return 0;
@@ -1005,7 +1008,7 @@ intptr_t w16_GetWindowPtr(HWND h, int i)
     case GWL_WNDPROC: return (intptr_t)h->proc;
     case GWL_STYLE: return (LONG)h->style;
     case GWL_EXSTYLE: return h->exstyle;
-    case GWL_ID: return h->id;
+    case GWL_ID: return (h->style & WS_CHILD) ? (intptr_t)h->id : (intptr_t)h->menu;
     case GWL_HINSTANCE: return (intptr_t)h->inst;
     case GWW_HWNDPARENT: return (intptr_t)GetParent(h);
     }
@@ -1024,7 +1027,10 @@ intptr_t w16_SetWindowPtr(HWND h, int i, intptr_t v)
     case GWL_WNDPROC: h->proc = (WNDPROC)v; return o;
     case GWL_STYLE: h->style = (DWORD)v; return o;
     case GWL_EXSTYLE: h->exstyle = (DWORD)v; return o;
-    case GWL_ID: h->id = (UINT)v; return o;
+    case GWL_ID:
+        if (h->style & WS_CHILD) h->id = (UINT)v;
+        else h->menu = (HMENU)v; /* no redraw: the caller recalculates the frame (SWP_FRAMECHANGED) */
+        return o;
     case GWL_HINSTANCE: h->inst = (HINSTANCE)v; return o;
     }
     if (i >= 0 && i + (int)sizeof(intptr_t) <= h->cbextra + 64) memcpy(h->extra + i, &v, sizeof v);

@@ -419,6 +419,59 @@ DWORD GetTickCount(void)
 }
 DWORD GetCurrentTime(void) { return GetTickCount(); }
 
+/* The DOS clock (INT 21h AH=2Ah get date, AH=2Ch get time, as DOS3Call returns them): local time with
+ * hundredths of a second. With ARCH311_CLOCK="YYYY-MM-DD HH:MM:SS" the clock reads exactly that at the
+ * first call and runs on in real time, like a DOS clock set with the DATE and TIME commands - the
+ * reference machine's clock is set the same way (ref-run.ps1 -Dos 'time 09:30:00'). */
+static void dos_clock(struct tm *tm, int *hundredths)
+{
+    static int init;
+    static long long offset_us;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    long long now = (long long)tv.tv_sec * 1000000 + tv.tv_usec;
+    if (!init) {
+        init = 1;
+        const char *fixed = getenv("ARCH311_CLOCK");
+        struct tm t;
+        memset(&t, 0, sizeof t);
+        if (fixed && sscanf(fixed, "%d-%d-%d %d:%d:%d", &t.tm_year, &t.tm_mon, &t.tm_mday, &t.tm_hour, &t.tm_min,
+                            &t.tm_sec) == 6) {
+            t.tm_year -= 1900;
+            t.tm_mon -= 1;
+            t.tm_isdst = -1;
+            time_t when = mktime(&t);
+            if (when != (time_t)-1) offset_us = (long long)when * 1000000 - now;
+        }
+    }
+    now += offset_us;
+    time_t s = (time_t)(now / 1000000);
+    localtime_r(&s, tm);
+    *hundredths = (int)(now % 1000000) / 10000;
+}
+
+void w16_dos_gettime(int *hour, int *min, int *sec, int *hundredths)
+{
+    struct tm t;
+    int h;
+    dos_clock(&t, &h);
+    if (hour) *hour = t.tm_hour;
+    if (min) *min = t.tm_min;
+    if (sec) *sec = t.tm_sec;
+    if (hundredths) *hundredths = h;
+}
+
+void w16_dos_getdate(int *year, int *month, int *day, int *weekday)
+{
+    struct tm t;
+    int h;
+    dos_clock(&t, &h);
+    if (year) *year = t.tm_year + 1900;
+    if (month) *month = t.tm_mon + 1;
+    if (day) *day = t.tm_mday;
+    if (weekday) *weekday = t.tm_wday;
+}
+
 /* ------------------------------------------------------------------ memory */
 #define MEM_MAGIC 0x4D454D31u
 typedef struct { uint32_t magic; uint32_t locks; size_t size; void *p; } MemH;
