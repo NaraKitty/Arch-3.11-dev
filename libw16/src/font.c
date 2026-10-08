@@ -93,6 +93,16 @@ W16Font *w16_font_realize(const LOGFONT *lf)
     w16_fonts_init();
     for (Realized *r = realized; r; r = r->next)
         if (!memcmp(&r->lf, lf, sizeof *lf)) return r->f;
+    /* a TrueType face (Arial, Times New Roman, ...) when TrueType is on and FreeType is there */
+    W16Font *tt = w16_tt_realize(lf);
+    if (tt) {
+        Realized *r = malloc(sizeof *r);
+        r->lf = *lf;
+        r->f = tt;
+        r->next = realized;
+        realized = r;
+        return tt;
+    }
     const char *face = lf->lfFaceName[0] ? substitute(lf->lfFaceName) : NULL;
     if (!face) {
         int fam = lf->lfPitchAndFamily & 0xF0, pitch = lf->lfPitchAndFamily & 3;
@@ -182,6 +192,10 @@ void w16_draw_text_dev(HDC dc, W16Font *f, int x, int y, const char *s, int n, u
     if (dc->target && dc->target->mono) fg = fg == 0xFFFFFF ? 0xFFFFFF : 0;
     int h = f->height;
     int x0 = x;
+    if (f->tt) {
+        w16_tt_draw_text(dc, f, x, y, s, n, fg, dx, charextra, &e, t);
+        for (int i = 0; i < n; i++) x += dx ? dx[i] : f->widths[(unsigned char)s[i]] + charextra;
+    } else
     for (int i = 0; i < n; i++) {
         int ch = (unsigned char)s[i];
         int gw;
@@ -449,95 +463,148 @@ void w16_draw_prefix_text(HDC dc, int x, int y, const char *s, int n, int nopref
     }
 }
 
-/* ------------------------------------------------------------------ DrawText */
+/* ------------------------------------------------------------------ DrawText
+ * USER DrawText (seg6:0571) with its word scanner (seg6:0311) and line writer (seg6:0360). A
+ * word-wrapped line keeps the spaces before the word that did not fit, so centred and right-aligned
+ * lines are placed with them (measured: MAIN.CPL Color's "Window Text" sample); left-aligned text
+ * skips one space at the start of the next line. */
+typedef struct { HDC dc; int left, width, tabw, avew, maxw, sx; } DtState;
+
+/* seg6:0311: the end of the word at s - a tab, a space (when word breaking), CR or LF ends it; a
+ * leading tab or space is a word of its own */
+static const char *dt_word(const char *s, const char *end, int wordbreak)
+{
+    for (int first = 1; s < end; s++, first = 0) {
+        unsigned char c = (unsigned char)*s;
+        if (c == ' ') { if (wordbreak) return s + first; continue; }
+        if (c > ' ') continue;
+        if (c == '\t') return s + first;
+        if (c == '\n' || c == '\r') return s;
+    }
+    return s;
+}
+
+/* seg1:10C4's count: '&' prefix characters ("&&" counts once) */
+static int dt_prefixes(const char *s, int n)
+{
+    int k = 0;
+    for (int i = 0; i < n && s[i]; i++)
+        if (s[i] == '&') { k++; if (i + 1 < n && s[i + 1] == '&') i++; }
+    return k;
+}
+
+/* seg6:0360: one line at x (offset in the line) and y, aligned by fmt, or only measured (fmt -1);
+ * returns x plus its extent. Measuring always expands tabs, drawing with DT_EXPANDTABS. */
+static int dt_line(DtState *st, int x, int y, const char *s, const char *end, int fmt, int overhang, int noprefix)
+{
+    HDC dc = st->dc;
+    int pfx = 0, ret, ox = st->left;
+    if (!noprefix) {
+        int k = dt_prefixes(s, (int)(end - s));
+        if (k) pfx = k * ((int)LOWORD(GetTextExtent(dc, "&", 1)) - overhang);
+    }
+    if (fmt != -1 && (fmt & 3)) {
+        ox = st->width - dt_line(st, 0, 0, s, end, -1, overhang, noprefix);
+        if ((fmt & 3) == DT_CENTER) ox >>= 1;
+        ox += st->left;
+    }
+    if (fmt == -1 || (fmt & DT_EXPANDTABS)) {
+        for (const char *p = s;;) {
+            const char *q = p;
+            while (q < end && *q != '\t') q++;
+            if (fmt != -1 && !(fmt & DT_CALCRECT)) w16_draw_prefix_text(dc, x * st->sx + ox, y, p, (int)(q - p), noprefix);
+            x += (int)LOWORD(GetTextExtent(dc, p, (int)(q - p))) - overhang - pfx;
+            if (q >= end) break;
+            p = q + 1;
+            if (st->tabw) x = ((x + st->avew / 2) / st->tabw + 1) * st->tabw;
+        }
+        ret = overhang;
+    } else {
+        if (!(fmt & DT_CALCRECT)) w16_draw_prefix_text(dc, x * st->sx + ox, y, s, (int)(end - s), noprefix);
+        ret = (int)LOWORD(GetTextExtent(dc, s, (int)(end - s))) - pfx;
+    }
+    x += ret;
+    if (x > st->maxw && fmt != -1) st->maxw = x;
+    return x;
+}
+
 int DrawText(HDC dc, LPCSTR s, int n, LPRECT r, UINT fmt)
 {
-    W16Font *f = w16_dc_font(dc);
-    if (n < 0) n = strlen(s);
-    int lh = f->height + ((fmt & DT_EXTERNALLEADING) ? f->eleading : 0);
-    int width = r->right - r->left;
-    int tabw = 8 * f->avgw;
-    if (fmt & DT_TABSTOP) tabw = ((fmt >> 8) & 0xFF) * f->avgw;
-    int noprefix = (fmt & DT_NOPREFIX) != 0;
-    int y = r->top, maxw = 0;
-    if ((fmt & DT_SINGLELINE) && (fmt & (DT_VCENTER | DT_BOTTOM)) && !(fmt & DT_CALCRECT)) {
-        if (fmt & DT_VCENTER) y = r->top + (r->bottom - r->top - lh) / 2;
-        else y = r->bottom - lh;
-    }
-    int saved = 0;
-    if (!(fmt & (DT_NOCLIP | DT_CALCRECT))) { saved = SaveDC(dc); IntersectClipRect(dc, r->left, r->top, r->right, r->bottom); }
-    int i = 0;
-    while (i <= n) {
-        /* find line end */
-        int j = i, last_break = -1;
-        int w = 0;
-        while (j < n) {
-            char c = s[j];
-            if (!(fmt & DT_SINGLELINE) && (c == '\r' || c == '\n')) break;
-            int cw;
-            if (c == '\t' && (fmt & DT_EXPANDTABS)) cw = tabw - (w % tabw);
-            else if (c == '&' && !noprefix) { if (j + 1 < n && s[j + 1] == '&') { j++; cw = f->widths['&']; } else cw = 0; }
-            else cw = f->widths[(unsigned char)c] + dc->charextra;
-            /* USER seg6:07A8: the line breaks before a word whose extent (overhang included) passes
-             * the right edge; the line's first word stays whole however wide it is (MAIN.CPL's
-             * 35-px "&Name:" static shows its colon on 3.11) */
-            if ((fmt & DT_WORDBREAK) && !(fmt & DT_SINGLELINE) && w + cw + f->bold_sim > width && j > i) {
-                if (c == ' ') break;
-                if (last_break > i) { j = last_break; break; }
-                while (j < n && s[j] != ' ' && s[j] != '\t' && s[j] != '\r' && s[j] != '\n') j++;
-                break;
+    DtState st = {dc, 0, 0, 0, 0, 0, 1};
+    UINT fmt0 = fmt;
+    int tabchars = 8;
+    if (fmt & DT_TABSTOP) { tabchars = (fmt >> 8) & 0xFF; fmt &= 0xFF; }
+    st.sx = (dc->vextx < 0) != (dc->wextx < 0) ? -1 : 1;
+    int sy = (dc->vexty < 0) != (dc->wexty < 0) ? -1 : 1;
+    if (!(fmt & DT_NOCLIP)) { SaveDC(dc); IntersectClipRect(dc, r->left, r->top, r->right, r->bottom); }
+    int lh = 0, y = 0;
+    st.width = (r->right - r->left) * st.sx;
+    if (st.width && n) {
+        if (n == -1) n = lstrlen(s);
+        TEXTMETRIC tm;
+        if (fmt & DT_INTERNAL) {
+            HDC sdc = GetDC(NULL);
+            SelectObject(sdc, GetStockObject(SYSTEM_FONT));
+            GetTextMetrics(sdc, &tm);
+            ReleaseDC(NULL, sdc);
+        } else
+            GetTextMetrics(dc, &tm);
+        lh = (tm.tmHeight + ((fmt & DT_EXTERNALLEADING) ? tm.tmExternalLeading : 0)) * sy;
+        st.avew = tm.tmAveCharWidth;
+        st.tabw = st.avew * tabchars;
+        st.left = r->left;
+        int overhang = tm.tmOverhang, noprefix = (fmt & DT_NOPREFIX) != 0;
+        const char *end = s + n;
+        y = r->top;
+        if (fmt & DT_SINGLELINE) {
+            switch (fmt & (DT_VCENTER | DT_BOTTOM)) {
+            case DT_VCENTER: y = (r->bottom - tm.tmHeight * sy - r->top) / 2 + r->top; break;
+            case DT_BOTTOM: y = r->bottom - tm.tmHeight * sy; break;
             }
-            if (c == ' ') last_break = j;
-            w += cw;
-            j++;
-        }
-        int lw = 0;
-        /* measure the line [i, j) */
-        for (int k = i; k < j; k++) {
-            char c = s[k];
-            if (c == '\t' && (fmt & DT_EXPANDTABS)) lw += tabw - (lw % tabw);
-            else if (c == '&' && !noprefix) { if (k + 1 < j && s[k + 1] == '&') { k++; lw += f->widths['&']; } }
-            else lw += f->widths[(unsigned char)c] + dc->charextra;
-        }
-        /* trailing spaces of a wrapped line do not count */
-        int jj = j;
-        while ((fmt & DT_WORDBREAK) && jj > i && s[jj - 1] == ' ') { jj--; lw -= f->widths[' ']; }
-        if (lw > 0) lw += f->bold_sim; /* measured with GetTextExtent: overhang included */
-        maxw = max(maxw, lw);
-        if (!(fmt & DT_CALCRECT)) {
-            int x = r->left;
-            /* a line wider than the rectangle starts left of it by half the excess, rounded down
-             * (measured: a 7-px "/" in MAIN.CPL's 6-px Date & Time separator starts 1 px left) */
-            if (fmt & DT_CENTER) x = r->left + ((width - lw) >> 1);
-            else if (fmt & DT_RIGHT) x = r->right - lw;
-            /* draw segments between tabs */
-            int cx = x, st = i;
-            for (int k = i; k <= jj; k++) {
-                if (k == jj || (s[k] == '\t' && (fmt & DT_EXPANDTABS))) {
-                    if (k > st) {
-                        w16_draw_prefix_text(dc, cx, y, s + st, k - st, noprefix);
-                        cx += noprefix ? extent(dc, f, s + st, k - st) : prefix_advance(dc, s + st, k - st);
-                    }
-                    if (k < jj) cx = x + ((cx - x) / tabw + 1) * tabw;
-                    st = k + 1;
+            dt_line(&st, 0, y, s, end, (int)fmt, overhang, noprefix);
+        } else {
+            const char *p = s, *lineStart = s, *lineEnd = s;
+            int x = 0, done = 0;
+            while (p < end) {
+                const char *we = dt_word(p, end, fmt & DT_WORDBREAK), *next = we;
+                lineEnd = we;
+                x = dt_line(&st, x, 0, p, we, -1, overhang, noprefix) - overhang;
+                if ((fmt & DT_WORDBREAK) && x + overhang > st.width && p != lineStart) {
+                    if (!(fmt & 3) && *p == ' ') p++;
+                    next = lineEnd = p;
+                    done = 1;
+                } else if (we < end && (*we == '\r' || *we == '\n')) {
+                    char c = *we;
+                    next = we + 1;
+                    if (next < end && *next == (c ^ 7)) next++;  /* CR LF or LF CR */
+                    done = 1;
+                    if (!(fmt & 3) && next < end && *next == ' ') next++;
                 }
+                p = next;
+                if (!done) continue;
+                dt_line(&st, 0, y, lineStart, lineEnd, (int)fmt, overhang, noprefix);
+                x = 0;
+                y += lh;
+                lineStart = lineEnd = p;
+                done = 0;
+                if (!(fmt & (DT_NOCLIP | DT_CALCRECT)) && r->bottom * sy < y * sy) break;
             }
+            dt_line(&st, 0, y, lineStart, lineEnd, (int)fmt, overhang, noprefix);
         }
-        y += lh;
-        if (fmt & DT_SINGLELINE) break;
-        /* skip the line break */
-        if (j < n && s[j] == '\r') j++;
-        if (j < n && s[j] == '\n') j++;
-        else if ((fmt & DT_WORDBREAK) && j < n && s[j] == ' ') while (j < n && s[j] == ' ') j++;
-        if (j >= n) break;
-        i = j;
     }
-    if (saved) RestoreDC(dc, saved);
+    if (!(fmt & DT_NOCLIP)) {
+        int cx = dc->curx, cy = dc->cury;
+        RestoreDC(dc, -1);
+        dc->curx = cx;
+        dc->cury = cy;
+    }
     if (fmt & DT_CALCRECT) {
-        r->right = r->left + maxw;
-        r->bottom = y;
+        /* (an empty string or rectangle leaves 3.1's maximum width of the previous call here) */
+        r->right = r->left + st.maxw * st.sx;
+        if (st.maxw > st.width) return DrawText(dc, s, n, r, fmt0);   /* rewrap at the widest line */
+        r->bottom = y + lh;
     }
-    return y - r->top;
+    return y - r->top + lh;
 }
 
 /* GrayString: draws text dimmed. With a solid gray available (16 colours have one),
@@ -564,10 +631,11 @@ void w16_draw_gray_text(HDC dc, int x, int y, const char *s, int n, int noprefix
 }
 
 /* Grayed text where GRAYTEXT would vanish into the background (push buttons: GRAYTEXT ==
- * BTNFACE on VGA): like GrayString with the 50% gray brush, only every other text pixel is
- * drawn, in the normal text colour. GrayString grays the text in a bitmap of its own, so the
- * checkerboard starts at the text's origin, not the screen's (measured on 3.11: the Desktop
- * applet's disabled "Test" and "Setup..." buttons, 27 px apart, have the same phase) */
+ * BTNFACE on VGA): USER GrayString (seg10:2F30) draws the text into a monochrome bitmap at (0,0),
+ * ORs USER's gray brush over it (rows 0x55, 0xAA from seg12:13E1: white where x + y is odd) and
+ * blits it to (x, y), so the pixels kept are those an even distance from the text origin, not the
+ * screen's (measured on 3.11: MAIN.CPL Color's disabled Save Scheme / Remove Scheme buttons, and the
+ * Desktop applet's disabled "Test" and "Setup..." buttons, 27 px apart, with the same phase). */
 void w16_draw_stippled_text(HDC dc, int x, int y, const char *s, int n, int noprefix, COLORREF fg)
 {
     TEXTMETRIC tm;

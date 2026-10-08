@@ -26,6 +26,8 @@ param(
     [string[]]$WinIni = @(),   # WIN.INI settings, 'section/key=value' (e.g. 'intl/sDate=-')
     [string[]]$SysIni = @(),   # SYSTEM.INI settings, the same; '+section/key=value' adds a line
                                # even if the key exists (e.g. '+386Enh/device=vsbd.386')
+    [string[]]$PrivateIni = @(), # any INI file in C:\WINDOWS, created if missing: 'FILE:section/key=value'
+                               # (e.g. 'CLOCK.INI:Clock/Options=1,0,0,0,0,0')
     [string[]]$Files = @(),    # files copied into C:\WINDOWS\SYSTEM (drivers from the rip)
     [string[]]$Dosbox = @(),   # extra DOSBox-X config lines (e.g. '[sblaster]','sbtype=sb2')
     [int]$Tolerance = 80       # pixels that may change in a 'stable' frame (caret 80; focused
@@ -67,6 +69,13 @@ function Set-IniKey([string]$file, [string]$kv) {
 }
 foreach ($kv in $WinIni) { Set-IniKey (Join-Path $drive 'WINDOWS\WIN.INI') $kv }
 foreach ($kv in $SysIni) { Set-IniKey (Join-Path $drive 'WINDOWS\SYSTEM.INI') $kv }
+foreach ($e in $PrivateIni) {
+    if ($e -notmatch '^([^:\\/]+):(.+)$') { throw "bad -PrivateIni entry: $e" }
+    $pf = Join-Path $drive "WINDOWS\$($Matches[1])"
+    $pkv = $Matches[2]
+    if (-not (Test-Path $pf)) { [IO.File]::WriteAllText($pf, '', [Text.Encoding]::ASCII) }
+    Set-IniKey $pf $pkv
+}
 foreach ($f in $Files) { Copy-Item $f (Join-Path $drive 'WINDOWS\SYSTEM') }
 
 $conf = Join-Path $RefDir "run-$Name.conf"

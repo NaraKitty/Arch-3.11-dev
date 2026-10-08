@@ -421,3 +421,66 @@ NEXT: USER's MessageBox layout (seg42:04F5: text limit cxScreen/8*5 - 2*(cyBorde
 space, sizes through dialog units; DrawText's CALCRECT width of a wrapped line includes its break space;
 open: two real boxes 384 and 388 px wide both have their left edge at x=128, client at 133, which the
 dialog-unit path (client x = 2 * units) cannot give); then the desktop settings' effects in the WM.
+
+### Session 8 (Oct 8, Color applet worktree) - MAIN.CPL Color, VGA colour matching
+Color applet (apps/control/colorcpl.c = MAIN.CPL seg6/seg7 with seg1:191B, seg4:00E5, seg23:07E1;
+seg3:0756 runs it with the private loop seg3:06AE): dialog 100 with the sample screen and the palette
+half, Save Scheme (27), the modeless Custom Color Selector (26). Windows Default and the basic colours
+come from VGA.DRV's OEMBIN #1/#2, MAIN.CPL's fallback colours from its own data segment (ds:02CE) - all
+read at run time. Color is the first icon, so its tests open it with Enter like the real scenarios.
+Verified in 16 colours (W16_COLORS=16) with tools/regress.sh, tests apps/control/tests/color*.w16 vs
+arch311-ref/scn/color-*.scn: opened, every scheme (23 frames), palette, custom colour, OK (Control
+Panel repainted in Arizona; WIN.INI [colors] and CONTROL.INI [current]/[Custom Colors] equal to real
+3.11's), Save Scheme (CONTROL.INI), Remove Scheme (CONTROL.INI and the dialog after it) - all PASS, as
+do the other applets' and Notepad's tests. The three confirmation-box frames (color-remove 02,
+color-mbox 02/05) are commented out "pending USER MessageBox (International branch)": a seg42:04F5 port
+of mine matched all three to the pixel but was dropped for the International agent's. UNTESTED: every
+mouse path (the rig types keys only), Help, the selector's own arrow keys, Color|Solid, Save over an
+existing name, true-colour drawing.
+libw16 (each from the 3.1 code named):
+- 16-colour mode matches VGA.DRV, tables read from the user's VGA.DRV: nearest colour seg1:1956,
+  dither seg1:24A1, RealizeObject seg1:292A (white/black and driver colours solid, E0E0E0+0x10 = the
+  scroll bar's 50% pattern, others dithered); brush patterns start at the DC origin + brush origin.
+- SetSysColors (seg41:0C06) and USER's start-up (seg3:0748, its reader 06D7) make the text-like colours
+  solid (GetNearestColor) and flag E0E0E0 scroll bars; SetSysColors broadcasts WM_SYSCOLORCHANGE and
+  redraws everything. nc.c fills frames and captions with brushes, so e.g. Arizona's caption dithers.
+- Dialog manager: CheckDefPushButton (seg25:0B5B), ClearDefaults (0AB2), Save/RestoreDlgFocus
+  (03A8/03E3), DlgSetFocus (0000); the default button changes only on the focus moves IsDialogMessage
+  makes (Tab, arrows, mnemonics, clicks), activation and DM_SETDEFID; a disabled default push button
+  draws plain (seg25:18BC). (This replaces session 7's set_default_button; its measurements hold.)
+- For whoever ports USER's MessageBox (seg42:04F5): the box is a DS_ABSALIGN template in system-font
+  units, and "#32770" has CS_BYTEALIGNWINDOW, so CreateWindow (seg13:0E34) rounds the window's left
+  edge to the nearest multiple of 8 on VGA - that is why real boxes sit at x=128 (client 133) where the
+  dialog-unit arithmetic gives 127/132 (libw16's window.c already does the rounding). Button width =
+  the longest label by length (OK, Cancel, Yes, No, Retry, Abort, Ignore, Close; "&Ignore") without
+  "&" + 2 x the width of "0" (seg3:23BE: 57 px); text limit (cxScreen/8)*5 - 2*(cyBorder + cxSize) -
+  icon area; margins cxSize/cySize = 18, frame cxBorder; 3.1's MessageBox calls no MessageBeep;
+  MB_DlgProc deletes SC_CLOSE without a Cancel button and turns a lone OK into IDCANCEL.
+- DrawText = USER seg6:0571 (wrapped lines keep their trailing blank for centring and for
+  DT_CALCRECT; a line's first word stays whole); GrayString's stipple follows the text origin;
+  owner-draw drop-down lists (seg33/34); CombineRgn/PtInRegion/FillRgn, ClipCursor, w16_module_data.
+- tools/regress.sh: `# ini:` takes a bracketed section with spaces ([Custom Colors]).
+Rig notes: the frame recorder drops a shot identical to the previous one, so count frames by what
+changed; a letter typed while a control wants characters (the colour grids) is no mnemonic; after a
+message box closed with "n", real 3.11 leaves one black pixel at the Color dialog's client origin
+(both runs, not understood; ignored in color-mbox.w16).
+
+### Session 7 (Oct 8) - Clock (CLOCK.EXE) and TrueType
+apps/clock/clock.c ports CLOCK.EXE (seg1): analog and digital faces, the Settings menu, Always on Top,
+CLOCK.INI (Maximized, Options, Position, sFont) as 3.1 reads/writes it, a minimised clock that keeps
+ticking with its icon title, SizeFont, raised digits, MulDiv hand geometry with ROP2 erasing, DOS time
+(ARCH311_CLOCK honoured). Set Font... builds the real CHOOSEFONT and calls a ChooseFont stub (FALSE)
+until COMMDLG's font dialog is ported. libw16: TrueType through FreeType (libw16/src/truetype.c) -
+FreeType is dlopen()ed at run time (libfreetype.so.6) with the few API structs/functions declared by
+hand (WSL has no FreeType headers; switch to <ft2build.h> once libfreetype-dev is installed), v35
+interpreter; without FreeType, TTEnable=0 or no .TTF files it falls back to raster fonts. tmAscent/
+tmDescent come from the font's VDMX table as 3.1 does. Also: VGA.DRV's line pixel rule, menu check
+mark/shadow/system-box details, iconic windows 36x36 with USER's icon slots and titles,
+SM_CXICONSPACING 75 / SM_CYICONSPACING 72 or 59 (IconTitleWrap), w16_dos_gettime/getdate,
+ref-run.ps1 -PrivateIni 'FILE:section/key=value'.
+Verified (regress.sh): every Clock frame 0 px apart except the digital faces' text (default max 10 px,
+dbig max 49 px: single pixels on diagonal outline edges where 3.1's scan converter differs from
+FreeType's; glyph positions and metrics match); CLOCK.INI values as 3.11 writes them. Whole suite on dev
+after the merge: 106 checks, all PASS. UNTESTED: the ChooseFont dialog, TrueType cases Clock does not use
+(positive lfHeight/VDMX cell lookup, lfWidth, simulated bold/italic, symbol fonts, underline/strikeout),
+EnumFonts listing TrueType faces, flat digits on true-colour displays, -ldl on glibc < 2.34.

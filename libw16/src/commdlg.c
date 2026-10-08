@@ -1076,3 +1076,16 @@ BOOL PrintDlg(PRINTDLG *pd)
     }
     return TRUE;
 }
+
+/* ------------------------------------------------------------------ ChooseFont (ordinal 15) */
+/* TODO: port COMMDLG.DLL's font dialog - ChooseFont (ordinal 15) with FormatCharDlgProc (16), the
+ * FontFamilyEnumProc / FontStyleEnumProc enumerators (19, 18) and dialog template 1543 ("Font"), or an
+ * application template such as Clock's dialog 100 under CF_ENABLETEMPLATE. Until then the dialog
+ * does not open and the call returns FALSE with no extended error, exactly what COMMDLG returns when
+ * the user presses Cancel, so callers keep their font. */
+BOOL ChooseFont(CHOOSEFONT *cf)
+{
+    (void)cf;
+    cd_err = 0;
+    return FALSE;
+}
