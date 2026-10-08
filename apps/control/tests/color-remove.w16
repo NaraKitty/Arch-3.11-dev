@@ -3,7 +3,7 @@
 # and the next scheme is selected. Same keys as arch311-ref/scn/color-remove.scn; compare in
 # 16 colours (W16_COLORS=16).
 # regress: W16_COLORS=16 sh tools/run-cp-test.sh "$TEST" "$OUT"
-# The confirmation box checks USER's MessageBox (libw16/src/dialog.c, seg42:04F5):
+# The confirmation box (libw16's MessageBox follows USER seg42:04F5):
 # compare: color-remove/02.png 02.png active ignore 320 240 332 260
 # compare: color-remove/03.png 03.png active
 # ini: CONTROL.INI current color schemes=Windows Default

@@ -55,6 +55,24 @@ void w16_dlgt_add(W16DlgTemplate *t, LPCSTR cls, LPCSTR text, int id, DWORD styl
     t->b[t->count_at]++;
 }
 
+/* an item as USER writes them itself (MessageBox, seg42:038E): a predefined class byte (0x80 BUTTON
+ * ... 0x85 COMBOBOX), the style as given, and the text as len bytes (an ordinal: 0xFF and the id,
+ * 3 bytes) or NUL-terminated (len -1) */
+void w16_dlgt_item(W16DlgTemplate *t, int cls, const char *text, int len, int id, DWORD style, int x, int y, int cx, int cy)
+{
+    put16(t, x); put16(t, y); put16(t, cx); put16(t, cy);
+    put16(t, id);
+    put32(t, style);
+    put8(t, cls);
+    if (len < 0) putsz(t, text);
+    else {
+        put(t, text, (size_t)len);
+        if (!(len == 3 && (BYTE)text[0] == 0xFF)) put8(t, 0);
+    }
+    put8(t, 0); /* no creation data */
+    t->b[t->count_at]++;
+}
+
 const void *w16_dlgt_data(W16DlgTemplate *t) { return t->b; }
 
 void w16_dlgt_free(W16DlgTemplate *t)

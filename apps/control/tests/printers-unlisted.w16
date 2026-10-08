@@ -1,0 +1,31 @@
+# Printers > Add >> > Install Unlisted: ARCH311_REF=<rig> sh tools/run-cp-test.sh apps/control/tests/printers-unlisted.w16 OUT Printers
+# Same keys as arch311-ref/scn/printers-unlisted.scn after opening: Add >>, Install... with "Install
+# Unlisted or Updated Printer" selected opens Install Driver (Add Unlisted or Updated Printer stays
+# hidden behind it while it runs its WM_INITDIALOG), Cancel returns, Esc closes.
+# regress: sh tools/run-cp-test.sh "$TEST" "$OUT" Printers
+# compare: printers-unlisted/02.png 01-open.png active ignore 320 240 332 260
+# compare: printers-unlisted/03.png 02-add.png active ignore 320 240 332 260
+# compare: printers-unlisted/04.png 03-installdrv.png active ignore 320 240 332 260
+# compare: printers-unlisted/05.png 04-back.png active ignore 320 240 332 260
+sleep 900
+shot shots/01-open.png
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key space
+sleep 600
+shot shots/02-add.png
+key tab
+key space
+sleep 600
+shotcaret shots/03-installdrv.png
+key esc
+sleep 600
+shot shots/04-back.png
+key esc
+sleep 400
+quit

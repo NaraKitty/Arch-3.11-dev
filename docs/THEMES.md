@@ -54,7 +54,16 @@ new pieces drawn in the theme's style, such as the Volume, Network and Internet 
 4. **Toolkit styles**: a GTK theme (CSS + assets generated from the theme's measurements) and a Qt
    style, so scroll bars, buttons, check boxes and menus inside Linux applications match.
 5. **Shell and system**: the start-up screen, Program Manager (3.11) or Explorer (95+), sounds.
-   The MS-DOS Prompt item launches the user's Linux terminal emulator.
+   The MS-DOS Prompt item starts the built-in DOSBox; Terminal is the Linux terminal in 3.11's
+   Terminal look (ADR-006).
+
+## Light / dark preference (owner, October 2026)
+Once the theme manager exists, is accurate and the other themes' colours are imported, it gets a
+Light / Dark toggle. The toggle does not change any arch311 theme's look: it only sets the desktop's
+colour-scheme preference that Linux applications read to pick their own light or dark appearance
+(the freedesktop `org.freedesktop.appearance color-scheme` setting served by xdg-desktop-portal, the
+GNOME `color-scheme` key GTK reads, and the matching Qt/KDE setting), so apps that auto-detect follow
+the user's choice.
 
 ## Browsers
 

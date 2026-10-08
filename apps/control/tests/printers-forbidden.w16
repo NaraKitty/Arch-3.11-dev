@@ -1,0 +1,24 @@
+# Printers when CUPS refuses (arch311 behaviour): ARCH311_SIM_ERROR='lpadmin: Forbidden' ARCH311_REF=<rig> sh tools/run-cp-test.sh apps/control/tests/printers-forbidden.w16 OUT Printers
+# A user without CUPS administration rights: Remove, Yes -> lpadmin's message in MAIN.CPL's error box
+# style (Control Panel, information icon); the printer stays listed. Esc closes; WIN.INI keeps both.
+# regress: ARCH311_SIM_ERROR='lpadmin: Forbidden' sh tools/run-cp-test.sh "$TEST" "$OUT" Printers
+# ini: WIN.INI devices HP_LaserJet_4=CUPS,LPT1:
+# ini: WIN.INI devices Text_Only=CUPS,FILE:
+sleep 900
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key space
+sleep 400
+key y
+sleep 400
+shot shots/01-refused.png
+key enter
+sleep 400
+shot shots/02-kept.png
+key esc
+sleep 400
+quit
