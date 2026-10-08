@@ -6,6 +6,7 @@
 
 const CplModuleDef cpl_modules[] = {
     {"MAIN.CPL", Main_CPlApplet, NULL},
+    {"DRIVERS.CPL", Drivers_CPlApplet, NULL},
     {"SND.CPL", Sound_CPlApplet, NULL},
     {"VOLUME.CPL", Volume_CPlApplet, NULL},
     {NULL, NULL, NULL},

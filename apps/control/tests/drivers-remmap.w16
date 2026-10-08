@@ -1,0 +1,29 @@
+# Drivers > Remove MIDI Mapper: ARCH311_REF_INI=1 tools/run-cp-test.sh apps/control/tests/drivers-remmap.w16 OUT Drivers
+# Same keys as arch311-ref/scn/drivers-remmap.scn: Remove, Yes, "The MIDI Mapper driver has been
+# removed..." (Don't Restart Now), the list without it, close
+# regress: ARCH311_REF_INI=1 sh tools/run-cp-test.sh "$TEST" "$OUT" Drivers
+# The confirmation is a MessageBox (USER seg1:9B91 / seg42:04F5; IDI_EXCLAMATION's 16-colour image):
+# compare: drivers-remmap/03.png 01-confirm.png active ignore 320 239 333 261
+# compare: drivers-remmap/04.png 02-restart.png active ignore 320 239 333 261
+# compare: drivers-remmap/05.png 03-removed.png active ignore 320 239 333 261
+# ini: SYSTEM.INI drivers midimapper=
+# ini: SYSTEM.INI drivers timer=timer.drv
+# ini: CONTROL.INI drivers.desc midimap.drv=
+# ini: CONTROL.INI drivers.desc timer.drv=Timer
+sleep 900
+key tab
+key tab
+key tab
+key space
+sleep 500
+shot shots/01-confirm.png
+key y
+sleep 500
+shot shots/02-restart.png
+key esc
+sleep 400
+shot shots/03-removed.png
+key esc
+sleep 300
+shot shots/04-closed.png
+quit

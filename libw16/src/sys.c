@@ -407,7 +407,9 @@ int GetPrivateProfileString(LPCSTR app, LPCSTR key, LPCSTR def, LPSTR out, int c
         return 0;
     if (app && ini_get(path, app, key, out, cb, &len))
         return len;
-    snprintf(out, cb, "%s", def ? def : "");
+    /* the default may be the output buffer itself (DRIVERS.CPL passes the same buffer) */
+    if (def != out) snprintf(out, cb, "%s", def ? def : "");
+    else if ((int)strlen(out) >= cb) out[cb - 1] = 0;
     return strlen(out);
 }
 int GetPrivateProfileInt(LPCSTR app, LPCSTR key, int def, LPCSTR file)
@@ -422,6 +424,8 @@ int GetPrivateProfileInt(LPCSTR app, LPCSTR key, int def, LPCSTR file)
 BOOL WritePrivateProfileString(LPCSTR app, LPCSTR key, LPCSTR val, LPCSTR file)
 {
     char path[1200];
+    /* NULL section: KERNEL writes its cached profile out; libw16 keeps no cache */
+    if (!app) return TRUE;
     ini_path(file, path, sizeof path);
     return ini_set(path, app, key, val);
 }
@@ -431,6 +435,10 @@ BOOL WriteProfileString(LPCSTR a, LPCSTR k, LPCSTR v) { return WritePrivateProfi
 
 UINT GetWindowsDirectory(LPSTR buf, UINT cb) { snprintf(buf, cb, "C:\\WINDOWS"); return strlen(buf); }
 UINT GetSystemDirectory(LPSTR buf, UINT cb) { snprintf(buf, cb, "C:\\WINDOWS\\SYSTEM"); return strlen(buf); }
+/* KERNEL's flags for 3.11 in 386 enhanced mode on the reference machine (DOSBox-X, a Pentium: KERNEL
+ * reports a 486 or later as WF_CPU486) with a coprocessor and paging. UNTESTED: the value itself was
+ * not read on the rig; programs test the CPU and mode bits */
+DWORD GetWinFlags(void) { return WF_PMODE | WF_CPU486 | WF_ENHANCED | WF_80x87 | WF_PAGING; }
 
 void w16_sys_init(void)
 {
@@ -613,14 +621,41 @@ static unsigned char lo1252(unsigned char c)
 int lstrlen(LPCSTR s) { return s ? (int)strlen(s) : 0; }
 LPSTR lstrcpy(LPSTR d, LPCSTR s) { return strcpy(d, s ? s : ""); }
 LPSTR lstrcat(LPSTR d, LPCSTR s) { return strcat(d, s ? s : ""); }
-int lstrcmp(LPCSTR a, LPCSTR b) { return strcmp(a, b); }
-int lstrcmpi(LPCSTR a, LPCSTR b)
+/* USER seg11:005E: a character's sort weight without a language driver (the ranges at seg11:0010:
+ * first, last, added, lower case). Digits and letters weigh more than every other character, upper
+ * and lower case (accented letters too) weigh the same */
+static unsigned sort_weight(unsigned char c, int *lower)
 {
-    for (;; a++, b++) {
-        int x = lo1252(*(unsigned char *)a), y = lo1252(*(unsigned char *)b);
-        if (x != y || !x) return x - y;
+    static const unsigned char ranges[7][4] = {
+        {'0', '9', 0xD0, 0}, {'A', 'Z', 0xD0, 0}, {'a', 'z', 0xB0, 1}, {0xC0, 0xD6, 0x20, 0},
+        {0xD8, 0xDE, 0x20, 0}, {0xE0, 0xF6, 0x00, 1}, {0xF8, 0xFE, 0x00, 1}};
+    *lower = 0;
+    for (int i = 0; i < 7 && c >= ranges[i][0]; i++)
+        if (c <= ranges[i][1]) {
+            *lower = ranges[i][3];
+            return c + ranges[i][2];
+        }
+    return c;
+}
+
+/* USER seg11:0088, behind lstrcmp (fCase) and lstrcmpi: the first characters that differ decide by
+ * weight; lstrcmp then orders strings that differ only in case by their first such difference (the
+ * lower-case one after). Returns 1, 0 or -1 */
+static int user_strcmp(LPCSTR a, LPCSTR b, int fCase)
+{
+    int ca = 0, cb = 0;
+    for (;;) {
+        unsigned char x = *a++, y = *b++;
+        if (!x || !y) return x ? 1 : y ? -1 : ca > cb ? 1 : ca < cb ? -1 : 0;
+        if (x == y) continue;
+        int lx, ly;
+        unsigned wx = sort_weight(x, &lx), wy = sort_weight(y, &ly);
+        if (wx != wy) return wx > wy ? 1 : -1;
+        if (fCase && lx != ly && !(ca | cb)) { ca = lx; cb = ly; }
     }
 }
+int lstrcmp(LPCSTR a, LPCSTR b) { return user_strcmp(a, b, 1); }
+int lstrcmpi(LPCSTR a, LPCSTR b) { return user_strcmp(a, b, 0); }
 LPSTR AnsiUpper(LPSTR s)
 {
     if (IS_INTRESOURCE(s)) return (LPSTR)(uintptr_t)up1252((unsigned char)(uintptr_t)s);
@@ -882,11 +917,31 @@ static void dos_resolve(LPCSTR in, char *out, size_t cb)
     for (int i = 0; i < n && o < cb; i++) o += snprintf(out + o, cb - o, "\\%s", parts[i]);
 }
 
+/* 3.1 keeps the profiles in the Windows directory: <windir>\NAME.INI is the file Get/Write(Private)-
+ * ProfileString use (in the config directory here), so programs that read or rewrite WIN.INI and
+ * SYSTEM.INI as files (DRIVERS.CPL adds [386Enh] device= lines that way) see the same data. Only
+ * profiles that exist (WIN, SYSTEM and CONTROL.INI are seeded on first use) */
+static int profile_host(const char *full, char *host, size_t cb)
+{
+    char win[260], path[1200];
+    GetWindowsDirectory(win, sizeof win);
+    size_t n = strlen(win), l;
+    const char *name = full + n + 1;
+    if (strncasecmp(full, win, n) || full[n] != '\\' || strchr(name, '\\') || (l = strlen(name)) < 5 ||
+        strcasecmp(name + l - 4, ".INI"))
+        return 0;
+    ini_path(name, path, sizeof path);
+    if (access(path, F_OK)) return 0;
+    snprintf(host, cb, "%s", path);
+    return 1;
+}
+
 int w16_dos_to_host(LPCSTR dos, char *host, size_t cb)
 {
     load_drives();
     char full[520];
     dos_resolve(dos, full, sizeof full);
+    if (profile_host(full, host, cb)) return 0;
     char drv = full[0];
     const char *root = NULL, *rest = full + 2;
     for (int i = 0; i < ndrives; i++)
