@@ -94,15 +94,6 @@ static int g_yLum;                  /* [0x1de8] */
 #define WM_CUSTADD 0x800        /* "Add Color": lParam = COLORREF */
 #define WM_GRIDFOCUS 0x801      /* a grid got (0x801) / lost (0x802) the focus */
 
-/* ds:02CE: basic colours for a display driver without OEMBIN #2 */
-static const COLORREF d02CE[48] = {
-    0x008080FF, 0x0080FFFF, 0x0080FF80, 0x0080FF00, 0x00FFFF80, 0x00FF8000, 0x00C080FF, 0x00FF80FF,
-    0x000000FF, 0x0000FFFF, 0x0000FF80, 0x0040FF00, 0x00FFFF00, 0x00C08000, 0x00C08080, 0x00FF00FF,
-    0x00404080, 0x004080FF, 0x0000FF00, 0x00808000, 0x00804000, 0x00FF8080, 0x00400080, 0x008000FF,
-    0x00000080, 0x000080FF, 0x00008000, 0x00408000, 0x00FF0000, 0x00A00000, 0x00800080, 0x00FF0080,
-    0x00000040, 0x00004080, 0x00004000, 0x00404000, 0x00800000, 0x00400000, 0x00400040, 0x00800040,
-    0x00000000, 0x00008080, 0x00408080, 0x00808080, 0x00808040, 0x00C0C0C0, 0x00400040, 0x00FFFFFF,
-};
 /* ds:03CE: element at element-combo position i */
 static const int g03CE[21] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 19, 9, 10, 11, 12, 13, 14, 15, 20, 16, 17, 18};
 /* ds:03F8: element -> COLOR_ index (also the index array of SetSysColors) */
@@ -129,6 +120,17 @@ static void SetRGBEdits(int id);
 
 /* a DWORD of a resource (little endian, any alignment) */
 static COLORREF ResDword(const BYTE *p) { return p[0] | (p[1] << 8) | ((DWORD)p[2] << 16) | ((DWORD)p[3] << 24); }
+
+/* ds:02CE: MAIN.CPL's own 48 basic colours, for a display driver without OEMBIN #2 - read from the
+ * user's ripped MAIN.CPL (its automatic data segment), white if it is not there. UNTESTED: VGA.DRV
+ * has OEMBIN #2, so the rig never shows these. */
+static COLORREF DefaultBasicColor(int i)
+{
+    unsigned len;
+    const BYTE *ds = w16_module_data(hInstMain, 0, &len);
+    if (!ds || len < 0x2CE + 48 * 4) return 0x00FFFFFF;
+    return ResDword(ds + 0x2CE + 4 * i);
+}
 
 /* ------------------------------------------------------------------ seg1:191B
  * a frame of border width out of four PATCOPY strips */
@@ -730,7 +732,7 @@ static void OpenPalette(void)
         g_rcBox[i].bottom = g_rcBox[i].top + g_cyBox - 5;
         if (i < g_nBasic) g_rgbBox[i] = ResDword(lp + 4 * i);
         else if (g_nBasic != 0) g_rgbBox[i] = 0x00FFFFFF;
-        else g_rgbBox[i] = d02CE[i];
+        else g_rgbBox[i] = DefaultBasicColor(i);
     }
     if (g_nBasic == 0) g_nBasic = 48;
     if (hRes) FreeResource(hRes);

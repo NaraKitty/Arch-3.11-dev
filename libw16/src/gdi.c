@@ -61,6 +61,7 @@ void w16_screen_init(int w, int h)
     if (c) ncolors = atoi(c) == 16 ? 16 : atoi(c) == 256 ? 256 : 1 << 24;
     c = getenv("W16_DAC");
     dac_ideal = c && !strcmp(c, "ideal");
+    w16_syscolors_realize(); /* (USER's start-up makes some WIN.INI colours solid, see sys.c) */
 }
 
 static uint32_t cref_to_rgb(COLORREF c) { return ((c & 0xFF) << 16) | (c & 0xFF00) | ((c >> 16) & 0xFF); }
