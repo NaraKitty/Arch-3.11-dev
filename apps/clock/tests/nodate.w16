@@ -1,0 +1,7 @@
+# Date off (CLOCK.INI Options=1,0,1,0,0,1): the title is just "Clock"
+# reference: clock-def.scn with -PrivateIni 'CLOCK.INI:Clock/Options=1,0,1,0,0,1'
+# regress: sh apps/clock/tests/clock.sh "$TEST" "$OUT" "Options=1,0,1,0,0,1"
+# compare: clock-nd/01.png 01.png ignore 320 240 333 261
+sleep 300
+shot shots/01.png
+quit

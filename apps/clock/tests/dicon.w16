@@ -1,0 +1,8 @@
+# The digital clock started minimised (CLOCK.INI Options=0,1,1,0,0,0): the 36 x 36 icon shows the
+# hours and minutes only, Arial at 11 pixels per em, under the active icon title "Clock - 10/8"
+# reference: clock-def.scn with -PrivateIni 'CLOCK.INI:Clock/Options=0,1,1,0,0,0'
+# regress: sh apps/clock/tests/clock.sh "$TEST" "$OUT" "Options=0,1,1,0,0,0"
+# compare: clock-dicon/01.png 01.png ignore 320 240 333 261
+sleep 300
+shot shots/01.png
+quit

@@ -88,12 +88,24 @@ static void init_metrics(int sw, int sh)
     m[SM_CYMINTRACK] = 27;
     m[SM_CXDOUBLECLK] = 4;
     m[SM_CYDOUBLECLK] = 4;
-    m[SM_CXICONSPACING] = 77;
-    m[SM_CYICONSPACING] = 77;
+    /* USER seg3:1DF5: LOGPIXELSX * 75 / 96 (75 on VGA) unless WIN.INI [desktop] IconSpacing says
+     * otherwise, never under cxIcon (measured: the first icon sits at 75 / 2 - 16 = 21, and at 34 with
+     * IconSpacing=100). rgwSysMet[SM_CXICONSPACING] is USER's [0xc0], which
+     * SPI_ICONHORIZONTALSPACING sets, so GetSystemMetrics reads w16_icon_spacing. */
+    m[SM_CXICONSPACING] = w16_icon_spacing;
+    /* USER seg3:1E1C/1E98: cyIcon / 4 + the icon window (cyIcon + 4 cyBorder) + the title: with
+     * IconTitleWrap=1 two lines of the 13-pixel MS Sans Serif 8 icon title font plus cyBorder each
+     * (72 on VGA, the measured distance of the first icon row above the bottom of the screen), else
+     * one line plus 2 cyBorder */
+    m[SM_CYICONSPACING] = w16_icon_title_wrap ? 2 * (13 + 1) + 32 / 4 + 32 + 4 : 32 / 4 + 2 + 32 + 4 + 13;
     m[SM_MENUDROPALIGNMENT] = 0;
 }
 
-int GetSystemMetrics(int i) { return (i >= 0 && i < SM_CMETRICS) ? w16_metric[i] : 0; }
+int GetSystemMetrics(int i)
+{
+    if (i == SM_CXICONSPACING) return w16_icon_spacing;
+    return (i >= 0 && i < SM_CMETRICS) ? w16_metric[i] : 0;
+}
 COLORREF GetSysColor(int i) { return (i >= 0 && i < W16_NUM_SYSCOLORS) ? w16_syscolor[i] : 0; }
 
 void SetSysColors(int n, const int *idx, const COLORREF *v)
@@ -322,12 +334,11 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
     }
     if (!done && key && val) {
         if (!sawsec) {
-            /* a new section follows an empty line; in a new (empty) file it is the first line
-             * (measured: the WINMINE.INI real 3.11 creates starts with "[Minesweeper]") */
+            /* a new section follows a blank line, except at the top of an empty file (real 3.11's
+             * Clock created CLOCK.INI as "[Clock]\r\nMaximized=0\r\n...") */
             size_t L = strlen(out);
             if (L && out[L - 1] != '\n') strcat(out, "\r\n");
-            if (L) strcat(out, "\r\n");
-            strcat(out, "["); strcat(out, app); strcat(out, "]\r\n");
+            strcat(out, L ? "\r\n[" : "["); strcat(out, app); strcat(out, "]\r\n");
             strcat(out, key); strcat(out, "="); strcat(out, val); strcat(out, "\r\n");
         } else {
             /* the section ends the file */
@@ -443,6 +454,59 @@ DWORD GetTickCount(void)
     return (DWORD)((t.tv_sec - t0.tv_sec) * 1000 + (t.tv_nsec - t0.tv_nsec) / 1000000) + 60000;
 }
 DWORD GetCurrentTime(void) { return GetTickCount(); }
+
+/* The DOS clock (INT 21h AH=2Ah get date, AH=2Ch get time, as DOS3Call returns them): local time with
+ * hundredths of a second. With ARCH311_CLOCK="YYYY-MM-DD HH:MM:SS" the clock reads exactly that at the
+ * first call and runs on in real time, like a DOS clock set with the DATE and TIME commands - the
+ * reference machine's clock is set the same way (ref-run.ps1 -Dos 'time 09:30:00'). */
+static void dos_clock(struct tm *tm, int *hundredths)
+{
+    static int init;
+    static long long offset_us;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    long long now = (long long)tv.tv_sec * 1000000 + tv.tv_usec;
+    if (!init) {
+        init = 1;
+        const char *fixed = getenv("ARCH311_CLOCK");
+        struct tm t;
+        memset(&t, 0, sizeof t);
+        if (fixed && sscanf(fixed, "%d-%d-%d %d:%d:%d", &t.tm_year, &t.tm_mon, &t.tm_mday, &t.tm_hour, &t.tm_min,
+                            &t.tm_sec) == 6) {
+            t.tm_year -= 1900;
+            t.tm_mon -= 1;
+            t.tm_isdst = -1;
+            time_t when = mktime(&t);
+            if (when != (time_t)-1) offset_us = (long long)when * 1000000 - now;
+        }
+    }
+    now += offset_us;
+    time_t s = (time_t)(now / 1000000);
+    localtime_r(&s, tm);
+    *hundredths = (int)(now % 1000000) / 10000;
+}
+
+void w16_dos_gettime(int *hour, int *min, int *sec, int *hundredths)
+{
+    struct tm t;
+    int h;
+    dos_clock(&t, &h);
+    if (hour) *hour = t.tm_hour;
+    if (min) *min = t.tm_min;
+    if (sec) *sec = t.tm_sec;
+    if (hundredths) *hundredths = h;
+}
+
+void w16_dos_getdate(int *year, int *month, int *day, int *weekday)
+{
+    struct tm t;
+    int h;
+    dos_clock(&t, &h);
+    if (year) *year = t.tm_year + 1900;
+    if (month) *month = t.tm_mon + 1;
+    if (day) *day = t.tm_mday;
+    if (weekday) *weekday = t.tm_wday;
+}
 
 /* ------------------------------------------------------------------ memory */
 #define MEM_MAGIC 0x4D454D31u

@@ -140,7 +140,11 @@ struct W16Font {
     const uint8_t *fnt;  /* raw FNT (inside module data) */
     int v3;
     struct W16Font *next;
+    struct W16TT *tt;    /* a TrueType font (truetype.c) instead of a raster one */
 };
+W16Font *w16_tt_realize(const LOGFONT *lf); /* NULL: not a TrueType face, or no FreeType */
+void w16_tt_draw_text(HDC dc, W16Font *f, int x, int y, const char *s, int n, uint32_t fg, const int *dx,
+                      int charextra, const Region *clip, W16Bitmap *t);
 W16Font *w16_font_realize(const LOGFONT *lf);
 W16Font *w16_font_system(void);
 int w16_text_width(W16Font *f, const char *s, int n);
@@ -236,6 +240,7 @@ int w16_nc_hittest(HWND h, int x, int y);
 LRESULT w16_nc_lbuttondown(HWND h, int hit, int x, int y);
 void w16_sys_command(HWND h, UINT cmd, int x, int y);
 void w16_draw_caption(HWND h, HDC dc, int active);
+extern HWND w16_sysbox_inverted; /* system-menu box selected by the menu loop: drawn inverted */
 int w16_has_caption(DWORD style);
 void w16_draw_sb(HWND h, HDC dc, int bar, int pressed_part);
 void w16_get_sb_rect(HWND h, int bar, RECT *r); /* window-relative */
@@ -246,6 +251,9 @@ void w16_iconic_paint(HWND h);
 /* USER's internal WINDOWPOS flags (WM_WINDOWPOSCHANGED): the client area kept its size / place */
 #define W16_SWP_NOCLIENTSIZE 0x0800
 #define W16_SWP_NOCLIENTMOVE 0x1000
+int w16_icon_title_rect(HWND h, RECT *r);   /* screen rectangle of an icon's title (0: not an icon) */
+void w16_invalidate_icon_title(HWND h);
+void w16_paint_icon_titles(HDC desktop_dc); /* the desktop's WM_PAINT draws the icon titles */
 void w16_minimize(HWND h);
 void w16_maximize(HWND h);
 void w16_restore(HWND h);

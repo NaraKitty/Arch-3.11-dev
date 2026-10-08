@@ -480,7 +480,8 @@ static void popup_draw_item(Popup *p, HDC dc, int i)
     if (it->flags & MF_CHECKED) {
         W16Bitmap *ck = w16_obm(OBM_CHECK);
         if (ck) {
-            /* at the item's left edge (measured on WINMINE's Game menu: Beginner, Marks, Color) */
+            /* USER seg10:21DA: BitBlt at the item's left edge, centred down the item (measured on
+             * WINMINE's Game menu and Clock's Settings menu) */
             int cx = r.left, cy = r.top + (r.bottom - r.top - ck->h) / 2;
             HDC tmp = dc;
             int a = cx, b = cy;
@@ -542,7 +543,7 @@ static LRESULT popup_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         FrameRect(dc, &r, w16_sys_brush(COLOR_WINDOWFRAME));
         /* 1-pixel shadow below (x 1 .. w-2) and to the right (y 1 .. h-1): USER seg10:0333 PatBlts
          * the COLOR_GRAYTEXT brush there (its colour table entry 17 at ds:054E), so dark pixels under
-         * it turn light gray too (measured over WINMINE's board) */
+         * it turn light gray too (measured over WINMINE's board and Clock's face) */
         HBRUSH sh = w16_sys_brush(COLOR_GRAYTEXT);
         FillRect(dc, &(RECT){1, r.bottom, r.right, r.bottom + 1}, sh);
         FillRect(dc, &(RECT){r.right, 1, r.right + 1, r.bottom + 1}, sh);
@@ -658,15 +659,23 @@ typedef struct {
     int npop;
 } Track;
 
+/* the selected bar item carries MF_HILITE while the menu is tracked, as in USER, so a repaint of the
+ * menu bar (a popup closing over it) keeps the highlight */
 static void bar_hilite(Track *t, int i)
 {
     HMENU m = t->h->menu;
     if (!m) return;
     if (t->bar_sel == i) return;
     HDC dc = GetWindowDC(t->h);
-    if (t->bar_sel >= 0 && t->bar_sel < m->n) draw_bar_item(t->h, dc, t->bar_sel, 0);
+    if (t->bar_sel >= 0 && t->bar_sel < m->n) {
+        m->it[t->bar_sel].flags &= ~MF_HILITE;
+        draw_bar_item(t->h, dc, t->bar_sel, 0);
+    }
     t->bar_sel = i;
-    if (i >= 0) draw_bar_item(t->h, dc, i, 1);
+    if (i >= 0) {
+        m->it[i].flags |= MF_HILITE;
+        draw_bar_item(t->h, dc, i, 1);
+    }
     ReleaseDC(t->h, dc);
     if (i >= 0) {
         struct W16MenuItem *it = &m->it[i];
@@ -678,6 +687,8 @@ static void sys_hilite(Track *t, int on)
 {
     if (t->sys == on) return;
     t->sys = on;
+    /* the caption draws the box inverted while it is selected (w16_draw_caption) */
+    w16_sysbox_inverted = on ? t->h : NULL;
     if (IsIconic(t->h)) return;
     /* invert the system-menu box in the caption */
     HDC dc = GetWindowDC(t->h);
@@ -727,6 +738,26 @@ static void open_sys_popup(Track *t)
     w16_sysbox_rect(t->h, &r);
     OffsetRect(&r, t->h->rw.left, t->h->rw.top);
     t->pop[t->npop++] = popup_open(t->h, sm, r.left, r.bottom, 0, 1);
+}
+
+/* Moving between the system-menu box and the bar items. The open popups close first: closing one
+ * repaints what it covered, caption and menu bar included, which would wipe a highlight set before
+ * (measured on Clock: Settings open, Left -> the system menu opens under an inverted system box;
+ * Esc, Esc -> the box is plain again). */
+static void move_to_sys(Track *t, int open)
+{
+    close_popups(t, 0);
+    bar_hilite(t, -1);
+    sys_hilite(t, 1);
+    if (open) open_sys_popup(t);
+}
+
+static void move_to_bar(Track *t, int i, int open)
+{
+    close_popups(t, 0);
+    sys_hilite(t, 0);
+    bar_hilite(t, i);
+    if (open) open_bar_popup(t, i);
 }
 
 static void execute(Track *t, Popup *p, int i, UINT *cmd, int *is_sys)
@@ -805,9 +836,7 @@ static void run_tracking(Track *t, int start_open, int keyboard)
                 over_sys = PtInRect(&h->rw, pt);
             if (bi >= 0 && (mouse_down || m.message != WM_MOUSEMOVE || t->npop)) {
                 if (bi != t->bar_sel || t->sys) {
-                    sys_hilite(t, 0);
-                    bar_hilite(t, bi);
-                    open_bar_popup(t, bi);
+                    move_to_bar(t, bi, 1);
                 } else if (m.message == WM_LBUTTONDOWN && t->npop && !keyboard) {
                     /* clicking the open item again closes the menu */
                     done = 1;
@@ -821,11 +850,7 @@ static void run_tracking(Track *t, int start_open, int keyboard)
                 break;
             }
             if (over_sys && (mouse_down || m.message != WM_MOUSEMOVE)) {
-                if (!t->sys) {
-                    bar_hilite(t, -1);
-                    sys_hilite(t, 1);
-                    open_sys_popup(t);
-                }
+                if (!t->sys) move_to_sys(t, 1);
                 break;
             }
             if (top && m.message == WM_MOUSEMOVE && top->sel >= 0 && !top->menu->it[top->sel].sub) popup_select(top, -1, h);
@@ -873,14 +898,12 @@ static void run_tracking(Track *t, int start_open, int keyboard)
                     if (pos == -1 && has_sys) break;
                     if (pos >= 0) break;
                 }
-                if (pos == -1) { bar_hilite(t, -1); sys_hilite(t, 1); if (was_open) { open_sys_popup(t); popup_select(t->pop[0], next_selectable(t->pop[0]->menu, -1, 1), h); } else close_popups(t, 0); }
-                else {
-                    sys_hilite(t, 0);
-                    bar_hilite(t, pos);
-                    if (was_open) {
-                        open_bar_popup(t, pos);
-                        if (t->npop) popup_select(t->pop[0], next_selectable(t->pop[0]->menu, -1, 1), h);
-                    } else close_popups(t, 0);
+                if (pos == -1) {
+                    move_to_sys(t, was_open);
+                    if (was_open) popup_select(t->pop[0], next_selectable(t->pop[0]->menu, -1, 1), h);
+                } else {
+                    move_to_bar(t, pos, was_open);
+                    if (was_open && t->npop) popup_select(t->pop[0], next_selectable(t->pop[0]->menu, -1, 1), h);
                 }
                 break;
             }
@@ -933,10 +956,9 @@ static void run_tracking(Track *t, int start_open, int keyboard)
                 } else MessageBeep(0);
             } else if (h->menu) {
                 int i = mnemonic_index(h->menu, ch);
-                if (ch == ' ' && (h->style & WS_SYSMENU)) { bar_hilite(t, -1); sys_hilite(t, 1); open_sys_popup(t); popup_select(t->pop[0], next_selectable(t->pop[0]->menu, -1, 1), h); }
+                if (ch == ' ' && (h->style & WS_SYSMENU)) { move_to_sys(t, 1); popup_select(t->pop[0], next_selectable(t->pop[0]->menu, -1, 1), h); }
                 else if (i >= 0) {
-                    sys_hilite(t, 0);
-                    bar_hilite(t, i);
+                    move_to_bar(t, i, 0);
                     if (h->menu->it[i].sub) {
                         open_bar_popup(t, i);
                         if (t->npop) popup_select(t->pop[0], next_selectable(t->pop[0]->menu, -1, 1), h);
