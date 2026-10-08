@@ -278,6 +278,12 @@ BOOL SystemParametersInfo(UINT action, UINT param, void *pv, UINT winini)
         GetProfileString("desktop", "IconTitleFaceName", "MS Sans Serif", lf->lfFaceName, sizeof lf->lfFaceName);
         return TRUE;
     }
+    case SPI_SETLANGDRIVER:
+        /* USER loads the language driver (a 16-bit DLL: not on arch311) and with SPIF_UPDATEINIFILE
+         * records it in SYSTEM.INI [boot] LANGUAGE.DLL (measured: International's German gave
+         * "language.dll=langger.dll"). UNTESTED: what 3.1 returns when the DLL cannot be loaded */
+        if (winini & SPIF_UPDATEINIFILE) WritePrivateProfileString("boot", "LANGUAGE.DLL", pv ? (LPCSTR)pv : "", "SYSTEM.INI");
+        return TRUE;
     }
     return FALSE;
 }

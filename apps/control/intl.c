@@ -930,8 +930,11 @@ static void OnCountrySelChange(HWND hDlg)
 /* ------------------------------------------------------------------ OK */
 /* seg12:102F: a changed language or keyboard layout. 3.1 first installs the DLL the INF line
  * names ("3:kbdgr.dll") from the Windows disks (InstallFiles seg1:07BA with dialogs 23 and 30;
- * a cancelled install keeps the dialog open), then loads it. Neither is done here (16-bit
- * DLLs): UNTESTED against 3.1, whose run would ask for the disk. */
+ * a cancelled install keeps the dialog open; it also records the file in CONTROL.INI
+ * [installed]), then loads it. Neither is done here (16-bit DLLs). The INI entries match a real
+ * 3.11 run that installed German from an A: drive: SYSTEM.INI [boot] language.dll=langger.dll,
+ * [boot.description] language.dll=German, [keyboard] keyboard.dll=kbdgr.dll (KERNEL drops the
+ * blank MAIN.CPL leaves after the name). */
 static BOOL InstallDriverFromList(HWND hDlg, int idCombo)
 {
     char line[0x100], desc[0x100], szSect[0x14], szKey[0x14], szOld[0x9E];
@@ -959,8 +962,12 @@ static BOOL InstallDriverFromList(HWND hDlg, int idCombo)
         lstrcpy(g_intl.sLanguage, g_intlDef.sLanguage);   /* (never written to WIN.INI) */
     }
     if (idCombo == IDC_LANGUAGE) {
-        /* TODO: SystemParametersInfo(SPI_SETLANGDRIVER, 0, g_szDllName, SPIF_UPDATEINIFILE) loads
-         * the language driver (3.1 keeps the dialog open if that fails); not done */
+        /* USER loads the language driver here; libw16 only records it in SYSTEM.INI [boot]
+         * (there are no 16-bit language drivers on arch311) */
+        if (!SystemParametersInfo(SPI_SETLANGDRIVER, 0, g_szDllName, SPIF_UPDATEINIFILE)) {
+            SetFocus(hCombo);
+            return FALSE;
+        }
         desc[0] = 0;
         if ((int)SendMessage(hCombo, CB_GETLBTEXTLEN, sel, 0) < (int)sizeof desc)
             SendMessage(hCombo, CB_GETLBTEXT, sel, (LPARAM)desc);
