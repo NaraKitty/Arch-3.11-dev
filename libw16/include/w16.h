@@ -1318,6 +1318,24 @@ int w16_drive_root(char letter, char *root, size_t cb); /* 0 if the drive letter
 void w16_dos_fullpath(LPCSTR dos, LPSTR out, size_t cb); /* "..\\X" -> "C:\\X": full, upper case, dots resolved */
 void w16_getcwd(LPSTR dos, size_t cb);                  /* "C:\\WINDOWS" */
 int w16_chdir(LPCSTR dos);                              /* "X:", "..", "X:\\DIR": 0, -1 no path, -2 no drive */
+/* COMM (comm.c): COM1..4 are Linux's ttyS0..3 */
+#define SETXOFF 1
+#define SETXON 2
+#define SETRTS 3
+#define CLRRTS 4
+#define SETDTR 5
+#define CLRDTR 6
+#define RESETDEV 7
+#define GETMAXLPT 8
+#define GETMAXCOM 9
+#define GETBASEIRQ 10
+LONG EscapeCommFunction(int cid, int func);
+/* ExitWindows: the program's windows are asked (WM_QUERYENDSESSION) and told (WM_ENDSESSION), then
+ * the program ends; restarting or rebooting the arch311 session is not wired up yet (UNTESTED) */
+#define EW_RESTARTWINDOWS 0x42
+#define EW_REBOOTSYSTEM 0x43
+#define EW_EXITANDEXECAPP 0x44
+BOOL ExitWindows(DWORD code, UINT reserved);
 /* there are no critical-error boxes to suppress; the mode is kept for callers that restore it */
 #define SEM_FAILCRITICALERRORS 0x0001
 #define SEM_NOGPFAULTERRORBOX 0x0002

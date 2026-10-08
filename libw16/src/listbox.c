@@ -530,6 +530,9 @@ typedef struct {
     int dropped;
     int btn_down;
     RECT btn;
+    RECT field;       /* the edit or static part */
+    RECT droprc;      /* where the list goes, in the combo's coordinates */
+    int full_h;       /* the height the combo was created with (field + list) */
     int ih;
     int drop_h;
     int focus;
@@ -548,6 +551,50 @@ static void cb_text_from_list(HWND h)
     else { free(h->text); h->text = strdup(buf); InvalidateRect(h, NULL, FALSE); }
 }
 
+/* USER seg34:02AC, at creation and again on WM_SETFONT: the field is the font's height + min(that,
+ * the system font's height) / 4 + 4 borders high; a drop-down's button is the right SM_CXVSCROLL
+ * pixels; a drop-down list's field reaches under the button's left border, a drop-down edit stops a
+ * system-font character width (8 on VGA) short of it; the list starts on the field's bottom line,
+ * indented by that width except under a drop-down list. On 3.11 the Ports settings combos (8 pt Helv)
+ * come out 20 px high, edits 53 and lists 61 px wide in a 77 px combo. */
+static void cb_layout(HWND h)
+{
+    Cb *c = cbd(h);
+    HDC dc = GetDC(h);
+    HGDIOBJ of = SelectObject(dc, h->font ? h->font : GetStockObject(SYSTEM_FONT));
+    TEXTMETRIC tm, sys;
+    GetTextMetrics(dc, &tm);
+    SelectObject(dc, GetStockObject(SYSTEM_FONT));
+    GetTextMetrics(dc, &sys);
+    SelectObject(dc, of);
+    ReleaseDC(h, dc);
+    int cxb = GetSystemMetrics(SM_CXBORDER), cyb = GetSystemMetrics(SM_CYBORDER), cxsys = LOWORD(GetDialogBaseUnits());
+    int w = h->rc.right - h->rc.left;
+    int eh = tm.tmHeight + min(tm.tmHeight, sys.tmHeight) / 4 + 4 * cyb, fw = w;
+    c->ih = tm.tmHeight;
+    if (cbtype(h) == CBS_SIMPLE)
+        SetRectEmpty(&c->btn);
+    else {
+        int bw = GetSystemMetrics(SM_CXVSCROLL);
+        SetRect(&c->btn, w - bw, 0, w, eh);
+        fw = max(0, w - bw + cxb);
+        if (cbtype(h) == CBS_DROPDOWN) fw = max(0, fw - cxsys);
+    }
+    SetRect(&c->field, 0, 0, fw, eh);
+    SetRect(&c->droprc, cbtype(h) == CBS_DROPDOWNLIST ? 0 : cxsys, eh - cyb, w, c->full_h - cyb);
+    c->drop_h = c->droprc.bottom - c->droprc.top;
+    if (c->edit) SetWindowPos(c->edit, NULL, 0, 0, fw, eh, SWP_NOZORDER | SWP_NOACTIVATE);
+    if (cbtype(h) == CBS_SIMPLE)
+        SetWindowPos(c->list, NULL, c->droprc.left, c->droprc.top, c->droprc.right - c->droprc.left, c->drop_h,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+    else if (h->rc.bottom - h->rc.top != eh) {
+        /* the combo window itself is only as tall as its field */
+        RECT pr = h->parent && h->parent != w16_desktop ? h->parent->rc : (RECT){0, 0, 0, 0};
+        SetWindowPos(h, NULL, h->rw.left - pr.left, h->rw.top - pr.top, h->rw.right - h->rw.left, eh,
+                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+    }
+}
+
 static void cb_show(HWND h, int show)
 {
     Cb *c = cbd(h);
@@ -560,7 +607,9 @@ static void cb_show(HWND h, int show)
         int n = (int)SendMessage(c->list, LB_GETCOUNT, 0, 0);
         int maxh = c->drop_h > 0 ? c->drop_h : c->ih * 8 + 2;
         int hh = min(maxh, max(1, n) * c->ih + 2);
-        SetWindowPos(c->list, HWND_TOP, r.left, r.top + (c->btn.bottom - c->btn.top), w, hh, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+        /* UNTESTED against 3.11: the dropped list's height (sized to its items here) */
+        SetWindowPos(c->list, HWND_TOP, r.left + c->droprc.left, r.top + c->droprc.top, w - c->droprc.left, hh,
+                     SWP_SHOWWINDOW | SWP_NOACTIVATE);
         int sel = (int)SendMessage(c->list, LB_GETCURSEL, 0, 0);
         if (sel >= 0) SendMessage(c->list, LB_SETTOPINDEX, sel, 0);
         SetCapture(c->list);
@@ -588,11 +637,12 @@ static void cb_paint(HWND h, HDC dc)
         FillRect(dc, &b, w16_sys_brush(COLOR_BTNFACE));
         HBRUSH hi = w16_sys_brush(COLOR_BTNHIGHLIGHT), sh = w16_sys_brush(COLOR_BTNSHADOW);
         if (!c->btn_down) {
+            /* 2 px shadow, then the highlight over it: the inner shadow line starts a pixel in (3.11) */
             RECT t;
-            SetRect(&t, b.left, b.top, b.right - 1, b.top + 1); FillRect(dc, &t, hi);
-            SetRect(&t, b.left, b.top, b.left + 1, b.bottom - 1); FillRect(dc, &t, hi);
             SetRect(&t, b.left, b.bottom - 2, b.right, b.bottom); FillRect(dc, &t, sh);
             SetRect(&t, b.right - 2, b.top, b.right, b.bottom); FillRect(dc, &t, sh);
+            SetRect(&t, b.left, b.top, b.right - 1, b.top + 1); FillRect(dc, &t, hi);
+            SetRect(&t, b.left, b.top, b.left + 1, b.bottom - 1); FillRect(dc, &t, hi);
         } else {
             RECT t;
             SetRect(&t, b.left, b.top, b.right, b.top + 1); FillRect(dc, &t, sh);
@@ -614,14 +664,24 @@ static void cb_paint(HWND h, HDC dc)
         }
     }
     if (cbtype(h) == CBS_DROPDOWNLIST) {
-        RECT t = {0, 0, c->btn.left - 2, c->btn.bottom};
+        /* USER seg33:0E77: inside the frame the control colour, then 1 px in the text cell: opaque
+         * text 1 px in from its corner, in the highlight colours with a focus rectangle around it
+         * while the box has the focus and is not dropped */
+        RECT t = c->field;
+        int sel = c->focus && !c->dropped;
         FrameRect(dc, &t, w16_sys_brush(COLOR_WINDOWFRAME));
+        InflateRect(&t, -GetSystemMetrics(SM_CXBORDER), -GetSystemMetrics(SM_CYBORDER));
+        FillRect(dc, &t, bg);
         InflateRect(&t, -1, -1);
-        FillRect(dc, &t, c->focus ? w16_sys_brush(COLOR_HIGHLIGHT) : bg);
-        SetBkMode(dc, TRANSPARENT);
-        SetTextColor(dc, c->focus ? GetSysColor(COLOR_HIGHLIGHTTEXT) : GetSysColor(COLOR_WINDOWTEXT));
-        TextOut(dc, t.left + 2, t.top + (t.bottom - t.top - c->ih) / 2, h->text, strlen(h->text));
-        if (c->focus) { RECT fr = t; DrawFocusRect(dc, &fr); }
+        if (sel) {
+            FillRect(dc, &t, w16_sys_brush(COLOR_HIGHLIGHT));
+            SetTextColor(dc, GetSysColor(COLOR_HIGHLIGHTTEXT));
+            SetBkColor(dc, GetSysColor(COLOR_HIGHLIGHT));
+        } else if (h->style & WS_DISABLED)
+            SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
+        SetBkMode(dc, OPAQUE);
+        ExtTextOut(dc, t.left + 1, t.top + 1, ETO_CLIPPED | ETO_OPAQUE, &t, h->text, strlen(h->text), NULL);
+        if (sel) DrawFocusRect(dc, &t);
     }
     SelectObject(dc, of);
 }
@@ -639,33 +699,19 @@ LRESULT w16_combobox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         return DefWindowProc(h, m, wp, lp);
     }
     case WM_CREATE: {
-        HDC dc = GetDC(NULL);
-        SelectObject(dc, GetStockObject(SYSTEM_FONT));
-        TEXTMETRIC tm;
-        GetTextMetrics(dc, &tm);
-        ReleaseDC(NULL, dc);
-        c->ih = tm.tmHeight;
         RECT r;
         GetClientRect(h, &r);
-        int eh = c->ih + 6;
-        int bw = GetSystemMetrics(SM_CXVSCROLL);
+        c->full_h = r.bottom;
         DWORD ls = WS_BORDER | WS_VSCROLL | LBS_NOTIFY | (h->style & CBS_SORT ? LBS_SORT : 0) |
                    (h->style & CBS_OWNERDRAWFIXED ? LBS_OWNERDRAWFIXED : 0) | (h->style & CBS_HASSTRINGS ? LBS_HASSTRINGS : 0) | LBS_NOINTEGRALHEIGHT;
-        if (cbtype(h) == CBS_SIMPLE) {
-            c->edit = CreateWindow("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 0, 0, r.right, eh, h, (HMENU)1001, NULL, NULL);
-            c->list = CreateWindow("LISTBOX", "", WS_CHILD | WS_VISIBLE | ls, 0, eh - 1, r.right, r.bottom - eh + 1, h, (HMENU)1000, NULL, NULL);
-            lbd(c->list)->combo = h;
-        } else {
-            c->drop_h = r.bottom - eh;
-            /* the combobox window itself is only as tall as the edit/static part */
-            RECT pr = h->parent->rc;
-            SetWindowPos(h, NULL, h->rw.left - pr.left, h->rw.top - pr.top, r.right, eh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
-            SetRect(&c->btn, r.right - bw, 0, r.right, eh);
-            if (cbtype(h) == CBS_DROPDOWN)
-                c->edit = CreateWindow("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 0, 0, r.right - bw - 2, eh, h, (HMENU)1001, NULL, NULL);
+        if (cbtype(h) != CBS_DROPDOWNLIST)
+            c->edit = CreateWindow("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 0, 0, r.right, 1, h, (HMENU)1001, NULL, NULL);
+        if (cbtype(h) == CBS_SIMPLE)
+            c->list = CreateWindow("LISTBOX", "", WS_CHILD | WS_VISIBLE | ls, 0, 0, r.right, 1, h, (HMENU)1000, NULL, NULL);
+        else
             c->list = CreateWindowEx(WS_EX_TOPMOST, "COMBOLBOX", "", WS_POPUP | ls, 0, 0, r.right, 100, h, NULL, NULL, h);
-            lbd(c->list)->combo = h;
-        }
+        lbd(c->list)->combo = h;
+        cb_layout(h);
         return 0;
     }
     case WM_DESTROY:
@@ -689,6 +735,8 @@ LRESULT w16_combobox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         h->font = (HFONT)wp;
         if (c->edit) SendMessage(c->edit, WM_SETFONT, wp, lp);
         SendMessage(c->list, WM_SETFONT, wp, lp);
+        cb_layout(h);
+        if (lp) InvalidateRect(h, NULL, TRUE);
         return 0;
     case WM_GETFONT: return (LRESULT)h->font;
     case WM_GETDLGCODE: return DLGC_WANTCHARS | DLGC_WANTARROWS;

@@ -236,19 +236,24 @@ static void paint_group(HWND h, HDC dc)
     SelectObject(dc, of);
 }
 
+/* BS_OWNERDRAW: the parent draws, told what changed - ODA_DRAWENTIRE on paint, ODA_FOCUS when the
+ * focus comes or goes, ODA_SELECT when the button is pressed or released (as USER does) */
+static void owner_draw(HWND h, HDC dc, UINT action)
+{
+    DRAWITEMSTRUCT di = {ODT_BUTTON, h->id, 0, action,
+                         (btn(h)->state & BST_PUSHED ? ODS_SELECTED : 0) | (btn(h)->state & BST_FOCUS ? ODS_FOCUS : 0) |
+                             (h->style & WS_DISABLED ? ODS_DISABLED : 0),
+                         h, dc, {0, 0, 0, 0}, 0};
+    GetClientRect(h, &di.rcItem);
+    SendMessage(h->parent, WM_DRAWITEM, h->id, (LPARAM)&di);
+}
+
 static void paint(HWND h, HDC dc)
 {
     switch (btype(h)) {
     case BS_PUSHBUTTON: case BS_DEFPUSHBUTTON: paint_push(h, dc); break;
     case BS_GROUPBOX: paint_group(h, dc); break;
-    case BS_OWNERDRAW: {
-        /* DRAWITEMSTRUCT (Win16 layout with native handles) */
-        struct { UINT type, id, action, state; HWND hwnd; HDC dc; RECT rc; DWORD data; } di;
-        di.type = 4; di.id = h->id; di.action = 1; di.state = (btn(h)->state & BST_PUSHED ? 1 : 0) | (btn(h)->state & BST_FOCUS ? 0x10 : 0);
-        di.hwnd = h; di.dc = dc; GetClientRect(h, &di.rc); di.data = 0;
-        SendMessage(h->parent, WM_DRAWITEM, h->id, (LPARAM)&di);
-        break;
-    }
+    case BS_OWNERDRAW: owner_draw(h, dc, ODA_DRAWENTIRE); break;
     case BS_USERBUTTON: SendMessage(h->parent, WM_COMMAND, h->id, MAKELPARAM(0, BN_PAINT)); break;
     default: paint_check(h, dc); break;
     }
@@ -259,6 +264,16 @@ static void redraw(HWND h)
     if (!w16_window_visible(h)) return;
     HDC dc = GetDC(h);
     paint(h, dc);
+    ReleaseDC(h, dc);
+}
+
+/* the focus or pushed state changed: an owner-drawn button is asked for just that part */
+static void redraw_part(HWND h, UINT action)
+{
+    if (btype(h) != BS_OWNERDRAW) { redraw(h); return; }
+    if (!w16_window_visible(h)) return;
+    HDC dc = GetDC(h);
+    owner_draw(h, dc, action);
     ReleaseDC(h, dc);
 }
 
@@ -321,7 +336,7 @@ LRESULT w16_button_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     case BM_GETSTATE: return b->state | b->check;
     case BM_SETSTATE:
         if (wp) b->state |= BST_PUSHED; else b->state &= ~BST_PUSHED;
-        redraw(h);
+        redraw_part(h, ODA_SELECT);
         return 0;
     case BM_SETSTYLE:
         h->style = (h->style & ~0x0F) | (wp & 0x0F);
@@ -329,12 +344,17 @@ LRESULT w16_button_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         return 0;
     case WM_SETFOCUS:
         b->state |= BST_FOCUS;
-        redraw(h);
+        redraw_part(h, ODA_FOCUS);
         return 0;
     case WM_KILLFOCUS:
         b->state &= ~BST_FOCUS;
-        if (b->tracking) { b->tracking = 0; b->state &= ~BST_PUSHED; ReleaseCapture(); }
-        redraw(h);
+        if (b->tracking) {
+            b->tracking = 0;
+            b->state &= ~BST_PUSHED;
+            ReleaseCapture();
+            redraw_part(h, ODA_SELECT);
+        }
+        redraw_part(h, ODA_FOCUS);
         return 0;
     case WM_LBUTTONDOWN:
     case WM_LBUTTONDBLCLK:
@@ -347,7 +367,7 @@ LRESULT w16_button_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         SetCapture(h);
         b->tracking = 1;
         b->state |= BST_PUSHED;
-        redraw(h);
+        redraw_part(h, ODA_SELECT);
         return 0;
     case WM_MOUSEMOVE:
         if (b->tracking) {
@@ -357,7 +377,7 @@ LRESULT w16_button_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
             int in = PtInRect(&r, p);
             if (in != ((b->state & BST_PUSHED) != 0)) {
                 if (in) b->state |= BST_PUSHED; else b->state &= ~BST_PUSHED;
-                redraw(h);
+                redraw_part(h, ODA_SELECT);
             }
         }
         return 0;
@@ -367,20 +387,20 @@ LRESULT w16_button_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
             ReleaseCapture();
             int in = (b->state & BST_PUSHED) != 0;
             b->state &= ~BST_PUSHED;
-            redraw(h);
+            redraw_part(h, ODA_SELECT);
             if (in) click(h);
         }
         return 0;
     case WM_KEYDOWN:
         if (wp == VK_SPACE && !b->tracking) {
             b->state |= BST_PUSHED;
-            redraw(h);
+            redraw_part(h, ODA_SELECT);
         }
         return 0;
     case WM_KEYUP:
         if (wp == VK_SPACE && (b->state & BST_PUSHED)) {
             b->state &= ~BST_PUSHED;
-            redraw(h);
+            redraw_part(h, ODA_SELECT);
             click(h);
         }
         return 0;

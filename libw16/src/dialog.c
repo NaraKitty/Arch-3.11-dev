@@ -166,7 +166,9 @@ static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC 
         if (!ch) { W16_LOG("dialog: could not create control class %s\n", ccls); continue; }
         if (font) SendMessage(ch, WM_SETFONT, (WPARAM)font, 0);
         if (ord && !strcasecmp(ccls, "STATIC") && (is & 0xF) == SS_ICON) {
+            /* a system icon (MAIN.CPL's restart box uses IDI_EXCLAMATION) when the module has none */
             HICON ic = LoadIcon(inst, MAKEINTRESOURCE(ord));
+            if (!ic) ic = LoadIcon(NULL, MAKEINTRESOURCE(ord));
             SendMessage(ch, STM_SETICON, (WPARAM)ic, 0);
         }
         if (!first && (is & WS_TABSTOP) && !(is & WS_DISABLED) && (is & WS_VISIBLE)) first = ch;
@@ -404,9 +406,18 @@ static int tabbable(HWND c)
     return (c->style & WS_VISIBLE) && !(c->style & WS_DISABLED) && (c->style & WS_TABSTOP);
 }
 
+/* the dialog's own child holding ctl: the focus can sit in a control's child window (the edit of a
+ * combo box), and USER moves on from the control itself */
+static HWND dlg_child(HWND dlg, HWND ctl)
+{
+    while (w16_valid(ctl) && ctl->parent && ctl->parent != dlg) ctl = ctl->parent;
+    return w16_valid(ctl) && ctl->parent == dlg ? ctl : NULL;
+}
+
 HWND GetNextDlgTabItem(HWND dlg, HWND ctl, BOOL prev)
 {
     if (!w16_valid(dlg) || !dlg->child) return NULL;
+    if (ctl) ctl = dlg_child(dlg, ctl);
     HWND list[512];
     int n = 0, cur = -1;
     for (HWND c = dlg->child; c && n < 512; c = c->next) {
@@ -424,6 +435,8 @@ HWND GetNextDlgTabItem(HWND dlg, HWND ctl, BOOL prev)
 HWND GetNextDlgGroupItem(HWND dlg, HWND ctl, BOOL prev)
 {
     if (!w16_valid(dlg) || !w16_valid(ctl)) return NULL;
+    ctl = dlg_child(dlg, ctl);
+    if (!ctl) return NULL;
     /* group: from the last WS_GROUP item at or before ctl up to the next WS_GROUP item */
     HWND list[512];
     int n = 0, cur = -1;
