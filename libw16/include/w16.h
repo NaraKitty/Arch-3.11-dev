@@ -1231,6 +1231,10 @@ HINSTANCE GetModuleHandle(LPCSTR name);
 HINSTANCE w16_load_module(LPCSTR filename);
 DWORD GetTickCount(void);
 DWORD GetCurrentTime(void);
+/* the DOS clock as programs read it through DOS3Call (INT 21h): local time. ARCH311_CLOCK=
+ * "YYYY-MM-DD HH:MM:SS" (tests) sets it to that moment at the first call; it runs on from there */
+void w16_dos_gettime(int *hour, int *min, int *sec, int *hundredths); /* AH=2Ch: CH, CL, DH, DL */
+void w16_dos_getdate(int *year, int *month, int *day, int *weekday);  /* AH=2Ah: CX, DH, DL, AL */
 int GetProfileInt(LPCSTR app, LPCSTR key, int def);
 int GetProfileString(LPCSTR app, LPCSTR key, LPCSTR def, LPSTR out, int cb);
 BOOL WriteProfileString(LPCSTR app, LPCSTR key, LPCSTR val);

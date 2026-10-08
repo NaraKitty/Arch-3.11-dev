@@ -1,0 +1,34 @@
+# No CLOCK.INI: Settings > Analog, > Seconds (off), > Date (off), then Close from the system menu, which
+# writes CLOCK.INI (clock.sh copies it to OUT/ini). Same keys as arch311-ref/scn/clock-close.scn; its
+# frame 03 is the analog clock without seconds and date (frame 02 shows a second hand at another second
+# than the port's and is not compared). Real 3.11 created CLOCK.INI as "[Clock]", "Maximized=0",
+# "Options=1,0,1,0,0,1", "Position=0,0,208,226" in CRLF lines.
+# regress: sh apps/clock/tests/clock.sh "$TEST" "$OUT"
+# compare: clock-close/03.png 04.png ignore 320 240 333 261
+# ini: CLOCK.INI Clock Maximized=0
+# ini: CLOCK.INI Clock Options=1,0,1,0,0,1
+# ini: CLOCK.INI Clock Position=0,0,208,226
+sleep 400
+sleep 400
+shot shots/01.png
+key alt
+key s
+key a
+sleep 400
+shot shots/02.png
+key alt
+key s
+key s
+sleep 400
+shot shots/03.png
+key alt
+key s
+key t
+sleep 400
+shot shots/04.png
+key alt
+key left
+key enter
+key c
+sleep 500
+quit

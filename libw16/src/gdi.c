@@ -977,6 +977,33 @@ static const uint8_t pen_pattern[5][8] = {
     {1, 1, 1, 0, 1, 0, 1, 0}, /* dashdotdot */
 };
 
+/* The pixels of a line as VGA.DRV's polyline code (seg6:02C9 and the slice set-up at seg6:0773) picks
+ * them: the end points are ordered left to right; along the major axis (the longer delta M, the
+ * other being m) pixel i sits floor((2 i m + M - 1 + up) / 2M) off the first point's minor
+ * coordinate, up = 1 when the ordered line climbs (y decreasing). So an exact half rounds away from
+ * the left point only on rising lines: measured on the hands of real 3.11's Clock, whose
+ * ties differ from a symmetric Bresenham. n = 0..M runs from (x0,y0) to (x1,y1) as given. */
+static void line_px(int x0, int y0, int x1, int y1, int n, int M, int *x, int *y)
+{
+    int i = n;
+    if (x0 > x1) { /* ordered: pixel n counts from the other end */
+        int t = x0; x0 = x1; x1 = t;
+        t = y0; y0 = y1; y1 = t;
+        i = M - n;
+    }
+    int dx = x1 - x0, dy = y1 - y0, up = dy < 0;
+    int ady = up ? -dy : dy;
+    if (ady > dx) {
+        int off = (int)(((long long)2 * i * dx + M - 1 + up) / (2LL * M));
+        *x = x0 + off;
+        *y = y0 + (up ? -i : i);
+    } else {
+        int off = (int)(((long long)2 * i * ady + M - 1 + up) / (2LL * M));
+        *x = x0 + i;
+        *y = y0 + (up ? -off : off);
+    }
+}
+
 static void draw_line_dev(HDC dc, Region *clip, int x0, int y0, int x1, int y1, int last)
 {
     HPEN p = dc->pen;
@@ -987,24 +1014,20 @@ static void draw_line_dev(HDC dc, Region *clip, int x0, int y0, int x1, int y1, 
     int style = p->u.pen.style;
     if (style > PS_DASHDOTDOT) style = PS_SOLID;
     if (w > 1) style = PS_SOLID;
-    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
-    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
-    int err = dx + dy, n = 0;
-    for (;;) {
-        if (x0 == x1 && y0 == y1 && !last) break;
+    int M = max(abs(x1 - x0), abs(y1 - y0));
+    for (int n = 0; n <= M; n++) {
+        if (n == M && !last) break;
+        int x, y;
+        if (M) line_px(x0, y0, x1, y1, n, M, &x, &y);
+        else x = x0, y = y0;
         if (w == 1) {
-            if (pen_pattern[style][n & 7]) put_rop(dc, clip, x0, y0, c, dc->rop2);
-            else if (dc->bkmode == OPAQUE) put_rop(dc, clip, x0, y0, bk, dc->rop2);
+            if (pen_pattern[style][n & 7]) put_rop(dc, clip, x, y, c, dc->rop2);
+            else if (dc->bkmode == OPAQUE) put_rop(dc, clip, x, y, bk, dc->rop2);
         } else {
             int h = w / 2;
-            for (int yy = y0 - h; yy < y0 - h + w; yy++)
-                for (int xx = x0 - h; xx < x0 - h + w; xx++) put_rop(dc, clip, xx, yy, c, dc->rop2);
+            for (int yy = y - h; yy < y - h + w; yy++)
+                for (int xx = x - h; xx < x - h + w; xx++) put_rop(dc, clip, xx, yy, c, dc->rop2);
         }
-        n++;
-        if (x0 == x1 && y0 == y1) break;
-        int e2 = 2 * err;
-        if (e2 >= dy) { err += dy; x0 += sx; }
-        if (e2 <= dx) { err += dx; y0 += sy; }
     }
 }
 
