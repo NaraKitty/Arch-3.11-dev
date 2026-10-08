@@ -20,6 +20,13 @@ Internet Explorer and Netscape Navigator are rebuilt as shells around Chromium (
 minimal distribution); their user interfaces come from the user's ripped installs, the original
 page engines are never used. The CEF download waits for the owner's approval.
 
+Addendum to ADR-003 (session 7, owner): Chromium stays updatable for security fixes. The CEF build the
+browsers use is named in one place (a version file with its URL and SHA-256/SHA-1 checksum, read by the
+build). An owner-run update script fetches a newer CEF release, verifies its published checksum, and
+rebuilds both browsers. The browser shells use only CEF's stable public API, so a CEF update needs no
+port change, and they never patch Chromium. When a CEF update breaks the shell, that is a bug to fix
+in the shell, not a reason to pin an old Chromium.
+
 ## ADR-004 (session 5, owner) - The look is a theme
 Windows 3.11 is the first theme; Windows 1.0/2.x, 95, 98, XP and 7 follow. Look-specific code sits
 behind a theme layer (docs/THEMES.md), and programs switch with the theme.
@@ -49,6 +56,12 @@ originals' code. The same engine may later stand behind MCI for 3.11's own Media
 Recorder. Their assets come from the user's own copies, as with every program.
 Addendum (owner): the players open everything libVLC can read and play, not only MP3/MP4.
 
+Addendum to ADR-007 (session 7, owner): the owner supplied the two players. WinPlay3 v2.3b5 (Fraunhofer
+IIS, the installer wp3v23b5.exe) is the MP3 player; XingMPEG Player 1.3 (xing_31.zip) is the video
+player. Both are installed from the user's copies in the reference rig and reproduced as libVLC shells.
+XingMPEG's licence text forbids reverse engineering, so its UI is reproduced from observation of the
+running program (screenshots, dialogs and menus as resources) unless the owner decides otherwise.
+
 ## ADR-008 (session 7, owner) - Program Manager groups for Linux apps; preferred applications
 - Krita is installed as an item in Accessories next to Paintbrush, with a 3.11-style icon (drawn in
   the theme's style, never a copied Microsoft icon).
@@ -64,3 +77,25 @@ not 8.3, but Linux folders hold long names. Rather than relaxing each ported che
 libw16 DOS path layer (sys.c) gives every long or non-8.3 name a stable 8.3 alias the way VFAT does
 (NAME~1.EXT, upper case, unique per directory) and maps it back on open/create/rename; File Manager
 also shows the long names through WfW's own long-file-name layer (seg19) where 3.11 would.
+
+## ADR-010 (session 7, owner) - Modern dates; the clock syncs over the internet
+- Dates work for today's and future computer dates: the ported date code (Calendar, the Date/Time
+  applet, File Manager, Clock, DOS file times through libw16) uses 64-bit host time. Wherever 3.1
+  stops at a year (for example Calendar's 1980-2099 range), the range is widened to what the host
+  time supports, and the rest of the behaviour stays as in 3.1. These widened limits are the only
+  intended deviations; each is marked in code with the 3.1 limit it replaces.
+- The system clock is set from internet time (NTP, through systemd-timesyncd) by default. The
+  Control Panel Date/Time dialog gets a control to turn that sync on or off, drawn in the theme's
+  style. This is the "internet settings in Control Panel" rule. The sync is a system service: no
+  legacy program gets network access through it (hard rule 4).
+
+## ADR-011 (session 7, owner) - Calmira II is an optional Windows 95-style shell
+Calmira II (GPL v2 or later, Delphi 1 source supplied by the owner as calsrc.zip) becomes an optional
+shell for users who find 3.11's Program Manager layout hard. Its start menu, taskbar, desktop icons and
+explorer give a 95-like layout on top of the 3.11 theme. It never starts automatically: the user
+launches it from Program Manager, and it is not the default shell. It is ported to C on libw16 like
+the other programs, but because its source is GPL, the port and its own art live in their own
+directory under GPL v2+, with the original copyright and licence notices kept. Its source text
+(comments, strings, identifiers) is English; anything that is not English is translated when ported.
+Its bitmaps are Calmira's own. Any bitmap that copies Windows 95 art is not committed and is redrawn
+in the theme's style instead.
