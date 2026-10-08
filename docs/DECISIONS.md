@@ -30,3 +30,12 @@ Native Linux applications are framed by `arch311-wm`, an X11 reparenting window 
 programs keep drawing their own frames in undecorated X windows, so the 3.11 frame has one
 implementation. X11 over Wayland because a reparenting window manager is far smaller than a
 compositor; Wayland can follow behind the same theme code.
+
+## ADR-006 (session 7, owner) - MS-DOS Prompt is a DOSBox; Terminal is the Linux terminal
+Supersedes the earlier plan that the MS-DOS Prompt item opens the Linux terminal emulator. The MS-DOS
+Prompt starts arch311's built-in DOS emulator (DOSBox, a packaged dependency - DOSBox-X like the
+reference rig unless a later ADR picks another), so DOS programs and games run emulated, never natively
+(hard rule 3 still holds: no guest code runs on the host CPU). The Linux terminal is a port of 3.11's
+Terminal (TERMINAL.EXE): its windows, menus, dialogs and VT-100/VT-52/TTY emulation are kept and look as
+in 3.11, but it talks to a shell on a pseudo-terminal instead of a modem; dial-up features (phone
+number, modem commands) have no modem to drive. Windows programs stay native ports (ADR-001).

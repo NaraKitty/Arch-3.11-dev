@@ -51,6 +51,8 @@ NOTHING BOOTS YET.
 | T-SB-01 | bwrap + seccomp + Landlock launcher, virtual C:\\ | |
 | T-BR-01 | QtWebEngine browser with IE5 chrome; T-BR-02 Netscape chrome | ADR-003 |
 | T-APP-nn | Optional clean-room native ports (Notepad, Calc, Clock, Winmine, Sol) | Respect `docs/LEGAL.md` |
+| T-DOS-01 | MS-DOS Prompt starts the built-in DOSBox (C: = arch311's C: drive, 3.11's prompt banner) | ADR-006; needs DOSBox installed |
+| T-TERM-01 | Port TERMINAL.EXE with a pseudo-terminal back end: the Linux terminal in 3.11's Terminal look | ADR-006 |
 
 ## Known quirks and findings
 - The media is **Windows for Workgroups 3.11** (NetWare/WINPOPUP files present), not plain 3.11.
