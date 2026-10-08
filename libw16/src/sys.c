@@ -624,6 +624,8 @@ LPSTR AnsiLower(LPSTR s)
     for (char *c = s; *c; c++) *c = lo1252(*c);
     return s;
 }
+UINT AnsiUpperBuff(LPSTR s, UINT n) { for (UINT i = 0; i < n; i++) s[i] = up1252(s[i]); return n; }
+UINT AnsiLowerBuff(LPSTR s, UINT n) { for (UINT i = 0; i < n; i++) s[i] = lo1252(s[i]); return n; }
 LPSTR AnsiNext(LPCSTR s) { return (LPSTR)(*s ? s + 1 : s); }
 LPSTR AnsiPrev(LPCSTR start, LPCSTR s) { return (LPSTR)(s > start ? s - 1 : s); }
 /* the DOS layer here already speaks ANSI (see w16.h) */
