@@ -126,6 +126,7 @@ void w16_dc_clip_iter_begin(HDC dc, Region *out);
 W16Bitmap *w16_bitmap_of(HBITMAP h);
 HBRUSH w16_sys_brush(int color_index);
 HPEN w16_sys_pen(int color_index);
+void w16_syscolors_realize(void); /* USER's start-up snapping of the WIN.INI colours (sys.c) */
 
 /* OEM bitmaps from the user's display driver (VGA.DRV) */
 W16Bitmap *w16_obm(int id);

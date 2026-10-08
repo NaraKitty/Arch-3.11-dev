@@ -131,12 +131,17 @@ static void obm_stretch(HDC dc, int id, int x, int y, int w, int h)
     }
 }
 
+/* USER paints frames, captions and scroll-bar parts with its system-colour brushes (PatBlt), so a
+ * colour the display cannot show solid is dithered by the driver as for any solid brush - measured:
+ * real 3.11 after MAIN.CPL Color applies Arizona (ActiveTitle 64 128 128, ActiveBorder 255 128 64) */
 static void fill(HDC dc, int l, int t, int r, int b, COLORREF c)
 {
     int a = l, bb = t, cc = r, d = b;
     w16_lp_to_dp(dc, &a, &bb);
     w16_lp_to_dp(dc, &cc, &d);
-    w16_fill_solid_dev(dc, &(RECT){a, bb, cc, d}, w16_rgb(c));
+    HBRUSH br = CreateSolidBrush(c);
+    w16_fill_rect_dev(dc, &(RECT){a, bb, cc, d}, br);
+    DeleteObject(br);
 }
 
 static void draw_frame(HWND h, HDC dc, int active)

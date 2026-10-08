@@ -1227,6 +1227,9 @@ extern const char *w16_app_module;
 /* KERNEL */
 HINSTANCE GetModuleHandle(LPCSTR name);
 HINSTANCE w16_load_module(LPCSTR filename);
+/* the file contents of segment seg (0 = the automatic data segment) of a loaded NE module, for
+ * read-only tables; NULL if absent */
+const void *w16_module_data(HINSTANCE m, int seg, unsigned *len);
 DWORD GetTickCount(void);
 DWORD GetCurrentTime(void);
 /* the DOS clock as programs read it through DOS3Call (INT 21h): local time. ARCH311_CLOCK=
@@ -1443,6 +1446,8 @@ int GetKeyState(int vk);
 int GetAsyncKeyState(int vk);
 void GetCursorPos(LPPOINT p);
 void SetCursorPos(int x, int y);
+void ClipCursor(LPCRECT r);         /* screen rectangle the pointer is kept in, NULL = whole screen */
+void GetClipCursor(LPRECT r);
 HCURSOR SetCursor(HCURSOR c);
 int ShowCursor(BOOL show);
 void MessageBeep(UINT t);
@@ -1740,6 +1745,15 @@ BOOL PtVisible(HDC dc, int x, int y);
 BOOL RectVisible(HDC dc, LPCRECT r);
 HRGN CreateRectRgn(int l, int t, int r, int b);
 HRGN CreateRectRgnIndirect(LPCRECT r);
+/* CombineRgn modes; regions are rectangle lists (region.c) */
+#define RGN_AND 1
+#define RGN_OR 2
+#define RGN_XOR 3
+#define RGN_DIFF 4
+#define RGN_COPY 5
+int CombineRgn(HRGN dst, HRGN a, HRGN b, int mode);
+BOOL PtInRegion(HRGN r, int x, int y);
+BOOL FillRgn(HDC dc, HRGN r, HBRUSH b);
 DWORD SetBrushOrg(HDC dc, int x, int y);
 BOOL UnrealizeObject(HGDIOBJ o);
 int AddFontResource(LPCSTR file);

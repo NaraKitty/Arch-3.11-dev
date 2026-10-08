@@ -68,6 +68,8 @@ static int name_or_ord(const uint8_t **p, const char **name)
 }
 
 static int tabbable(HWND c);
+static void check_def_push(HWND dlg, HWND old, HWND nw);
+static void dlg_set_focus(HWND c);
 static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC proc, LPARAM lp, int modal)
 {
     DWORD style = u32(t);
@@ -181,13 +183,17 @@ static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC 
         if (!strcasecmp(ccls, "BUTTON") && (is & 0xF) == BS_DEFPUSHBUTTON) dd->defid = id;
     }
     if (!first) first = GetNextDlgTabItem(h, NULL, FALSE);
-    dd->focus = first;
+    HWND param = first;
+    dd->focus = first; /* given at the first activation (RestoreDlgFocus) */
     if (SendMessage(h, WM_INITDIALOG, (WPARAM)first, lp) && w16_valid(h)) {
         /* WM_INITDIALOG may have disabled or hidden the control picked before it ran */
         if (first && !tabbable(first)) first = GetNextDlgTabItem(h, first, FALSE);
         if (first) {
-            dd->focus = first;
-            if (visible || modal) { /* focus is set when shown/activated */ }
+            /* USER seg24:0914: DlgSetFocus, then CheckDefPushButton - at once if WM_INITDIALOG
+             * already showed and activated the dialog, else when it is */
+            if (w16_active == h && IsWindowVisible(h)) dlg_set_focus(first);
+            else dd->focus = first;
+            check_def_push(h, param, first);
         }
     } else if (w16_valid(h)) {
         /* FALSE: the proc placed the focus itself. If it did not, activation gives the focus to the
@@ -197,10 +203,11 @@ static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC 
     }
     if (!w16_valid(h)) return NULL;
     if (visible || modal) {
+        HWND f0 = dd->focus; /* (activation hands it over and forgets it) */
         ShowWindow(h, SW_SHOWNORMAL);
-        if (dd->focus && w16_valid(dd->focus)) SetFocus(dd->focus);
-        if (dd->focus && w16_valid(dd->focus) && (SendMessage(dd->focus, WM_GETDLGCODE, 0, 0) & DLGC_HASSETSEL))
-            SendMessage(dd->focus, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
+        if (f0 && w16_valid(f0) && w16_focus != f0) SetFocus(f0);
+        if (f0 && w16_valid(f0) && (SendMessage(f0, WM_GETDLGCODE, 0, 0) & DLGC_HASSETSEL))
+            SendMessage(f0, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
     }
     return h;
 }
@@ -273,17 +280,67 @@ void EndDialog(HWND h, int result)
 }
 
 /* ------------------------------------------------------------------ dialog window procedure */
-static void set_default_button(HWND dlg, HWND focus)
+static LRESULT dlg_code(HWND h) { return w16_valid(h) ? SendMessage(h, WM_GETDLGCODE, 0, 0) : 0; }
+
+/* USER seg25:0AB2: every default push button of the dialog becomes a plain one */
+static void clear_defaults(HWND dlg)
 {
-    W16Dialog *d = w16_dlg(dlg);
-    if (!d) return;
-    /* the focused push button becomes the default; otherwise the template default */
-    int want = d->defid;
-    if (focus && (SendMessage(focus, WM_GETDLGCODE, 0, 0) & (DLGC_DEFPUSHBUTTON | DLGC_UNDEFPUSHBUTTON))) want = GetDlgCtrlID(focus);
-    for (HWND c = dlg->child; c; c = c->next) {
-        LRESULT code = SendMessage(c, WM_GETDLGCODE, 0, 0);
-        if (code & DLGC_DEFPUSHBUTTON && GetDlgCtrlID(c) != want) SendMessage(c, BM_SETSTYLE, BS_PUSHBUTTON, TRUE);
-        else if (code & DLGC_UNDEFPUSHBUTTON && GetDlgCtrlID(c) == want) SendMessage(c, BM_SETSTYLE, BS_DEFPUSHBUTTON, TRUE);
+    for (HWND c = dlg->child; c; c = c->next)
+        if (dlg_code(c) & DLGC_DEFPUSHBUTTON) SendMessage(c, BM_SETSTYLE, BS_PUSHBUTTON, TRUE);
+}
+
+/* USER CheckDefPushButton (seg25:0B5B), run when the dialog manager moves the focus from old to
+ * new (Tab, arrows, mnemonics, a click on a control, activation, WM_NEXTDLGCTL, DM_SETDEFID): a push
+ * button getting the focus becomes the default, otherwise the dialog's default button is made the
+ * default again - unless it is disabled. Focus moved by the application's own SetFocus leaves the
+ * buttons as they are (measured: MAIN.CPL Color after "Color Palette >>"). */
+static void check_def_push(HWND dlg, HWND old, HWND nw)
+{
+    if (!w16_valid(dlg)) return;
+    LRESULT cn = nw ? dlg_code(nw) : 0;
+    if (old == nw) {
+        if (cn & DLGC_UNDEFPUSHBUTTON) SendMessage(nw, BM_SETSTYLE, BS_DEFPUSHBUTTON, TRUE);
+        return;
+    }
+    if ((old && (dlg_code(old) & (DLGC_DEFPUSHBUTTON | DLGC_UNDEFPUSHBUTTON))) ||
+        (nw && (cn & (DLGC_DEFPUSHBUTTON | DLGC_UNDEFPUSHBUTTON))))
+        clear_defaults(dlg);
+    if (cn & DLGC_UNDEFPUSHBUTTON) {
+        SendMessage(nw, BM_SETSTYLE, BS_DEFPUSHBUTTON, TRUE);
+        return;
+    }
+    LRESULT r = SendMessage(dlg, DM_GETDEFID, 0, 0);
+    HWND def = GetDlgItem(dlg, HIWORD(r) == DC_HASDEFID ? LOWORD(r) : IDOK);
+    if (!def) return;
+    LRESULT cd = dlg_code(def);
+    if ((cd & DLGC_DEFPUSHBUTTON) || !(cd & DLGC_UNDEFPUSHBUTTON) || (def->style & WS_DISABLED)) return;
+    SendMessage(def, BM_SETSTYLE, BS_DEFPUSHBUTTON, TRUE);
+}
+
+/* USER DlgSetFocus (seg25:0000): the focus, an edit's text selected */
+static void dlg_set_focus(HWND c)
+{
+    SetFocus(c);
+    if (w16_valid(c) && (dlg_code(c) & DLGC_HASSETSEL)) SendMessage(c, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
+}
+
+/* USER RestoreDlgFocus (seg25:03E3): the control that had the focus when the dialog was
+ * deactivated gets it back (once); SaveDlgFocus (seg25:03A8) keeps it, when nothing is kept yet,
+ * and makes the default buttons plain */
+static int restore_dlg_focus(HWND dlg, W16Dialog *d)
+{
+    HWND f = d->focus;
+    d->focus = NULL;
+    if (!f || IsIconic(dlg) || !w16_valid(f) || !IsChild(dlg, f)) return 0;
+    check_def_push(dlg, w16_focus, f);
+    SetFocus(f);
+    return 1;
+}
+static void save_dlg_focus(HWND dlg, W16Dialog *d)
+{
+    if (w16_focus && IsChild(dlg, w16_focus) && !d->focus) {
+        d->focus = w16_focus;
+        clear_defaults(dlg);
     }
 }
 
@@ -306,36 +363,44 @@ LRESULT DefDlgProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         return 0;
     }
     case WM_ACTIVATE:
+        /* USER seg25:050B: restore or save the focus; a dialog activated with nothing to restore
+         * gets the focus itself, which DefDlgProc's WM_SETFOCUS hands to the first tab stop */
         if (d && LOWORD(wp) != WA_INACTIVE) {
-            if (d->focus && w16_valid(d->focus) && IsChild(h, d->focus)) SetFocus(d->focus);
-            else { HWND f = GetNextDlgTabItem(h, NULL, FALSE); if (f) SetFocus(f); }
-            if (w16_focus && IsChild(h, w16_focus)) set_default_button(h, w16_focus);
-        } else if (d) {
-            if (w16_focus && IsChild(h, w16_focus)) d->focus = w16_focus;
+            if (!restore_dlg_focus(h, d) && !(w16_focus && IsChild(h, w16_focus))) {
+                HWND f = GetNextDlgTabItem(h, NULL, FALSE);
+                if (f) dlg_set_focus(f);
+            }
+        } else if (d)
             /* while another window is active no button of the dialog is the default (measured on
              * 3.11: behind the Edit Pattern dialog the focused "Edit Pattern..." and the Desktop's
              * OK both have the thin border, and so has OK behind a message box with the focus in
-             * an edit); the default comes back with the activation */
-            for (HWND c = h->child; c; c = c->next)
-                if (SendMessage(c, WM_GETDLGCODE, 0, 0) & DLGC_DEFPUSHBUTTON) SendMessage(c, BM_SETSTYLE, BS_PUSHBUTTON, TRUE);
-        }
+             * an edit); the default comes back with the activation (CheckDefPushButton) */
+            save_dlg_focus(h, d);
         return 0;
     case WM_SETFOCUS:
-        if (d && d->focus && w16_valid(d->focus)) SetFocus(d->focus);
+        /* seg25:0553 */
+        if (d && !d->ended && !restore_dlg_focus(h, d)) {
+            HWND f = GetNextDlgTabItem(h, NULL, FALSE);
+            if (f) dlg_set_focus(f);
+        }
         return 0;
     case WM_NEXTDLGCTL: {
         HWND n;
         if (LOWORD(lp)) n = (HWND)wp; /* only usable from libw16 code (pointer handle) */
         else n = GetNextDlgTabItem(h, w16_focus, wp != 0);
         if (n) {
-            SetFocus(n);
-            if (SendMessage(n, WM_GETDLGCODE, 0, 0) & DLGC_HASSETSEL) SendMessage(n, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
+            check_def_push(h, w16_focus, n);
+            dlg_set_focus(n);
         }
         return 0;
     }
     case DM_GETDEFID: return d ? MAKELONG(d->defid, DC_HASDEFID) : 0;
     case DM_SETDEFID:
-        if (d) { d->defid = (int)wp; set_default_button(h, w16_focus); }
+        if (d) {
+            HWND old = GetDlgItem(h, d->defid), nw = GetDlgItem(h, (int)wp);
+            check_def_push(h, old, nw);
+            d->defid = (int)wp;
+        }
         return TRUE;
     case WM_GETFONT: return d ? (LRESULT)d->font : 0;
     case WM_SETFONT: if (d) d->font = (HFONT)wp; return 0;
@@ -556,8 +621,8 @@ BOOL IsDialogMessage(HWND dlg, LPMSG m)
                     }
                 }
                 if (n) {
-                    SetFocus(n);
-                    if (SendMessage(n, WM_GETDLGCODE, 0, 0) & DLGC_HASSETSEL) SendMessage(n, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
+                    dlg_set_focus(n);
+                    check_def_push(dlg, f, n);
                 }
             }
             return TRUE;
@@ -566,7 +631,8 @@ BOOL IsDialogMessage(HWND dlg, LPMSG m)
             if (f) {
                 HWND n = GetNextDlgGroupItem(dlg, f, m->wParam == VK_LEFT || m->wParam == VK_UP);
                 if (n && n != f) {
-                    SetFocus(n);
+                    dlg_set_focus(n);
+                    check_def_push(dlg, f, n);
                     if (SendMessage(n, WM_GETDLGCODE, 0, 0) & DLGC_RADIOBUTTON) {
                         /* auto radio buttons check themselves as focus arrives */
                         if ((n->style & 0xF) == BS_AUTORADIOBUTTON) SendMessage(n, WM_KEYDOWN, VK_SPACE, 0), SendMessage(n, WM_KEYUP, VK_SPACE, 0);
@@ -602,22 +668,32 @@ BOOL IsDialogMessage(HWND dlg, LPMSG m)
         if (m->wParam == '\t' || m->wParam == '\r' || m->wParam == 27) return TRUE;
         {
             HWND c = find_mnemonic(dlg, (int)m->wParam, f);
-            if (c) { activate_ctl(dlg, c); return TRUE; }
+            if (c) {
+                activate_ctl(dlg, c);
+                if (w16_focus && IsChild(dlg, w16_focus)) check_def_push(dlg, f, w16_focus);
+                return TRUE;
+            }
         }
         break;
     case WM_SYSCHAR:
         {
             HWND c = find_mnemonic(dlg, (int)m->wParam, f);
-            if (c) { activate_ctl(dlg, c); return TRUE; }
+            if (c) {
+                activate_ctl(dlg, c);
+                if (w16_focus && IsChild(dlg, w16_focus)) check_def_push(dlg, f, w16_focus);
+                return TRUE;
+            }
         }
         break;
+    case WM_LBUTTONDOWN:
+        /* seg25:0E98: a click on a control is a focus change for the default button */
+        if (m->hwnd != dlg && w16_focus) check_def_push(dlg, w16_focus, m->hwnd);
+        break;
     }
+    /* (USER changes no default button after other messages, whatever focus moves they cause) */
     TranslateMessage(m);
     DispatchMessage(m);
-    if (w16_valid(dlg) && w16_focus && IsChild(dlg, w16_focus)) {
-        if (d) d->focus = w16_focus;
-        set_default_button(dlg, w16_focus);
-    }
+    (void)d;
     return TRUE;
 }
 
