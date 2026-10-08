@@ -713,6 +713,11 @@ static BOOL mb_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         HWND c = h->child;
         for (int i = mb->def; c && i > 0; i--) c = c->next;
         if (c) SetFocus(c);
+        /* without a Cancel button the system menu has no Close */
+        if (!GetDlgItem(h, IDCANCEL)) {
+            HMENU m = GetSystemMenu(h, FALSE);
+            if (m) DeleteMenu(m, SC_CLOSE, MF_BYCOMMAND);
+        }
         /* a lone OK answers Esc and Close as Cancel (its id becomes IDCANCEL; MessageBox still
          * returns IDOK) */
         if ((mb->type & MB_TYPEMASK) == MB_OK && GetDlgItem(h, IDOK)) GetDlgItem(h, IDOK)->id = IDCANCEL;
@@ -828,7 +833,7 @@ int MessageBox(HWND owner, LPCSTR text, LPCSTR caption, UINT type)
 
     HWND parent = owner && w16_valid(owner) ? w16_top_level(owner) : NULL;
     mb_nest++;
-    MessageBeep(type & MB_ICONMASK);
+    /* (3.1's MessageBox plays no sound: programs call MessageBeep themselves) */
     int res = DialogBoxIndirectParam(NULL, w16_dlgt_data(t), parent, mb_proc, (LPARAM)&mb);
     if (mb_nest) mb_nest--;
     w16_dlgt_free(t);

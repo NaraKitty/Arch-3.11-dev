@@ -484,3 +484,37 @@ FreeType's; glyph positions and metrics match); CLOCK.INI values as 3.11 writes 
 after the merge: 106 checks, all PASS. UNTESTED: the ChooseFont dialog, TrueType cases Clock does not use
 (positive lfHeight/VDMX cell lookup, lfWidth, simulated bold/italic, symbol fonts, underline/strikeout),
 EnumFonts listing TrueType faces, flat digits on true-colour displays, -ldl on glibc < 2.34.
+
+### Session 9 (Oct 8, Printers worktree) - MAIN.CPL Printers over CUPS; USER's MessageBox
+apps/control/prntcpl.c ports Printers (dialog 1, seg20/21), Connect (12), Install with the unlisted
+path (23, 29, Install Driver 30, Browse 38 on COMMDLG) and printer connections (21, 32, seg17, seg3:0010);
+the data layer is CUPS (apps/control/cups.c through sysexec.c: lpstat -v/-d, lpinfo -l -v/-l -m, lpadmin
+-p -m|-P -v -E / -v / -x, lpoptions -d / -p -o; parsers in cupsparse.c, unit test tests/cups_test.c,
+`make -C apps check`). Mapping: the installed list is the CUPS queues as "NAME on PORT", PORT from
+w16_printer_port (parallel:/dev/lpN = LPT(N+1):, serial:/dev/ttySN = COM(N+1):, else the URI scheme
+upper-cased; Print Setup gets the same queues through w16_set_printer_enum); an entry's driver is its
+WIN.INI [PrinterPorts]/[devices] driver, else "CUPS"; the default is lpstat -d (WIN.INI device= when
+CUPS has none) and lpoptions -d on Close, where WIN.INI is rewritten exactly as 3.1 does; Connect lists
+[ports]' LPTn:/COMn: with 3.1's statuses (COM: GETBASEIRQ; LPT: CUPS lists parallel:/dev/lpN), then
+CUPS's other devices, then the printer's own URI; List of Printers = lpinfo -m; Install makes the queue
+on the first port the name is not installed on, the name from make-and-model (name_1 ... when taken);
+unlisted printers are PPD files (*.ppd, *.ppd.gz) in the Install Driver path, "Current" = lpadmin -P on
+the queue; a network connection is a raw queue named after its port (LPT2) on smb://server/share or the
+URI typed (the password is not kept). CUPS is told before the list changes; a refusal shows the tool's
+message in MAIN.CPL's box. Setup... shows Print Setup (3.1 runs the driver's dialog). ARCH311_SIMULATE:
+ARCH311_SIM_PRINTERS ("[*]NAME=URI;..."; default the reference's two printers, empty = none),
+ARCH311_SIM_NETWORK, ARCH311_SIM_ERROR; the simulated drivers are the user's CONTROL.INF names.
+Verified (regress.sh, scn/printers-{open,connect,default,empty,unlisted}.scn with ref-run -WinIni: two
+printers on TTY.DRV via -Files): every frame 0 px apart (Connect: one row left out, below) and WIN.INI
+after Connect, Set As Default + Print Manager and the empty install byte-identical to 3.11's;
+printers-{install,remove,forbidden,setup,network}.w16 check arch311's own flows. tools/run-cp-test.sh:
+ARCH311_WININI applies ref-run's -WinIni edits (byte-identical to Set-IniKey's output).
+libw16: MessageBox = USER seg42:04F5/0101 (template in system-font units, button width seg3:23BE, no
+MessageBeep, SC_CLOSE removed without Cancel) - also matches color-mbox1/02, color-mbox2/02,
+color-remove/02 and desk-nowall/04, now compared there; w16_dlgt_item; atoms (atom.c); list boxes keep
+the template height through CreateWindow's WM_SIZE, get their scroll bar back, measure tab stops from
+the client edge (seg35:24A6); TabbedTextOut's default tab = 8 x USER's average width (seg6:0992);
+ConfirmRemove (seg6:0000) uses 0x34 (exclamation). Open: 3.11 shows no focus rectangle on Connect's
+preselected port until a key moves it (USER's list caret, seg35:085C/08E1/0C4E; that row is ignored).
+UNTESTED: everything against a real CUPS server or share, admin rights (lpadmin/lpinfo -v "Forbidden"
+handling only simulated), real PPD files, CPlApplet 100/101, Help.
