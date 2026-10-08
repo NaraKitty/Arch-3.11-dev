@@ -45,6 +45,20 @@ typedef struct {
 #define OFN_SHAREAWARE 0x00004000
 #define OFN_NOREADONLYRETURN 0x00008000
 #define OFN_NOTESTFILECREATE 0x00010000
+#define OFN_NONETWORKBUTTON 0x00020000 /* Windows for Workgroups */
+/* what a hook answers to SHAREVISTRING */
+#define OFN_SHAREFALLTHROUGH 2
+#define OFN_SHARENOWARN 1
+#define OFN_SHAREWARN 0
+/* registered messages the file dialogs send to their hook (RegisterWindowMessage) */
+#define LBSELCHSTRING "commdlg_LBSelChangedNotify"
+#define SHAREVISTRING "commdlg_ShareViolation"
+#define FILEOKSTRING "commdlg_FileNameOK"
+/* HIWORD(lParam) of LBSELCHSTRING */
+#define CD_LBSELNOITEMS (-1)
+#define CD_LBSELCHANGE 0
+#define CD_LBSELSUB 1
+#define CD_LBSELADD 2
 
 typedef struct {
     DWORD lStructSize;
@@ -56,7 +70,7 @@ typedef struct {
     UINT wFindWhatLen;
     UINT wReplaceWithLen;
     LPARAM lCustData;
-    void *lpfnHook;
+    void *lpfnHook; /* UINT (*)(HWND, UINT, WPARAM, LPARAM) */
     LPCSTR lpTemplateName;
 } FINDREPLACE, *LPFINDREPLACE;
 
@@ -125,6 +139,7 @@ typedef struct {
 #define CDERR_MEMALLOCFAILURE 0x0009
 #define CDERR_MEMLOCKFAILURE 0x000A
 #define CDERR_NOHOOK 0x000B
+#define CDERR_REGISTERMSGFAIL 0x000C
 #define PDERR_SETUPFAILURE 0x1001
 #define PDERR_PARSEFAILURE 0x1002
 #define PDERR_RETDEFFAILURE 0x1003

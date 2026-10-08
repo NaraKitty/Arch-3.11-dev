@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
@@ -438,9 +439,12 @@ void w16_sys_init(void)
         sscanf(s, "%dx%d", &sw, &sh);
     init_metrics(sw, sh);
     /* like a program started from a DOS prompt: the current directory is where it was launched,
-     * if that folder is on a mapped drive */
+     * if that folder is on a mapped drive; W16_DOS_CWD names one (tests start in C:\WINDOWS, as the
+     * reference machine does: tools/run-fixture-test.sh) */
     char host[1024], dos[300];
-    if (getcwd(host, sizeof host) && w16_host_to_dos(host, dos, sizeof dos) == 0) w16_chdir(dos);
+    const char *cwd = getenv("W16_DOS_CWD");
+    if (cwd && *cwd) w16_chdir(cwd);
+    else if (getcwd(host, sizeof host) && w16_host_to_dos(host, dos, sizeof dos) == 0) w16_chdir(dos);
 }
 
 /* ------------------------------------------------------------------ time */
@@ -566,14 +570,39 @@ static unsigned char lo1252(unsigned char c)
 int lstrlen(LPCSTR s) { return s ? (int)strlen(s) : 0; }
 LPSTR lstrcpy(LPSTR d, LPCSTR s) { return strcpy(d, s ? s : ""); }
 LPSTR lstrcat(LPSTR d, LPCSTR s) { return strcat(d, s ? s : ""); }
-int lstrcmp(LPCSTR a, LPCSTR b) { return strcmp(a, b); }
-int lstrcmpi(LPCSTR a, LPCSTR b)
+/* USER's lstrcmp / lstrcmpi without a language driver (seg11:0088 with the class table at
+ * seg11:0010): characters that differ are compared by a sort weight - digits weigh 0x100 + digit,
+ * letters 0x111.. in either case, accented capitals as their small letters (0xE0..0xFE), every other
+ * byte its own value - so punctuation sorts before digits and digits before letters (a 3.11 file list
+ * starts "_default.pif", "256color.bmp", "accessor.grp"). lstrcmp breaks a tie that only case made
+ * by the first such difference, the small letter after the capital. */
+static int collate(unsigned char c, int *lower)
 {
-    for (;; a++, b++) {
-        int x = lo1252(*(unsigned char *)a), y = lo1252(*(unsigned char *)b);
-        if (x != y || !x) return x - y;
-    }
+    static const unsigned char cls[7][4] = {
+        {'0', '9', 0xD0, 0}, {'A', 'Z', 0xD0, 0}, {'a', 'z', 0xB0, 1}, {0xC0, 0xD6, 0x20, 0},
+        {0xD8, 0xDE, 0x20, 0}, {0xE0, 0xF6, 0x00, 1}, {0xF8, 0xFE, 0x00, 1}};
+    *lower = -1;
+    for (int i = 0; i < 7 && c >= cls[i][0]; i++)
+        if (c <= cls[i][1]) { *lower = cls[i][3]; return c + cls[i][2]; }
+    return c;
 }
+static int user_strcmp(LPCSTR a, LPCSTR b, int fcase)
+{
+    const unsigned char *s = (const unsigned char *)a, *t = (const unsigned char *)b;
+    int ca = 0, cb = 0, tie = 0;
+    for (;; s++, t++) {
+        if (!*s || !*t) break;
+        if (*s == *t) continue;
+        int la, lb, x = collate(*s, &la), y = collate(*t, &lb);
+        if (x != y) return x > y ? 1 : -1;
+        if (fcase && la != lb && !tie) { ca = la; cb = lb; tie = 1; }
+    }
+    if (*s) return 1;
+    if (*t) return -1;
+    return ca > cb ? 1 : ca < cb ? -1 : 0;
+}
+int lstrcmp(LPCSTR a, LPCSTR b) { return user_strcmp(a, b, 1); }
+int lstrcmpi(LPCSTR a, LPCSTR b) { return user_strcmp(a, b, 0); }
 LPSTR AnsiUpper(LPSTR s)
 {
     if (IS_INTRESOURCE(s)) return (LPSTR)(uintptr_t)up1252((unsigned char)(uintptr_t)s);
@@ -926,6 +955,39 @@ UINT _lwrite(HFILE f, const void *b, UINT n)
 LONG _llseek(HFILE f, LONG off, int o) { return (LONG)lseek(f, off, o == 0 ? SEEK_SET : o == 1 ? SEEK_CUR : SEEK_END); }
 HFILE _lclose(HFILE f) { return close(f) ? HFILE_ERROR : 0; }
 
+/* DOS extended error codes (INT 21h AH=59h) for what Linux reports */
+int w16_dos_error(int err)
+{
+    switch (err) {
+    case 0: return 0;
+    case ENOENT: return 2;          /* file not found */
+    case ENOTDIR: case ENAMETOOLONG: case ELOOP: return 3; /* path not found */
+    case EMFILE: case ENFILE: return 4;  /* too many open files */
+    case EACCES: case EPERM: case EISDIR: case ENOTEMPTY: return 5; /* access denied */
+    case EEXIST: return 0x50;       /* file exists */
+    case EROFS: return 0x13;        /* write-protected */
+    case ETXTBSY: case EBUSY: return 0x20; /* sharing violation */
+    case ENOSPC: case EDQUOT: return 0x52; /* cannot make directory entry (disk full) */
+    case ENODEV: case ENXIO: case EIO: return 0x15; /* drive not ready */
+    }
+    return 0x1F;                    /* general failure */
+}
+
+/* as w16_dos_error for an operation on host path `h`: a missing file whose directory is missing too
+ * is DOS's "path not found" */
+static int dos_error_at(const char *h, int err)
+{
+    if (err == ENOENT) {
+        char dir[2048];
+        struct stat st;
+        snprintf(dir, sizeof dir, "%s", h);
+        char *s = strrchr(dir, '/');
+        if (s && s != dir) *s = 0;
+        if (s && (stat(dir, &st) || !S_ISDIR(st.st_mode))) return 3;
+    }
+    return w16_dos_error(err);
+}
+
 /* OpenFile's search for a file named without a directory: the current directory, the Windows
  * directory, then the system directory (3.1 goes on to the program's directory and PATH; the
  * programs live in the Windows directory here and PATH holds Linux folders) */
@@ -971,7 +1033,7 @@ HFILE OpenFile(LPCSTR name, OFSTRUCT *of, UINT style)
     }
     if (style & OF_DELETE) {
         int r = unlink(h);
-        if (r && of) of->nErrCode = 2;
+        if (r && of) of->nErrCode = dos_error_at(h, errno);
         return r ? HFILE_ERROR : 1;
     }
     int fd;
@@ -981,8 +1043,15 @@ HFILE OpenFile(LPCSTR name, OFSTRUCT *of, UINT style)
         int m = style & 3;
         fd = open(h, m == OF_WRITE ? O_WRONLY : m == OF_READWRITE ? O_RDWR : O_RDONLY);
     }
+    struct stat fst;
+    if (fd >= 0 && fstat(fd, &fst) == 0 && S_ISDIR(fst.st_mode)) {
+        /* DOS opens no directory: access denied */
+        close(fd);
+        fd = -1;
+        errno = EISDIR;
+    }
     if (fd < 0) {
-        if (of) of->nErrCode = errno == ENOENT ? 2 : errno == EACCES ? 5 : 3;
+        if (of) of->nErrCode = dos_error_at(h, errno);
         return HFILE_ERROR;
     }
     if (style & OF_EXIST) {
@@ -1130,3 +1199,118 @@ void w16_find_close(W16FINDDATA *f)
     }
     f->search = NULL;
 }
+
+/* ------------------------------------------------------------------ drive types, labels, attributes */
+/* /proc/mounts escapes blanks and backslashes in mount points as \ooo */
+static void unescape_mount(char *s)
+{
+    char *o = s;
+    for (char *i = s; *i; i++) {
+        if (i[0] == '\\' && i[1] >= '0' && i[1] <= '7' && i[2] >= '0' && i[2] <= '7' && i[3] >= '0' && i[3] <= '7') {
+            *o++ = (char)(((i[1] - '0') << 6) | ((i[2] - '0') << 3) | (i[3] - '0'));
+            i += 3;
+        } else
+            *o++ = *i;
+    }
+    *o = 0;
+}
+
+/* what kind of drive a letter is: A: and B: are floppies (as on a PC); any other mapped drive is
+ * what the file system holding its folder is, from the deepest /proc/mounts entry above it */
+int w16_drive_class(char letter)
+{
+    char root[1024], real[PATH_MAX];
+    letter = toupper((unsigned char)letter);
+    if (w16_drive_root(letter, root, sizeof root)) return W16_DRV_NONE;
+    if (letter == 'A' || letter == 'B') return W16_DRV_FLOPPY;
+    if (!realpath(root, real)) snprintf(real, sizeof real, "%s", root);
+    FILE *f = fopen("/proc/mounts", "r");
+    if (!f) return W16_DRV_FIXED;
+    char line[4096], best[64] = "";
+    size_t bestlen = 0;
+    while (fgets(line, sizeof line, f)) {
+        char dev[1024], mp[2048], type[64];
+        if (sscanf(line, "%1023s %2047s %63s", dev, mp, type) != 3) continue;
+        unescape_mount(mp);
+        size_t l = strlen(mp);
+        int under = !strcmp(mp, "/") || (!strncmp(real, mp, l) && (real[l] == '/' || !real[l]));
+        if (under && l >= bestlen) { bestlen = l; snprintf(best, sizeof best, "%s", type); }
+    }
+    fclose(f);
+    static const char *cd[] = {"iso9660", "udf", NULL};
+    static const char *net[] = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "ncpfs", "afs", "davfs", "sshfs",
+                                "fuse.sshfs", "fuse.rclone", "fuse.s3fs", "fuse.davfs2", "fuse.gvfsd-fuse", NULL};
+    static const char *ram[] = {"tmpfs", "ramfs", NULL};
+    for (int i = 0; cd[i]; i++) if (!strcmp(best, cd[i])) return W16_DRV_CDROM;
+    for (int i = 0; net[i]; i++) if (!strcmp(best, net[i])) return W16_DRV_REMOTE;
+    for (int i = 0; ram[i]; i++) if (!strcmp(best, ram[i])) return W16_DRV_RAM;
+    return W16_DRV_FIXED;
+}
+
+/* KERNEL GetDriveType: floppies are removable; a CD-ROM is an MSCDEX network-redirector drive to
+ * KERNEL, so it is "remote" like a network drive; RAM disks and hard disks are fixed */
+UINT GetDriveType(int drive)
+{
+    if (drive < 0 || drive > 25) return 0;
+    switch (w16_drive_class((char)('A' + drive))) {
+    case W16_DRV_FLOPPY: return DRIVE_REMOVABLE;
+    case W16_DRV_CDROM: case W16_DRV_REMOTE: return DRIVE_REMOTE;
+    case W16_DRV_FIXED: case W16_DRV_RAM: return DRIVE_FIXED;
+    }
+    return 0;
+}
+
+/* Linux folders carry no volume label: a drive is labelled with its folder's name, as a FAT label
+ * (upper case, 11 characters) */
+int w16_volume_label(char letter, LPSTR out, size_t cb)
+{
+    char root[1024];
+    if (cb) out[0] = 0;
+    if (w16_drive_root(letter, root, sizeof root)) return -1;
+    size_t l = strlen(root);
+    while (l > 1 && root[l - 1] == '/') root[--l] = 0;
+    const char *b = strrchr(root, '/');
+    b = b ? b + 1 : root;
+    if (cb) snprintf(out, cb < 12 ? cb : 12, "%s", b);
+    AnsiUpper(out);
+    return 0;
+}
+
+int w16_dos_attr(LPCSTR dos)
+{
+    char h[2048];
+    struct stat st;
+    if (w16_dos_to_host(dos, h, sizeof h)) return -3;
+    if (stat(h, &st)) return -dos_error_at(h, errno);
+    const char *b = strrchr(h, '/');
+    int hidden = b && b[1] == '.' ? 0x02 : 0;
+    if (S_ISDIR(st.st_mode)) return 0x10 | hidden;
+    return 0x20 | hidden | (access(h, W_OK) ? 0x01 : 0);
+}
+
+HFILE w16_dos_create_temp(LPCSTR dir, LPSTR out, size_t cb)
+{
+    static unsigned seq;
+    for (int tries = 0; tries < 100; tries++) {
+        char dos[400], h[2048];
+        size_t l = strlen(dir);
+        snprintf(dos, sizeof dos, "%s%s%08X", dir, l && dir[l - 1] == '\\' ? "" : "\\",
+                 (unsigned)(time(NULL) * 7 + getpid() * 131 + seq++) & 0xFFFFFFFFu);
+        if (w16_dos_to_host(dos, h, sizeof h)) return -3;
+        int fd = open(h, O_RDWR | O_CREAT | O_EXCL, 0644);
+        if (fd >= 0) {
+            w16_dos_fullpath(dos, out, cb);
+            return fd;
+        }
+        if (errno != EEXIST) return -dos_error_at(h, errno);
+    }
+    return -5;
+}
+
+/* ------------------------------------------------------------------ WNet (USER's network entry points) */
+/* 3.1 hands these to the network driver; arch311 has none, so they answer as 3.1 does without one:
+ * no capabilities (WNNC_NET_TYPE 0, no WNNC_DIALOG bits, no driver handle for index 0xFFFF) and
+ * WN_NOT_SUPPORTED for everything else */
+WORD WNetGetCaps(WORD index) { (void)index; return 0; }
+WORD WNetGetConnection(LPSTR local, LPSTR remote, WORD *cb) { (void)local; (void)remote; (void)cb; return WN_NOT_SUPPORTED; }
+WORD WNetConnectDialog(HWND owner, WORD type) { (void)owner; (void)type; return WN_NOT_SUPPORTED; }

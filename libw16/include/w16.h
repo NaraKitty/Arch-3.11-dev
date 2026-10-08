@@ -1329,6 +1329,39 @@ typedef struct {
 int w16_find_first(LPCSTR spec, UINT attr, W16FINDDATA *f);
 int w16_find_next(W16FINDDATA *f);
 void w16_find_close(W16FINDDATA *f);
+/* KERNEL GetDriveType (0 = no such drive). What a drive letter is comes from the Linux folder it maps
+ * to (w16_drive_class): A: and B: are floppies; otherwise the file system of that folder in
+ * /proc/mounts - a CD-ROM (iso9660, udf), a network drive (nfs, cifs, sshfs, ...), a RAM disk (tmpfs,
+ * ramfs) or a hard disk. As on 3.1, a CD-ROM (an MSCDEX drive) reports DRIVE_REMOTE. */
+#define DRIVE_REMOVABLE 2
+#define DRIVE_FIXED 3
+#define DRIVE_REMOTE 4
+UINT GetDriveType(int drive); /* 0 = A: */
+enum { W16_DRV_NONE, W16_DRV_FLOPPY, W16_DRV_FIXED, W16_DRV_CDROM, W16_DRV_REMOTE, W16_DRV_RAM };
+int w16_drive_class(char letter);
+/* the volume label DOS would report for a drive (INT 21h AH=11h with the volume attribute): the name
+ * of the folder the drive maps to, upper case, at most 11 characters; "" for a drive at "/" */
+int w16_volume_label(char letter, LPSTR out, size_t cb);
+/* INT 21h AX=4300h: a file's DOS attributes (0x01 read-only, 0x02 hidden, 0x10 directory, 0x20
+ * archive), or the negative DOS error (-2 file not found, -3 path not found, ...) */
+int w16_dos_attr(LPCSTR dos);
+/* INT 21h AH=5Ah: create a file with a new unique name in DOS directory `dir`; returns the open
+ * handle and the file's DOS path in `out`, or the negative DOS error */
+HFILE w16_dos_create_temp(LPCSTR dir, LPSTR out, size_t cb);
+/* the DOS extended error (INT 21h AH=59h) for a Linux errno */
+int w16_dos_error(int err);
+
+/* USER's network entry points (WNet*, forwarded to the network driver on 3.1). arch311 has no
+ * Windows network driver: WNetGetCaps answers 0 for every index (no driver, no dialogs) and the
+ * others WN_NOT_SUPPORTED, which is what 3.1 returns without a network. */
+#define WN_SUCCESS 0x0000
+#define WN_NOT_SUPPORTED 0x0001
+#define WNNC_NET_TYPE 0x0002
+#define WNNC_DIALOG 0x0008
+#define WNTYPE_DRIVE 1
+WORD WNetGetCaps(WORD index);
+WORD WNetGetConnection(LPSTR local, LPSTR remote, WORD *cb);
+WORD WNetConnectDialog(HWND owner, WORD type);
 /* COMM (comm.c): COM1..4 are Linux's ttyS0..3 */
 #define SETXOFF 1
 #define SETXON 2

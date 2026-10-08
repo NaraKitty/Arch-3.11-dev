@@ -1,5 +1,5 @@
 # Notepad: a new window, then "Hello" typed
-# regress: sh tools/run-app-test.sh apps/build/notepad "$TEST" "$OUT"
+# regress: sh tools/run-fixture-test.sh notepad "$TEST" "$OUT"
 # compare: hello/01.png 01-start.png active ignore 316 228 333 261
 # compare: hello/02.png 02-hello.png active ignore 316 228 333 261
 sleep 300

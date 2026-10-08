@@ -196,8 +196,10 @@ static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC 
         else if (dd->focus && !tabbable(dd->focus)) dd->focus = GetNextDlgTabItem(h, NULL, FALSE);
     }
     if (!w16_valid(h)) return NULL;
-    if (visible || modal) {
-        ShowWindow(h, SW_SHOWNORMAL);
+    if (visible || modal || IsWindowVisible(h)) {
+        /* (a modeless dialog may show itself in WM_INITDIALOG, as COMMDLG's Find and Replace do; it
+         * gets its focus and the edit's selection all the same) */
+        if (!IsWindowVisible(h)) ShowWindow(h, SW_SHOWNORMAL);
         if (dd->focus && w16_valid(dd->focus)) SetFocus(dd->focus);
         if (dd->focus && w16_valid(dd->focus) && (SendMessage(dd->focus, WM_GETDLGCODE, 0, 0) & DLGC_HASSETSEL))
             SendMessage(dd->focus, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
@@ -277,13 +279,17 @@ static void set_default_button(HWND dlg, HWND focus)
 {
     W16Dialog *d = w16_dlg(dlg);
     if (!d) return;
-    /* the focused push button becomes the default; otherwise the template default */
+    /* the focused push button becomes the default; otherwise the template default - only while it is
+     * enabled (USER's CheckDefPushButton, seg25:0B5B, skips a disabled one; measured on 3.11: COMMDLG's
+     * Find dialog opens with Find Next disabled and drawn without the default border, which it gets
+     * when typing enables it) */
     int want = d->defid;
     if (focus && (SendMessage(focus, WM_GETDLGCODE, 0, 0) & (DLGC_DEFPUSHBUTTON | DLGC_UNDEFPUSHBUTTON))) want = GetDlgCtrlID(focus);
     for (HWND c = dlg->child; c; c = c->next) {
         LRESULT code = SendMessage(c, WM_GETDLGCODE, 0, 0);
-        if (code & DLGC_DEFPUSHBUTTON && GetDlgCtrlID(c) != want) SendMessage(c, BM_SETSTYLE, BS_PUSHBUTTON, TRUE);
-        else if (code & DLGC_UNDEFPUSHBUTTON && GetDlgCtrlID(c) == want) SendMessage(c, BM_SETSTYLE, BS_DEFPUSHBUTTON, TRUE);
+        int is = GetDlgCtrlID(c) == want && !(c->style & WS_DISABLED);
+        if (code & DLGC_DEFPUSHBUTTON && !is) SendMessage(c, BM_SETSTYLE, BS_PUSHBUTTON, TRUE);
+        else if (code & DLGC_UNDEFPUSHBUTTON && is) SendMessage(c, BM_SETSTYLE, BS_DEFPUSHBUTTON, TRUE);
     }
 }
 
@@ -747,6 +753,9 @@ int MessageBox(HWND owner, LPCSTR text, LPCSTR caption, UINT type)
                               bx + i * (bw + gap), by, bw, bh, h, (HMENU)(uintptr_t)mb.ids[i], NULL, NULL);
         (void)b;
     }
+    /* the default button has the focus (MB_DEFBUTTON2: COMMDLG's overwrite prompt opens on No, as on
+     * 3.11); set before WM_INITDIALOG, whose SetFocus activates the box, which restores this focus */
+    dd->focus = GetDlgItem(h, mb.ids[mb.def]);
     SendMessage(h, WM_INITDIALOG, 0, (LPARAM)&mb);
     dd->focus = GetDlgItem(h, mb.ids[mb.def]);
     ShowWindow(h, SW_SHOWNORMAL);
@@ -853,6 +862,35 @@ int w16_dir_add(HWND lb, UINT attr, LPCSTR spec, int combo)
     return last;
 }
 
+/* USER seg37:0000: the directory shown in DlgDirList's static, shortened when it is wider than the
+ * static (measured in the static's font) to "c:\...\" and the tail from the first directory boundary
+ * at which it fits ("c:\..." when none does). USER builds the result in place in front of the tail;
+ * it goes into `out` here. */
+static const char *fit_dir_path(HWND st, const char *path, char *out, size_t cb)
+{
+    RECT rc;
+    GetClientRect(st, &rc);
+    int cx = rc.right - rc.left;
+    HDC dc = GetDC(st);
+    HGDIOBJ of = st->font ? SelectObject(dc, st->font) : NULL;
+    snprintf(out, cb, "%s", path);
+    if ((int)LOWORD(GetTextExtent(dc, path, strlen(path))) > cx) {
+        char pre[16];
+        wsprintf(pre, "%c:\\...\\", path[0]);
+        cx -= LOWORD(GetTextExtent(dc, pre, strlen(pre)));
+        const char *s = path;
+        for (;;) {
+            while (*s && *s++ != '\\') {}
+            if (!*s || (int)LOWORD(GetTextExtent(dc, s, strlen(s))) <= cx) break;
+        }
+        if (!*s) pre[strlen(pre) - 1] = 0;
+        snprintf(out, cb, "%s%s", pre, s);
+    }
+    if (of) SelectObject(dc, of);
+    ReleaseDC(st, dc);
+    return out;
+}
+
 static int dir_fill(HWND dlg, LPSTR path, int idlist, int idstatic, UINT attr, int combo)
 {
     char spec[260] = "*.*", dir[260] = "";
@@ -871,11 +909,11 @@ static int dir_fill(HWND dlg, LPSTR path, int idlist, int idstatic, UINT attr, i
         SendMessage(lb, combo ? CB_RESETCONTENT : LB_RESETCONTENT, 0, 0);
         w16_dir_add(lb, attr, spec, combo);
     }
-    if (idstatic) {
-        char cwd[300];
+    if (idstatic && GetDlgItem(dlg, idstatic)) {
+        char cwd[300], fit[320];
         w16_getcwd(cwd, sizeof cwd);
         AnsiLower(cwd);
-        SetDlgItemText(dlg, idstatic, cwd);
+        SetDlgItemText(dlg, idstatic, fit_dir_path(GetDlgItem(dlg, idstatic), cwd, fit, sizeof fit));
     }
     if (path) snprintf(path, 260, "%s", spec);
     return 1;

@@ -9,8 +9,9 @@
 # - Drive C: is a fixture laid out like a 3.11 install: C:\WINDOWS, C:\WINDOWS\SYSTEM and C:\WINDOWS\TEMP
 #   holding symbolic links to the user's ripped files (nothing is copied into the repo); A: exists (an
 #   empty floppy). With ARCH311_REF set to the reference rig (the folder with c-pristine), the files
-#   are placed in WINDOWS and SYSTEM exactly as in its pristine install, so directory listings match
-#   real 3.11, and the drives are the rig's: A:, C: labelled C_DRIVE and DOSBox-X's own Z: labelled
+#   are placed in WINDOWS and SYSTEM exactly as in its pristine install (the ones Setup made copied
+#   from it), so directory listings match real 3.11, and the drives are the rig's: A:, C: labelled
+#   C_DRIVE and DOSBox-X's own Z: labelled
 #   DOSBOX-X (libw16 gives a drive the name of its folder as volume label); ARCH311_REF_INI=1 also
 #   starts from that install's WIN.INI, SYSTEM.INI and CONTROL.INI, so the files after the run compare
 #   byte for byte with a reference run's (arch311-ref/run-NAME).
@@ -41,7 +42,8 @@ if [ -n "$ref" ] && [ -d "$ref/c-pristine/WINDOWS" ]; then
             [ -f "$f" ] || continue
             n=$(basename "$f")
             u=$(printf '%s' "$n" | tr a-z A-Z)
-            if [ -e "$files/$u" ]; then ln -s "$files/$u" "$c/$d/$n"; fi
+            # the rip's copy; files Setup made (BOOTLOG.TXT, *.GRP, REG.DAT, ...) from the install
+            if [ -e "$files/$u" ]; then ln -s "$files/$u" "$c/$d/$n"; else cp "$f" "$c/$d/$n"; fi
         done
     done
     if [ "${ARCH311_REF_INI:-0}" = 1 ]; then

@@ -1,0 +1,39 @@
+# Notepad File > Open (COMMDLG): the C:\WINDOWS listing, into SYSTEM and back up with the keyboard (Enter
+# on a selected directory, as a double click does). Reference: arch311-ref scn/cdlg-open.scn (frame 01 is
+# Notepad before the scenario starts).
+# regress: sh tools/run-fixture-test.sh notepad "$TEST" "$OUT"
+# compare: cdlg-open/02.png 01-open.png active ignore 320 240 332 260
+# compare: cdlg-open/03.png 02-files.png active ignore 320 240 332 260
+# compare: cdlg-open/04.png 03-dirs.png active ignore 320 240 332 260
+# compare: cdlg-open/05.png 04-system.png active ignore 320 240 332 260
+# compare: cdlg-open/06.png 05-insystem.png active ignore 320 240 332 260
+# compare: cdlg-open/07.png 06-windows.png active ignore 320 240 332 260
+# compare: cdlg-open/08.png 07-back.png active ignore 320 240 332 260
+# compare: cdlg-open/09.png 08-closed.png active ignore 316 228 333 261
+sleep 400
+key alt+f
+key o
+sleep 400
+shotcaret shots/01-open.png
+key tab
+sleep 400
+shot shots/02-files.png
+key tab
+sleep 400
+shot shots/03-dirs.png
+key down
+sleep 400
+shot shots/04-system.png
+key enter
+sleep 400
+shot shots/05-insystem.png
+key up
+sleep 400
+shot shots/06-windows.png
+key enter
+sleep 400
+shot shots/07-back.png
+key esc
+sleep 400
+shotcaret shots/08-closed.png
+quit

@@ -1,0 +1,35 @@
+# Notepad Search > Find (COMMDLG FindText, modeless): Find Next disabled while Find What is empty, "hello"
+# found as "Hello", Match Case checked, found again as "hello", the dialog closed with Esc. Reference:
+# arch311-ref scn/cdlg-find.scn (frame 01 is Notepad before the scenario starts; the check alone changed
+# too few pixels for the recorder, so frame 06 holds it together with the second match).
+# regress: sh tools/run-fixture-test.sh notepad "$TEST" "$OUT"
+# compare: cdlg-find/02.png 01-find.png ignore 320 240 332 260
+# compare: cdlg-find/03.png 02-typed.png ignore 320 240 332 260
+# compare: cdlg-find/04.png 03-found.png ignore 320 240 332 260
+# compare: cdlg-find/05.png 04-matchcase.png ignore 320 240 332 260
+# compare: cdlg-find/06.png 05-found2.png ignore 320 240 332 260
+# compare: cdlg-find/07.png 06-closed.png ignore 316 228 333 261
+sleep 400
+type Hello world, hello again.
+key home
+key alt+s
+key f
+sleep 400
+shot shots/01-find.png
+type hello
+sleep 400
+shotcaret shots/02-typed.png
+key enter
+sleep 400
+shot shots/03-found.png
+key tab
+sleep 400
+shot shots/04-matchcase.png
+key space
+key enter
+sleep 400
+shot shots/05-found2.png
+key esc
+sleep 400
+shotcaret shots/06-closed.png
+quit
