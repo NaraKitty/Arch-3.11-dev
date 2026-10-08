@@ -314,3 +314,7 @@ Decodes of the remaining MAIN.CPL applets (Desktop, International, Ports + Fonts
 written to the session scratchpad (derived from the disassembly: never commit them).
 NEXT: port Desktop, Color, International, Ports, Fonts, Printers from those decodes; then DRIVERS.CPL,
 CPWIN386.CPL and the Internet applet; CEF spike (download still needs the owner's OK).
+Tests: tools/run-cp-test.sh SCRIPT.w16 [OUT] runs a Control Panel script with a private XDG_CONFIG_HOME
+(fresh WIN.INI/SYSTEM.INI/CONTROL.INI from the .SRC templates, copied to OUT/ini afterwards) and a C:
+fixture shaped like a 3.11 install (links to the rip; with ARCH311_REF=<rig folder> exactly as in
+c-pristine). Use it for every applet test: runs can go in parallel and never touch ~/.config/arch311.
