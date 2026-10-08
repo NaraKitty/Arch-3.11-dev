@@ -5,6 +5,7 @@
 # Script commands (libw16/src/msg.c): sleep MS | key alt+f | type TEXT | click X Y | shot FILE.png
 # (caret hidden) | shotcaret FILE.png (caret shown) | clip TEXT (onto the clipboard) | quit
 # Key names include kp_plus, kp_minus, kp_multiply, kp_divide, kp_period, kp_enter, kp_0..kp_9.
+# Shots left in the script when the program ends are taken of the screen it leaves.
 # The app's C: drive is $HOME unless ~/.config/arch311/drives says otherwise.
 set -e
 app=$(realpath "$1"); script=$(realpath "$2"); out=${3:-test-out}

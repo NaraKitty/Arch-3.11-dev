@@ -1228,8 +1228,15 @@ extern const char *w16_app_module;
 /* KERNEL */
 HINSTANCE GetModuleHandle(LPCSTR name);
 HINSTANCE w16_load_module(LPCSTR filename);
+/* the file contents of segment seg (0 = the automatic data segment) of a loaded NE module, for
+ * read-only tables; NULL if absent */
+const void *w16_module_data(HINSTANCE m, int seg, unsigned *len);
 DWORD GetTickCount(void);
 DWORD GetCurrentTime(void);
+/* the DOS clock as programs read it through DOS3Call (INT 21h): local time. ARCH311_CLOCK=
+ * "YYYY-MM-DD HH:MM:SS" (tests) sets it to that moment at the first call; it runs on from there */
+void w16_dos_gettime(int *hour, int *min, int *sec, int *hundredths); /* AH=2Ch: CH, CL, DH, DL */
+void w16_dos_getdate(int *year, int *month, int *day, int *weekday);  /* AH=2Ah: CX, DH, DL, AL */
 int GetProfileInt(LPCSTR app, LPCSTR key, int def);
 int GetProfileString(LPCSTR app, LPCSTR key, LPCSTR def, LPSTR out, int cb);
 BOOL WriteProfileString(LPCSTR app, LPCSTR key, LPCSTR val);
@@ -1310,6 +1317,20 @@ int w16_drive_root(char letter, char *root, size_t cb); /* 0 if the drive letter
 void w16_dos_fullpath(LPCSTR dos, LPSTR out, size_t cb); /* "..\\X" -> "C:\\X": full, upper case, dots resolved */
 void w16_getcwd(LPSTR dos, size_t cb);                  /* "C:\\WINDOWS" */
 int w16_chdir(LPCSTR dos);                              /* "X:", "..", "X:\\DIR": 0, -1 no path, -2 no drive */
+/* DOS find first / find next (INT 21h 4Eh / 4Fh) for programs that list a directory themselves:
+ * w16_find_first("C:\\WINDOWS\\*.SCR", attr, &f) puts the first match in f and returns 0;
+ * w16_find_next(&f) moves on. Both return -1 when nothing (more) matches, and the search is then
+ * over; w16_find_close ends one early. attr as DOS: 0x10 lists directories too ("." and ".." below
+ * a root), 0x02 hidden (Linux dot) files. Names come in upper case, as FAT keeps them. */
+typedef struct {
+    char name[260];
+    BYTE attrib;            /* 0x01 read-only, 0x02 hidden, 0x10 directory, 0x20 archive */
+    DWORD size;
+    void *search;           /* libw16's state */
+} W16FINDDATA;
+int w16_find_first(LPCSTR spec, UINT attr, W16FINDDATA *f);
+int w16_find_next(W16FINDDATA *f);
+void w16_find_close(W16FINDDATA *f);
 /* COMM (comm.c): COM1..4 are Linux's ttyS0..3 */
 #define SETXOFF 1
 #define SETXON 2
@@ -1426,6 +1447,8 @@ int GetKeyState(int vk);
 int GetAsyncKeyState(int vk);
 void GetCursorPos(LPPOINT p);
 void SetCursorPos(int x, int y);
+void ClipCursor(LPCRECT r);         /* screen rectangle the pointer is kept in, NULL = whole screen */
+void GetClipCursor(LPRECT r);
 HCURSOR SetCursor(HCURSOR c);
 int ShowCursor(BOOL show);
 void MessageBeep(UINT t);
@@ -1491,14 +1514,26 @@ HICON CreateIcon(HINSTANCE inst, int w, int h, BYTE planes, BYTE bpp, const void
 #define SPI_GETKEYBOARDSPEED 0x000A
 #define SPI_SETKEYBOARDSPEED 0x000B
 #define SPI_ICONHORIZONTALSPACING 0x000D
+#define SPI_GETSCREENSAVETIMEOUT 0x000E
+#define SPI_SETSCREENSAVETIMEOUT 0x000F
+#define SPI_GETSCREENSAVEACTIVE 0x0010
+#define SPI_SETSCREENSAVEACTIVE 0x0011
+#define SPI_GETGRIDGRANULARITY 0x0012
+#define SPI_SETGRIDGRANULARITY 0x0013
+#define SPI_SETDESKWALLPAPER 0x0014
+#define SPI_SETDESKPATTERN 0x0015
 #define SPI_GETKEYBOARDDELAY 0x0016
 #define SPI_SETKEYBOARDDELAY 0x0017
 #define SPI_ICONVERTICALSPACING 0x0018
+#define SPI_GETICONTITLEWRAP 0x0019
+#define SPI_SETICONTITLEWRAP 0x001A
 #define SPI_SETDOUBLECLKWIDTH 0x001D
 #define SPI_SETDOUBLECLKHEIGHT 0x001E
 #define SPI_GETICONTITLELOGFONT 0x001F
 #define SPI_SETDOUBLECLICKTIME 0x0020
 #define SPI_SETMOUSEBUTTONSWAP 0x0021
+#define SPI_GETFASTTASKSWITCH 0x0023
+#define SPI_SETFASTTASKSWITCH 0x0024
 #define SPIF_UPDATEINIFILE 0x0001
 #define SPIF_SENDWININICHANGE 0x0002
 BOOL SystemParametersInfo(UINT action, UINT param, void *pv, UINT winini);
@@ -1711,6 +1746,15 @@ BOOL PtVisible(HDC dc, int x, int y);
 BOOL RectVisible(HDC dc, LPCRECT r);
 HRGN CreateRectRgn(int l, int t, int r, int b);
 HRGN CreateRectRgnIndirect(LPCRECT r);
+/* CombineRgn modes; regions are rectangle lists (region.c) */
+#define RGN_AND 1
+#define RGN_OR 2
+#define RGN_XOR 3
+#define RGN_DIFF 4
+#define RGN_COPY 5
+int CombineRgn(HRGN dst, HRGN a, HRGN b, int mode);
+BOOL PtInRegion(HRGN r, int x, int y);
+BOOL FillRgn(HDC dc, HRGN r, HBRUSH b);
 DWORD SetBrushOrg(HDC dc, int x, int y);
 BOOL UnrealizeObject(HGDIOBJ o);
 int AddFontResource(LPCSTR file);

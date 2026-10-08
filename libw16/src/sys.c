@@ -11,6 +11,7 @@
 
 int w16_debug;
 int w16_border_width = 3;
+int w16_icon_spacing = 75, w16_icon_title_wrap = 1, w16_grid = 1, w16_fast_switch = 1, w16_screen_save;
 int w16_kbd_speed = 31, w16_kbd_delay = 2;
 UINT w16_dblclk_time = 500;
 int w16_swap_buttons;
@@ -87,19 +88,62 @@ static void init_metrics(int sw, int sh)
     m[SM_CYMINTRACK] = 27;
     m[SM_CXDOUBLECLK] = 4;
     m[SM_CYDOUBLECLK] = 4;
-    m[SM_CXICONSPACING] = 77;
-    m[SM_CYICONSPACING] = 77;
+    /* USER seg3:1DF5: LOGPIXELSX * 75 / 96 (75 on VGA) unless WIN.INI [desktop] IconSpacing says
+     * otherwise, never under cxIcon (measured: the first icon sits at 75 / 2 - 16 = 21, and at 34 with
+     * IconSpacing=100). rgwSysMet[SM_CXICONSPACING] is USER's [0xc0], which
+     * SPI_ICONHORIZONTALSPACING sets, so GetSystemMetrics reads w16_icon_spacing. */
+    m[SM_CXICONSPACING] = w16_icon_spacing;
+    /* USER seg3:1E1C/1E98: cyIcon / 4 + the icon window (cyIcon + 4 cyBorder) + the title: with
+     * IconTitleWrap=1 two lines of the 13-pixel MS Sans Serif 8 icon title font plus cyBorder each
+     * (72 on VGA, the measured distance of the first icon row above the bottom of the screen), else
+     * one line plus 2 cyBorder */
+    m[SM_CYICONSPACING] = w16_icon_title_wrap ? 2 * (13 + 1) + 32 / 4 + 32 + 4 : 32 / 4 + 2 + 32 + 4 + 13;
     m[SM_MENUDROPALIGNMENT] = 0;
 }
 
-int GetSystemMetrics(int i) { return (i >= 0 && i < SM_CMETRICS) ? w16_metric[i] : 0; }
+int GetSystemMetrics(int i)
+{
+    if (i == SM_CXICONSPACING) return w16_icon_spacing;
+    return (i >= 0 && i < SM_CMETRICS) ? w16_metric[i] : 0;
+}
 COLORREF GetSysColor(int i) { return (i >= 0 && i < W16_NUM_SYSCOLORS) ? w16_syscolor[i] : 0; }
 
+/* USER, both at start-up (seg3:0748, jump table 07D1) and in SetSysColors (seg41:0C06, table 0C50):
+ * the text-like colours are made solid with the display's GetNearestColor; a scroll bar colour of
+ * exactly E0E0E0 gets the 0x10 flag in its high byte (VGA.DRV then realizes the brush as its 50% gray
+ * pattern) */
+static COLORREF snap_syscolor(int k, COLORREF c)
+{
+    switch (k) {
+    case COLOR_SCROLLBAR:
+        if (c == 0x00E0E0E0) c |= 0x10000000;
+        break;
+    case COLOR_MENU: case COLOR_WINDOW: case COLOR_WINDOWFRAME: case COLOR_MENUTEXT:
+    case COLOR_WINDOWTEXT: case COLOR_CAPTIONTEXT: case COLOR_HIGHLIGHT: case COLOR_HIGHLIGHTTEXT:
+    case COLOR_BTNTEXT: case COLOR_INACTIVECAPTIONTEXT:
+        c = GetNearestColor(NULL, c);
+        break;
+    }
+    return c;
+}
+
+/* the start-up half, once the display (W16_COLORS) is set up: libw16 reads WIN.INI before that */
+void w16_syscolors_realize(void)
+{
+    for (int k = 0; k < W16_NUM_SYSCOLORS; k++) w16_syscolor[k] = snap_syscolor(k, w16_syscolor[k]);
+}
+
+/* SetSysColors (seg41:0C06): every top-level window then gets WM_SYSCOLORCHANGE and the whole screen
+ * is redrawn, frames and children included (RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN
+ * on the desktop) */
 void SetSysColors(int n, const int *idx, const COLORREF *v)
 {
-    for (int i = 0; i < n; i++)
-        if (idx[i] >= 0 && idx[i] < W16_NUM_SYSCOLORS)
-            w16_syscolor[idx[i]] = v[i];
+    for (int i = 0; i < n; i++) {
+        int k = idx[i];
+        if (k < 0 || k >= W16_NUM_SYSCOLORS) continue;
+        w16_syscolor[k] = snap_syscolor(k, v[i]);
+    }
+    SendMessage(HWND_BROADCAST, WM_SYSCOLORCHANGE, 0, 0);
     w16_invalidate_screen_rect(&(RECT){0, 0, w16_metric[SM_CXSCREEN], w16_metric[SM_CYSCREEN]});
 }
 
@@ -243,6 +287,11 @@ static int ini_get(const char *path, LPCSTR app, LPCSTR key, LPSTR out, int cb, 
     return found;
 }
 
+/* KERNEL's WriteProfileString as measured on 3.11 (Desktop applet, WIN.INI [Desktop]): a key that is
+ * there keeps its own spelling and only the value after its '=' changes ("Wallpaper=" stays when
+ * MAIN.CPL writes "WallPaper"); a new key goes after the last line of its section that is not
+ * blank; a new section goes at the end after an empty line. key NULL removes the section, val NULL
+ * the key. */
 static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
 {
     char *d = read_all(path);
@@ -252,6 +301,7 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
     char *out = malloc(cap);
     out[0] = 0;
     int in = 0, done = 0, sawsec = 0;
+    size_t after_last = 0;   /* in out: the end of the section's last line that is not blank */
     char *p = d;
     while (*p) {
         char *nl = strchr(p, '\n');
@@ -263,14 +313,25 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
         trim(t);
         if (t[0] == '[') {
             if (in && !done && key && val) {
-                strcat(out, key); strcat(out, "="); strcat(out, val); strcat(out, "\r\n");
+                /* the new key after the section's last line */
+                char line[2048];
+                snprintf(line, sizeof line, "%s=%s\r\n", key, val);
+                memmove(out + after_last + strlen(line), out + after_last, strlen(out + after_last) + 1);
+                memcpy(out + after_last, line, strlen(line));
                 done = 1;
             }
             char *e = strchr(t, ']');
             if (e) *e = 0;
-            in = !strcasecmp(t + 1, app);
+            in = !done && !strcasecmp(t + 1, app);
             if (in) sawsec = 1;
             if (in && !key) { p += n; continue; } /* delete whole section */
+            if (in) {
+                strncat(out, p, n);
+                if (!nl) strcat(out, "\r\n");
+                after_last = strlen(out);
+                p += n;
+                continue;
+            }
         } else if (in) {
             if (!key) { p += n; continue; }
             char *eq = strchr(t, '=');
@@ -279,12 +340,24 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
                 trim(t);
                 if (!strcasecmp(t, key)) {
                     if (val && !done) {
-                        strcat(out, key); strcat(out, "="); strcat(out, val); strcat(out, "\r\n");
+                        /* the line up to its '=' stays */
+                        size_t pre = (size_t)(strchr(p, '=') - p) + 1;
+                        strncat(out, p, pre);
+                        strcat(out, val);
+                        strcat(out, "\r\n");
+                        after_last = strlen(out);
                     }
                     done = 1;
                     p += n;
                     continue;
                 }
+            }
+            if (t[0]) {
+                strncat(out, p, n);
+                if (!nl) strcat(out, "\r\n");
+                after_last = strlen(out);
+                p += n;
+                continue;
             }
         }
         strncat(out, p, n);
@@ -292,34 +365,18 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
     }
     if (!done && key && val) {
         if (!sawsec) {
+            /* a new section follows a blank line, except at the top of an empty file (real 3.11's
+             * Clock created CLOCK.INI as "[Clock]\r\nMaximized=0\r\n...") */
             size_t L = strlen(out);
             if (L && out[L - 1] != '\n') strcat(out, "\r\n");
-            strcat(out, "\r\n["); strcat(out, app); strcat(out, "]\r\n");
-        } else if (in) {
-            size_t L = strlen(out);
-            if (L && out[L - 1] != '\n') strcat(out, "\r\n");
-        }
-        if (sawsec && !in) {
-            /* section exists earlier: rebuild by inserting after its header */
-            char hdr[300];
-            snprintf(hdr, sizeof hdr, "[%s]", app);
-            char *h = strcasestr(out, hdr);
-            if (h) {
-                char *eol = strchr(h, '\n');
-                size_t at = eol ? (size_t)(eol - out + 1) : strlen(out);
-                char line[2048];
-                snprintf(line, sizeof line, "%s=%s\r\n", key, val);
-                char *o2 = malloc(strlen(out) + strlen(line) + 1);
-                memcpy(o2, out, at);
-                strcpy(o2 + at, line);
-                strcat(o2, out + at);
-                free(out);
-                out = o2;
-                done = 1;
-            }
-        }
-        if (!done) {
+            strcat(out, L ? "\r\n[" : "["); strcat(out, app); strcat(out, "]\r\n");
             strcat(out, key); strcat(out, "="); strcat(out, val); strcat(out, "\r\n");
+        } else {
+            /* the section ends the file */
+            char line[2048];
+            snprintf(line, sizeof line, "%s=%s\r\n", key, val);
+            memmove(out + after_last + strlen(line), out + after_last, strlen(out + after_last) + 1);
+            memcpy(out + after_last, line, strlen(line));
         }
     }
     FILE *f = fopen(path, "wb");
@@ -371,9 +428,19 @@ void w16_sys_init(void)
     char b[64];
     const char *dbg = getenv("W16_DEBUG");
     w16_debug = dbg && *dbg && *dbg != '0';
+    /* USER's start (seg3:1290, 1E09-1E95, 20FC, 226C) */
     w16_border_width = GetProfileInt("windows", "BorderWidth", 3);
     if (w16_border_width < 1) w16_border_width = 1;
-    if (w16_border_width > 49) w16_border_width = 49;
+    if (w16_border_width > 50) w16_border_width = 50;
+    w16_fast_switch = GetProfileInt("windows", "CoolSwitch", 1);
+    w16_grid = (SHORT)(GetProfileInt("Desktop", "GridGranularity", 0) << 3);
+    if (!w16_grid) w16_grid = 1;
+    w16_icon_spacing = GetProfileInt("Desktop", "IconSpacing", 96 * 75 / 96);   /* LOGPIXELSX * 75 / 96 */
+    if ((UINT)32 > (UINT)w16_icon_spacing) w16_icon_spacing = 32;           /* SM_CXICON */
+    w16_icon_title_wrap = GetProfileInt("Desktop", "IconTitleWrap", 1);
+    w16_screen_save = GetProfileInt("windows", "ScreenSaveTimeOut", 0);
+    if (!GetProfileInt("windows", "ScreenSaveActive", 0) && w16_screen_save > 0) w16_screen_save = -w16_screen_save;
+    SetCaretBlinkTime(GetProfileInt("windows", "CursorBlinkRate", 500));   /* seg3:1182 */
     w16_kbd_speed = GetProfileInt("windows", "KeyboardSpeed", 31);
     w16_kbd_delay = GetProfileInt("windows", "KeyboardDelay", 2);
     if (w16_kbd_speed < 0 || w16_kbd_speed > 31) w16_kbd_speed = 31;
@@ -389,11 +456,18 @@ void w16_sys_init(void)
     w16_mouse_params[2] = GetProfileInt("windows", "MouseSpeed", 1);
     if (w16_mouse_params[2] == 2) w16_mouse_params[1] = GetProfileInt("windows", "MouseThreshold2", 10);
     w16_trails_init();
+    /* USER's start-up (seg3:0748 with its reader seg3:06D7): three numbers, each the next run of
+     * digits (anything else between them is skipped), kept as a byte. 3.1 reads on past the end of a
+     * value with fewer than three numbers; libw16 stops there and takes 0 for the rest. */
     for (int i = 0; i < W16_NUM_SYSCOLORS; i++) {
-        if (GetProfileString("colors", color_keys[i], "", b, sizeof b)) {
-            int r, g, bl;
-            if (sscanf(b, "%d %d %d", &r, &g, &bl) == 3)
-                w16_syscolor[i] = RGB(r, g, bl);
+        if (GetProfileString("colors", color_keys[i], "", b, sizeof b) && b[0]) {
+            BYTE v[3] = {0, 0, 0};
+            const char *p = b;
+            for (int k = 0; k < 3; k++) {
+                while (*p && (*p < '0' || *p > '9')) p++;
+                while (*p >= '0' && *p <= '9') v[k] = (BYTE)(v[k] * 10 + (*p++ - '0'));
+            }
+            w16_syscolor[i] = RGB(v[0], v[1], v[2]);
         }
     }
     int sw = 640, sh = 480;
@@ -418,6 +492,59 @@ DWORD GetTickCount(void)
     return (DWORD)((t.tv_sec - t0.tv_sec) * 1000 + (t.tv_nsec - t0.tv_nsec) / 1000000) + 60000;
 }
 DWORD GetCurrentTime(void) { return GetTickCount(); }
+
+/* The DOS clock (INT 21h AH=2Ah get date, AH=2Ch get time, as DOS3Call returns them): local time with
+ * hundredths of a second. With ARCH311_CLOCK="YYYY-MM-DD HH:MM:SS" the clock reads exactly that at the
+ * first call and runs on in real time, like a DOS clock set with the DATE and TIME commands - the
+ * reference machine's clock is set the same way (ref-run.ps1 -Dos 'time 09:30:00'). */
+static void dos_clock(struct tm *tm, int *hundredths)
+{
+    static int init;
+    static long long offset_us;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    long long now = (long long)tv.tv_sec * 1000000 + tv.tv_usec;
+    if (!init) {
+        init = 1;
+        const char *fixed = getenv("ARCH311_CLOCK");
+        struct tm t;
+        memset(&t, 0, sizeof t);
+        if (fixed && sscanf(fixed, "%d-%d-%d %d:%d:%d", &t.tm_year, &t.tm_mon, &t.tm_mday, &t.tm_hour, &t.tm_min,
+                            &t.tm_sec) == 6) {
+            t.tm_year -= 1900;
+            t.tm_mon -= 1;
+            t.tm_isdst = -1;
+            time_t when = mktime(&t);
+            if (when != (time_t)-1) offset_us = (long long)when * 1000000 - now;
+        }
+    }
+    now += offset_us;
+    time_t s = (time_t)(now / 1000000);
+    localtime_r(&s, tm);
+    *hundredths = (int)(now % 1000000) / 10000;
+}
+
+void w16_dos_gettime(int *hour, int *min, int *sec, int *hundredths)
+{
+    struct tm t;
+    int h;
+    dos_clock(&t, &h);
+    if (hour) *hour = t.tm_hour;
+    if (min) *min = t.tm_min;
+    if (sec) *sec = t.tm_sec;
+    if (hundredths) *hundredths = h;
+}
+
+void w16_dos_getdate(int *year, int *month, int *day, int *weekday)
+{
+    struct tm t;
+    int h;
+    dos_clock(&t, &h);
+    if (year) *year = t.tm_year + 1900;
+    if (month) *month = t.tm_mon + 1;
+    if (day) *day = t.tm_mday;
+    if (weekday) *weekday = t.tm_wday;
+}
 
 /* ------------------------------------------------------------------ memory */
 #define MEM_MAGIC 0x4D454D31u
@@ -943,4 +1070,101 @@ int w16_chdir(LPCSTR dos)
     snprintf(cur_dir, sizeof cur_dir, "%s", n + 2);
     snprintf(drive_dir[cur_drive - 'A'], sizeof drive_dir[0], "%s", cur_dir);
     return 0;
+}
+
+/* ------------------------------------------------------------------ DOS find first / next (INT 21h 4Eh/4Fh) */
+typedef struct { int n, i; W16FINDDATA *e; } FindState;
+
+static int find_cmp(const void *a, const void *b)
+{
+    const W16FINDDATA *x = a, *y = b;
+    int dx = !strcmp(x->name, ".") ? 0 : !strcmp(x->name, "..") ? 1 : 2;
+    int dy = !strcmp(y->name, ".") ? 0 : !strcmp(y->name, "..") ? 1 : 2;
+    return dx != dy ? dx - dy : strcmp(x->name, y->name);
+}
+
+static void find_add(FindState *s, const char *name, BYTE attrib, DWORD size)
+{
+    W16FINDDATA *e = realloc(s->e, sizeof *e * (s->n + 1));
+    if (!e) return;
+    s->e = e;
+    e = &s->e[s->n++];
+    memset(e, 0, sizeof *e);
+    snprintf(e->name, sizeof e->name, "%s", name);
+    AnsiUpper(e->name);
+    e->attrib = attrib;
+    e->size = size;
+}
+
+/* Linux keeps no DOS directory order: the names come sorted, "." and ".." first */
+int w16_find_first(LPCSTR spec, UINT attr, W16FINDDATA *f)
+{
+    char dir[300] = "", pat[260] = "*.*", full[300], host[1024];
+    memset(f, 0, sizeof *f);
+    const char *bs = strrchr(spec, '\\');
+    if (!bs && spec[0] && spec[1] == ':') bs = spec + 1;
+    if (bs) {
+        snprintf(dir, sizeof dir, "%.*s", (int)(bs - spec + 1), spec);
+        snprintf(pat, sizeof pat, "%s", bs + 1);
+    } else
+        snprintf(pat, sizeof pat, "%s", spec);
+    norm_dos(dir[0] ? dir : ".", full, sizeof full);
+    DIR *d = w16_dos_to_host(full, host, sizeof host) ? NULL : opendir(host);
+    if (!d) return -1;
+    FindState *s = calloc(1, sizeof *s);
+    if (!s) { closedir(d); return -1; }
+    if ((attr & 0x10) && full[3]) {
+        if (w16_wildmatch(pat, ".")) find_add(s, ".", 0x10, 0);
+        if (w16_wildmatch(pat, "..")) find_add(s, "..", 0x10, 0);
+    }
+    for (struct dirent *e; (e = readdir(d));) {
+        char path[1400];
+        struct stat st;
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        snprintf(path, sizeof path, "%s/%s", host, e->d_name);
+        int hidden = e->d_name[0] == '.';
+        if (stat(path, &st) || (hidden && !(attr & 0x02)) || !w16_wildmatch(pat, e->d_name)) continue;
+        if (S_ISDIR(st.st_mode)) {
+            if (attr & 0x10) find_add(s, e->d_name, 0x10 | (hidden ? 0x02 : 0), 0);
+        } else
+            find_add(s, e->d_name, 0x20 | (access(path, W_OK) ? 0x01 : 0) | (hidden ? 0x02 : 0), (DWORD)st.st_size);
+    }
+    closedir(d);
+    if (attr & 0x10) {
+        /* directories mounted here from elsewhere (C:\WINDOWS) */
+        char sub[16][64];
+        int ns = w16_mount_children(full, sub, 16);
+        for (int i = 0; i < ns; i++) {
+            int dup = 0;
+            for (int k = 0; k < s->n && !dup; k++) dup = !strcasecmp(s->e[k].name, sub[i]);
+            if (!dup && w16_wildmatch(pat, sub[i])) find_add(s, sub[i], 0x10, 0);
+        }
+    }
+    if (s->n) qsort(s->e, s->n, sizeof *s->e, find_cmp);
+    f->search = s;
+    return w16_find_next(f);
+}
+
+int w16_find_next(W16FINDDATA *f)
+{
+    FindState *s = f->search;
+    if (!s) return -1;
+    if (s->i >= s->n) {
+        w16_find_close(f);
+        return -1;
+    }
+    void *keep = f->search;
+    *f = s->e[s->i++];
+    f->search = keep;
+    return 0;
+}
+
+void w16_find_close(W16FINDDATA *f)
+{
+    FindState *s = f->search;
+    if (s) {
+        free(s->e);
+        free(s);
+    }
+    f->search = NULL;
 }

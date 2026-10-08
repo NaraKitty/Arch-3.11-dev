@@ -144,7 +144,7 @@ BOOL CreateCaret(HWND h, HBITMAP bm, int w, int ht)
     caret.gray = bm == (HBITMAP)1;
     caret.h = h; caret.w = w ? w : GetSystemMetrics(SM_CXBORDER); caret.ht = ht ? ht : GetSystemMetrics(SM_CYBORDER);
     caret.hide = 1; caret.on = 0; caret.created = 1;
-    caret.blink = GetProfileInt("windows", "CursorBlinkRate", 530);
+    /* (the blink time is USER's, from WIN.INI at the start and SetCaretBlinkTime since) */
     return TRUE;
 }
 void DestroyCaret(void) { caret_off(); caret.h = NULL; caret.created = 0; }
@@ -344,10 +344,36 @@ HCURSOR SetCursor(HCURSOR c)
 }
 int ShowCursor(BOOL show) { cursor_count += show ? 1 : -1; if (!headless) SDL_ShowCursor(cursor_count >= 0); w16_screen_dirty = 1; return cursor_count; }
 void GetCursorPos(LPPOINT p) { *p = w16_mouse; }
+
+/* USER ClipCursor: the pointer stays inside the rectangle (right and bottom exclusive) until
+ * ClipCursor(NULL); positions from the host are clamped to it */
+static RECT cursor_clip;
+static int cursor_clipped;
+static void clamp_mouse(void)
+{
+    if (!cursor_clipped) return;
+    if (w16_mouse.x < cursor_clip.left) w16_mouse.x = cursor_clip.left;
+    if (w16_mouse.x >= cursor_clip.right) w16_mouse.x = cursor_clip.right - 1;
+    if (w16_mouse.y < cursor_clip.top) w16_mouse.y = cursor_clip.top;
+    if (w16_mouse.y >= cursor_clip.bottom) w16_mouse.y = cursor_clip.bottom - 1;
+}
+void ClipCursor(LPCRECT r)
+{
+    RECT s = {0, 0, w16_screen.w, w16_screen.h};
+    cursor_clipped = r && IntersectRect(&cursor_clip, r, &s);
+    clamp_mouse();
+}
+void GetClipCursor(LPRECT r)
+{
+    if (cursor_clipped) *r = cursor_clip;
+    else SetRect(r, 0, 0, w16_screen.w, w16_screen.h);
+}
+
 void SetCursorPos(int x, int y)
 {
     w16_mouse.x = x; w16_mouse.y = y;
-    if (win) SDL_WarpMouseInWindow(win, x * scale, y * scale);
+    clamp_mouse();
+    if (win) SDL_WarpMouseInWindow(win, w16_mouse.x * scale, w16_mouse.y * scale);
 }
 
 /* ------------------------------------------------------------------ keyboard */
@@ -455,7 +481,7 @@ static void mouse_event(UINT base)
         }
         hit = (int)SendMessage(h, WM_NCHITTEST, 0, MAKELPARAM(p.x, p.y));
         while (hit == HTTRANSPARENT && h->parent && h->parent != w16_desktop) {
-            h = h->parent;
+            h = w16_window_under(h, p);
             hit = (int)SendMessage(h, WM_NCHITTEST, 0, MAKELPARAM(p.x, p.y));
         }
     }
@@ -608,7 +634,7 @@ static int script_step(void)
         }
         if (!strcmp(cmd, "move") || !strcmp(cmd, "click") || !strcmp(cmd, "dblclick") || !strcmp(cmd, "down") || !strcmp(cmd, "up")) {
             int x, y;
-            if (sscanf(arg, "%d %d", &x, &y) == 2) { w16_mouse.x = x; w16_mouse.y = y; }
+            if (sscanf(arg, "%d %d", &x, &y) == 2) { w16_mouse.x = x; w16_mouse.y = y; clamp_mouse(); }
             mouse_event(WM_MOUSEMOVE);
             if (!strcmp(cmd, "click") || !strcmp(cmd, "down") || !strcmp(cmd, "dblclick")) {
                 w16_keystate[VK_LBUTTON] |= 0x80; mouse_event(WM_LBUTTONDOWN);
@@ -703,11 +729,13 @@ static void handle_sdl(SDL_Event *e)
         break;
     case SDL_MOUSEMOTION:
         w16_mouse.x = e->motion.x; w16_mouse.y = e->motion.y;
+        clamp_mouse();
         mouse_event(WM_MOUSEMOVE);
         break;
     case SDL_MOUSEBUTTONDOWN:
     case SDL_MOUSEBUTTONUP: {
         w16_mouse.x = e->button.x; w16_mouse.y = e->button.y;
+        clamp_mouse();
         int down = e->type == SDL_MOUSEBUTTONDOWN;
         int vk = e->button.button == SDL_BUTTON_LEFT ? VK_LBUTTON : e->button.button == SDL_BUTTON_RIGHT ? VK_RBUTTON : VK_MBUTTON;
         if (w16_swap_buttons && vk != VK_MBUTTON) vk = vk == VK_LBUTTON ? VK_RBUTTON : VK_LBUTTON;
@@ -844,6 +872,28 @@ static int fetch(LPMSG out, HWND h, UINT first, UINT last, int remove, int *wait
     return 0;
 }
 
+/* the program ended with script lines left (the Control Panel closes after an applet opened by
+ * name): what its windows uncovered is painted and the remaining shots are taken of the screen it
+ * leaves (a wallpaper the applet set); input lines have nothing left to go to */
+void w16_script_finish(void)
+{
+    if (!script) return;
+    char line[512];
+    while (fgets(line, sizeof line, script)) {
+        char *c = line, cmd[32], arg[480] = "";
+        while (*c == ' ' || *c == '\t') c++;
+        c[strcspn(c, "\r\n")] = 0;
+        if (!*c || *c == '#' || sscanf(c, "%31s %479[^\n]", cmd, arg) < 1) continue;
+        if (strcmp(cmd, "shot") && strcmp(cmd, "shotcaret")) continue;
+        MSG m;
+        int wait = 0;
+        for (int i = 0; i < 1000 && fetch(&m, NULL, WM_PAINT, WM_PAINT, 1, &wait); i++) DispatchMessage(&m);
+        w16_screenshot(arg);
+    }
+    fclose(script);
+    script = NULL;
+}
+
 BOOL GetMessage(LPMSG m, HWND h, UINT first, UINT last)
 {
     for (;;) {
@@ -937,7 +987,7 @@ LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
             h->active_frame = wp != 0;
             w16_nc_paint(h, wp != 0);
         }
-        if (IsIconic(h)) w16_invalidate_screen_rect(&(RECT){h->rw.left - 24, h->rw.top, h->rw.right + 24, h->rw.bottom + 32});
+        if (IsIconic(h)) w16_invalidate_icon_title(h); /* the title shows the activation */
         return TRUE;
     case WM_NCHITTEST: return w16_nc_hittest(h, (SHORT)LOWORD(lp), (SHORT)HIWORD(lp));
     case WM_NCLBUTTONDOWN: return w16_nc_lbuttondown(h, (int)wp, (SHORT)LOWORD(lp), (SHORT)HIWORD(lp));
@@ -969,14 +1019,15 @@ LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         if (LOWORD(wp) != WA_INACTIVE && !HIWORD(wp)) SetFocus(h);
         return 0;
     case WM_SETTEXT:
+        if (IsIconic(h)) w16_invalidate_icon_title(h); /* the old title's area */
         free(h->text);
         h->text = strdup(lp ? (const char *)lp : "");
-        if (w16_has_caption(h->style) && w16_window_visible(h)) {
+        if (w16_has_caption(h->style) && w16_window_visible(h) && !IsIconic(h)) {
             HDC dc = GetWindowDC(h);
             w16_draw_caption(h, dc, h->parent == w16_desktop && h == w16_active);
             ReleaseDC(h, dc);
         }
-        if (IsIconic(h)) w16_invalidate_screen_rect(&(RECT){h->rw.left - 24, h->rw.bottom, h->rw.right + 24, h->rw.bottom + 32});
+        if (IsIconic(h)) w16_invalidate_icon_title(h);
         return TRUE;
     case WM_GETTEXT: {
         int n = (int)wp;
@@ -1008,7 +1059,7 @@ LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         HDC dc = (HDC)wp;
         RECT r;
         GetClientRect(h, &r);
-        FillRect(dc, &r, w16_sys_brush(COLOR_BACKGROUND));
+        w16_paint_desktop(dc, &r);
         return 1;
     }
     case WM_QUERYDRAGICON: return (LRESULT)h->cls->wc.hIcon;

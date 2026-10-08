@@ -1,0 +1,23 @@
+# The Settings menu (Analog and Date checked, Set Font grayed), then Left: the system menu with Always
+# on Top under the inverted system box, then Esc Esc. Same keys as arch311-ref/scn/clock-menu.scn, run
+# with -PrivateIni 'CLOCK.INI:Clock/Options=1,0,1,0,0,0'
+# regress: sh apps/clock/tests/clock.sh "$TEST" "$OUT" "Options=1,0,1,0,0,0"
+# compare: clock-menu/01.png 01.png ignore 320 240 333 261
+# compare: clock-menu/02.png 02.png ignore 320 240 333 261
+# compare: clock-menu/03.png 03.png ignore 320 240 333 261
+# compare: clock-menu/04.png 04.png ignore 320 240 333 261
+sleep 400
+sleep 400
+shot shots/01.png
+key alt
+key s
+sleep 400
+shot shots/02.png
+key left
+sleep 400
+shot shots/03.png
+key esc
+key esc
+sleep 400
+shot shots/04.png
+quit

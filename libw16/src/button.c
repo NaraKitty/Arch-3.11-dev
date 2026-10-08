@@ -127,7 +127,8 @@ static void paint_push(HWND h, HDC dc)
     GetClientRect(h, &r);
     HBRUSH bg = w16_ctl_color(h, dc, CTLCOLOR_BTN);
     int l = r.left, t = r.top, rt = r.right, bt = r.bottom;
-    int def = btype(h) == BS_DEFPUSHBUTTON;
+    /* USER seg25:18BC: a disabled default push button is drawn as a plain one */
+    int def = btype(h) == BS_DEFPUSHBUTTON && !(h->style & WS_DISABLED);
     int pressed = (b->state & BST_PUSHED) != 0;
     /* corners show the parent's background */
     RECT c;
@@ -366,6 +367,10 @@ LRESULT w16_button_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         }
         redraw_part(h, ODA_FOCUS);
         return 0;
+    case WM_NCHITTEST:
+        /* a group box lets the mouse through to what lies under it */
+        if (btype(h) == BS_GROUPBOX) return HTTRANSPARENT;
+        return DefWindowProc(h, m, wp, lp);
     case WM_LBUTTONDOWN:
     case WM_LBUTTONDBLCLK:
         if (btype(h) == BS_GROUPBOX) return 0;
