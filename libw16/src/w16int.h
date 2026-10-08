@@ -218,6 +218,7 @@ HWND w16_next_to_paint(HWND root);
 int w16_any_paint_pending(void);
 void w16_set_window_rect(HWND h, const RECT *rw, UINT swp);
 HWND w16_top_level(HWND h);
+HWND w16_window_under(HWND h, POINT pt); /* hit testing past an HTTRANSPARENT window */
 int w16_window_visible(HWND h); /* visible including ancestors */
 void w16_activate(HWND h, int how);
 void w16_send_paint_cascade(HWND h); /* UpdateWindow semantics */

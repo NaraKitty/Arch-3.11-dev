@@ -1,0 +1,30 @@
+# Desktop with a pattern CONTROL.INI does not list (WIN.INI [Desktop] Pattern=1 2 3 4 5 6 7 8, also on
+# the desktop) and a wallpaper that does not exist: OK shows message 215 (the settings before the
+# wallpaper are written already), then Cancel. Same keys as arch311-ref/scn/desktop-nowall.scn
+# (reference run with -WinIni 'Desktop/Pattern=1 2 3 4 5 6 7 8').
+# Desktop is the third icon here (Ports, Mouse, Desktop, ...); real 3.11 has it fifth (index 4).
+# Run with ARCH311_INI_DIR=<folder with that WIN.INI>: tools/run-cp-test.sh apps/control/tests/desktop-nowall.w16 OUT
+sleep 600
+key right
+key right
+key enter
+sleep 600
+shot shots/01-desktop.png
+key tab
+key tab
+key tab
+key tab
+key tab
+type nofile.bmp
+sleep 200
+shotcaret shots/02-typed.png
+key enter
+sleep 500
+shot shots/03-message.png
+key enter
+sleep 300
+shot shots/04-back.png
+key esc
+sleep 300
+shot shots/05-closed.png
+quit

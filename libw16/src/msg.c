@@ -455,7 +455,7 @@ static void mouse_event(UINT base)
         }
         hit = (int)SendMessage(h, WM_NCHITTEST, 0, MAKELPARAM(p.x, p.y));
         while (hit == HTTRANSPARENT && h->parent && h->parent != w16_desktop) {
-            h = h->parent;
+            h = w16_window_under(h, p);
             hit = (int)SendMessage(h, WM_NCHITTEST, 0, MAKELPARAM(p.x, p.y));
         }
     }

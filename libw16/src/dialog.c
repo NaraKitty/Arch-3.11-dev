@@ -304,13 +304,14 @@ LRESULT DefDlgProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
             if (d->focus && w16_valid(d->focus) && IsChild(h, d->focus)) SetFocus(d->focus);
             else { HWND f = GetNextDlgTabItem(h, NULL, FALSE); if (f) SetFocus(f); }
             if (w16_focus && IsChild(h, w16_focus)) set_default_button(h, w16_focus);
-        } else if (d && w16_focus && IsChild(h, w16_focus)) {
-            d->focus = w16_focus;
-            /* a focused push button stops being the default while another window is active, and
-             * the dialog's default does not take over (measured on 3.11: "Edit Pattern..." behind
-             * the Edit Pattern dialog, and the Desktop's OK, both have the thin border) */
-            if (SendMessage(w16_focus, WM_GETDLGCODE, 0, 0) & DLGC_DEFPUSHBUTTON)
-                SendMessage(w16_focus, BM_SETSTYLE, BS_PUSHBUTTON, TRUE);
+        } else if (d) {
+            if (w16_focus && IsChild(h, w16_focus)) d->focus = w16_focus;
+            /* while another window is active no button of the dialog is the default (measured on
+             * 3.11: behind the Edit Pattern dialog the focused "Edit Pattern..." and the Desktop's
+             * OK both have the thin border, and so has OK behind a message box with the focus in
+             * an edit); the default comes back with the activation */
+            for (HWND c = h->child; c; c = c->next)
+                if (SendMessage(c, WM_GETDLGCODE, 0, 0) & DLGC_DEFPUSHBUTTON) SendMessage(c, BM_SETSTYLE, BS_PUSHBUTTON, TRUE);
         }
         return 0;
     case WM_SETFOCUS:

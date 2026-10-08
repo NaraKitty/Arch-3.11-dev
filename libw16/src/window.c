@@ -937,6 +937,23 @@ static HWND from_point(HWND parent, POINT pt, int skip_disabled)
     return NULL;
 }
 HWND WindowFromPoint(POINT pt) { HWND h = from_point(w16_desktop, pt, 1); return h ? h : w16_desktop; }
+
+/* the window under pt once h answered WM_NCHITTEST with HTTRANSPARENT: the next sibling below h
+ * there (its deepest child at pt), else h's parent - USER goes on down the z-order (a click on the
+ * Desktop applet's spin arrows inside a group box reaches the arrows) */
+HWND w16_window_under(HWND h, POINT pt)
+{
+    for (HWND s = h->next; s; s = s->next) {
+        if (!(s->style & WS_VISIBLE) || !PtInRect(&s->rw, pt)) continue;
+        if ((s->style & WS_CHILD) && (s->style & WS_DISABLED)) continue;
+        if (!(s->style & WS_MINIMIZE) && PtInRect(&s->rc, pt)) {
+            HWND k = from_point(s, pt, 1);
+            if (k) return k;
+        }
+        return s;
+    }
+    return h->parent;
+}
 HWND ChildWindowFromPoint(HWND parent, POINT pt)
 {
     if (!w16_valid(parent)) return NULL;
