@@ -115,7 +115,8 @@ static void paint_push(HWND h, HDC dc)
     GetClientRect(h, &r);
     HBRUSH bg = w16_ctl_color(h, dc, CTLCOLOR_BTN);
     int l = r.left, t = r.top, rt = r.right, bt = r.bottom;
-    int def = btype(h) == BS_DEFPUSHBUTTON;
+    /* USER seg25:18BC: a disabled default push button is drawn as a plain one */
+    int def = btype(h) == BS_DEFPUSHBUTTON && !(h->style & WS_DISABLED);
     int pressed = (b->state & BST_PUSHED) != 0;
     /* corners show the parent's background */
     RECT c;

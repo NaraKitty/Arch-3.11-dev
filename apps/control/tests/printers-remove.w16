@@ -1,0 +1,23 @@
+# Printers > Remove (arch311 behaviour, no 3.11 frame): ARCH311_REF=<rig> sh tools/run-cp-test.sh apps/control/tests/printers-remove.w16 OUT Printers
+# The two simulated queues: Remove with HP_LaserJet_4 (the default) selected, Yes: lpadmin -x
+# (simulated), the list keeps Text_Only, "No Default Printer"; Esc closes and WIN.INI keeps only
+# Text_Only and no device= (as 3.1 writes it after removing the default printer).
+# regress: sh tools/run-cp-test.sh "$TEST" "$OUT" Printers
+# ini: WIN.INI windows device=
+# ini: WIN.INI devices Text_Only=CUPS,FILE:
+# ini: WIN.INI devices HP_LaserJet_4=
+sleep 900
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key space
+sleep 400
+key y
+sleep 400
+shot shots/01-removed.png
+key esc
+sleep 400
+quit

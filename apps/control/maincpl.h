@@ -43,9 +43,12 @@ void MouseRun(HWND hwnd);                          /* seg3:097F, dialog 6 (seg16
 BOOL DateTimeDlgProc(HWND, UINT, WPARAM, LPARAM);  /* seg8:077C, dialog 7 */
 BOOL DesktopDlgProc(HWND, UINT, WPARAM, LPARAM);   /* seg18:1419, dialog 8 */
 BOOL RegisterArrowClass(HINSTANCE hInst);          /* seg2:060E, "cpArrow" */
+void ColorRun(HWND hwnd);                          /* seg3:0756, dialog 100 (seg6) modeless */
+void ColorExit(void);                              /* seg3:0371: Color's GDI objects */
 void NetworkDialog(HWND owner);                    /* arch311: replaces WNetDeviceMode */
 BOOL PortsDlgProc(HWND, UINT, WPARAM, LPARAM);     /* seg19:062E, dialog 4 */
 int DoPortSettings(HWND hwndOwner, int iPort);     /* seg19:04C6, dialog 19 (also Printers' Connect) */
 BOOL RestartDlgProc(HWND, UINT, WPARAM, LPARAM);   /* seg9:05A9, dialog 37 (Ports, Fonts) */
+void PrintersRun(HWND hwnd);                       /* seg3:0782 + seg20:1302, dialog 1 (CUPS) */
 
 #endif

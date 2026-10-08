@@ -1,0 +1,36 @@
+# Printers > Connect > Network... (arch311 behaviour; UNTESTED against a real share): ARCH311_SIM_NETWORK=1 ARCH311_REF=<rig> sh tools/run-cp-test.sh apps/control/tests/printers-network.w16 OUT Printers
+# With a network (the reference PC has none, so 3.11's Network... was never enabled there): Connect
+# for HP_LaserJet_4, Network..., \\server\laser on LPT1: -> a raw CUPS queue "LPT1" printing to
+# smb://server/laser (simulated lpadmin), listed as "LPT1:   \\server\laser"; Close; the Connect list
+# then shows LPT1: with the network path; Cancel, Esc.
+# (CONTROL.INI [Previous] gets the path as a key, as 3.1 writes it.)
+# regress: ARCH311_SIM_NETWORK=1 sh tools/run-cp-test.sh "$TEST" "$OUT" Printers
+sleep 900
+key tab
+key tab
+key tab
+key tab
+key space
+sleep 600
+shot shots/01-connect.png
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key space
+sleep 600
+shot shots/02-network.png
+type \\server\laser
+key enter
+sleep 600
+shot shots/03-connected.png
+key esc
+sleep 600
+shot shots/04-ports.png
+key esc
+sleep 300
+key esc
+sleep 400
+quit

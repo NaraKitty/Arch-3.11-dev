@@ -1,0 +1,26 @@
+# Printers with no printer: ARCH311_SIM_PRINTERS= ARCH311_REF=<rig> ARCH311_REF_INI=1 sh tools/run-cp-test.sh apps/control/tests/printers-empty.w16 OUT Printers
+# Same keys as arch311-ref/scn/printers-empty.scn after opening, on the pristine install's WIN.INI and a
+# CUPS without queues: the dialog opens with Add >> done, Generic / Text Only selected (the simulated
+# lpinfo -m lists the printer names of CONTROL.INF), Use Print Manager off, Esc closes.
+# regress: ARCH311_SIM_PRINTERS= ARCH311_REF_INI=1 sh tools/run-cp-test.sh "$TEST" "$OUT" Printers
+# compare: printers-empty/02.png 01-open.png active ignore 320 240 332 260
+# compare: printers-empty/03.png 02-generic.png active ignore 320 240 332 260
+# compare: printers-empty/04.png 03-printman.png active ignore 320 240 332 260
+# ini: WIN.INI windows spooler=no
+# ini: WIN.INI windows device=
+sleep 900
+shot shots/01-open.png
+key down
+sleep 300
+shot shots/02-generic.png
+key tab
+key tab
+key tab
+key tab
+key tab
+key space
+sleep 300
+shot shots/03-printman.png
+key esc
+sleep 400
+quit

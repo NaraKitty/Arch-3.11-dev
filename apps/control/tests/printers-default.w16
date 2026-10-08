@@ -1,0 +1,28 @@
+# Printers > Set As Default, Use Print Manager: ARCH311_REF=<rig> ARCH311_REF_INI=1 ARCH311_WININI='<as below>' sh tools/run-cp-test.sh apps/control/tests/printers-default.w16 OUT Printers
+# Same keys as arch311-ref/scn/printers-default.scn after opening, from the same WIN.INI (two printers
+# on TTY.DRV, as the reference run's -WinIni): Text_Only set as default, Use Print Manager off, Esc
+# closes. CUPS's default becomes Text_Only (lpoptions -d, simulated); WIN.INI as real 3.11 writes it.
+# regress: ARCH311_REF_INI=1 ARCH311_WININI='windows/device=HP_LaserJet_4,TTY,LPT1:;PrinterPorts/HP_LaserJet_4=TTY,LPT1:,15,45;PrinterPorts/Text_Only=TTY,FILE:,15,45;devices/HP_LaserJet_4=TTY,LPT1:;devices/Text_Only=TTY,FILE:' sh tools/run-cp-test.sh "$TEST" "$OUT" Printers
+# compare: printers-default/02.png 01-open.png active ignore 320 240 332 260
+# compare: printers-default/03.png 02-default.png active ignore 320 240 332 260
+# compare: printers-default/04.png 03-printman.png active ignore 320 240 332 260
+# ini: WIN.INI windows spooler=no
+# ini: WIN.INI windows device=Text_Only,TTY,FILE:
+# ini: WIN.INI PrinterPorts HP_LaserJet_4=TTY,LPT1:,15,45
+# ini: WIN.INI PrinterPorts Text_Only=TTY,FILE:,15,45
+# ini: WIN.INI devices HP_LaserJet_4=TTY,LPT1:
+# ini: WIN.INI devices Text_Only=TTY,FILE:
+sleep 900
+shot shots/01-open.png
+key down
+key tab
+key space
+sleep 300
+shot shots/02-default.png
+key tab
+key space
+sleep 300
+shot shots/03-printman.png
+key esc
+sleep 400
+quit

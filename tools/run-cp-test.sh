@@ -14,8 +14,12 @@
 #   files after the run compare byte for byte with a reference run's (arch311-ref/run-NAME).
 # - ARCH311_INI_DIR=<folder>: its *.INI files are the starting ones (after the above), e.g. a WIN.INI
 #   changed the way a reference run's -WinIni changes it.
-# ARCH311_SIMULATE (default 1), ARCH311_WAVEDEVS (default 0, the rig's DOSBox has no sound card) and
-# ARCH311_CLOCK pass through.
+# - ARCH311_WININI='section/key=value;...' changes the starting WIN.INI exactly as ref-run.ps1 -WinIni
+#   does (Set-IniKey: the key's line replaced in its section, else added at the section's top, a new
+#   section added at the end; a leading '+' always adds), so a run starts from a reference run's file.
+# - ARCH311_A_FILES="NAME ...": those ripped files are on drive A: (a driver disk for Drivers' Add).
+# ARCH311_SIMULATE (default 1), ARCH311_WAVEDEVS (default 0, the rig's DOSBox has no sound card),
+# ARCH311_CLOCK and the applets' ARCH311_SIM_* settings pass through.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
@@ -26,6 +30,7 @@ fx=$(mktemp -d)
 trap 'rm -rf "$fx"' EXIT
 files=${ARCH311_ASSETS:-${XDG_DATA_HOME:-$HOME/.local/share}/arch311}/files
 mkdir -p "$fx/config/arch311" "$fx/a" "$fx/c/WINDOWS/SYSTEM" "$fx/c/WINDOWS/TEMP"
+for n in ${ARCH311_A_FILES:-}; do ln -s "$files/$n" "$fx/a/$n"; done
 ref=${ARCH311_REF:-}
 if [ -n "$ref" ] && [ -d "$ref/c-pristine/WINDOWS" ]; then
     for d in "$ref"/c-pristine/WINDOWS/*/; do mkdir -p "$fx/c/WINDOWS/$(basename "$d")"; done
@@ -45,6 +50,34 @@ else
 fi
 if [ -n "${ARCH311_INI_DIR:-}" ]; then
     for f in "$ARCH311_INI_DIR"/*.INI; do [ -f "$f" ] && cp "$f" "$fx/config/arch311/"; done
+fi
+if [ -n "${ARCH311_WININI:-}" ]; then
+    w="$fx/config/arch311/WIN.INI"
+    [ -f "$w" ] || cp "$files/WIN.SRC" "$w"
+    printf '%s\n' "$ARCH311_WININI" | tr ';' '\n' | while IFS= read -r kv; do
+        [ -n "$kv" ] || continue
+        awk -v kv="$kv" '
+            BEGIN { add = substr(kv, 1, 1) == "+"; if (add) kv = substr(kv, 2)
+                    i = index(kv, "/"); secname = substr(kv, 1, i - 1); kv = substr(kv, i + 1)
+                    i = index(kv, "="); key = substr(kv, 1, i - 1); val = substr(kv, i + 1) }
+            { sub(/\r$/, ""); line[++n] = $0 }
+            END {
+                at = 0; inside = 0; done = 0
+                for (i = 1; i <= n && !done; i++) {
+                    if (line[i] ~ /^\[.*\]/) { h = line[i]; sub(/^\[/, "", h); sub(/\].*$/, "", h)
+                                              inside = tolower(h) == tolower(secname); if (inside) at = i; continue }
+                    if (inside && !add && tolower(substr(line[i], 1, length(key))) == tolower(key) &&
+                        substr(line[i], length(key) + 1) ~ /^[ \t]*=/) { line[i] = key "=" val; done = 1 }
+                }
+                if (!done) {
+                    if (!at) { line[++n] = "[" secname "]"; at = n }
+                    for (i = n; i > at; i--) line[i + 1] = line[i]
+                    line[at + 1] = key "=" val; n++
+                }
+                for (i = 1; i <= n; i++) printf "%s\r\n", line[i]
+            }' "$w" > "$w.new"
+        mv "$w.new" "$w"
+    done
 fi
 printf 'A=%s\nC=%s\n' "$fx/a" "$fx/c" > "$fx/config/arch311/drives"
 status=0

@@ -1,0 +1,36 @@
+# Minesweeper: About (SHELL.DLL's box), Color off (the monochrome bitmaps), Marks off, the Game menu,
+# Exit. Same keys as e.scn, run on real 3.11 as arch311-ref/scn/winmine-e.scn. In the About box the
+# licensed user (the Linux account here, Setup's name there) and the memory figures differ on purpose.
+# regress: sh apps/winmine/tests/run.sh "$TEST" "$OUT"
+# compare: winmine-e/02.png 01.png ignore 320 240 332 260 ignore 196 218 340 234 ignore 326 322 450 354
+# compare: winmine-e/03.png 02.png ignore 320 240 332 260
+# compare: winmine-e/04.png 03.png ignore 320 240 332 260
+# ini: WINMINE.INI Minesweeper Mark=0
+# ini: WINMINE.INI Minesweeper Color=0
+# ini: WINMINE.INI Minesweeper Difficulty=0
+# ini: WINMINE.INI Minesweeper Name3=Anonymous
+sleep 400
+key alt
+key h
+key a
+sleep 400
+shot shots/01.png
+key enter
+key alt
+key g
+key l
+sleep 400
+shot shots/02.png
+key alt
+key g
+key m
+key alt
+key g
+sleep 400
+shot shots/03.png
+key esc
+key esc
+key alt
+key g
+key x
+quit

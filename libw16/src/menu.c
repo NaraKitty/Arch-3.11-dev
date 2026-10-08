@@ -207,12 +207,10 @@ BOOL SetMenu(HWND h, HMENU m)
     if (!w16_valid(h) || (h->style & WS_CHILD)) return FALSE;
     h->menu = m;
     if (m) m->owner = h;
+    /* the frame changes: SetWindowPos recomputes the client area and sends WM_MOVE / WM_SIZE when it
+     * moved / changed size */
     SetWindowPos(h, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-    RECT rc;
-    w16_nc_calc(h, &h->rw, &rc);
-    h->rc = rc;
     w16_invalidate_window(h, NULL, 1, 1);
-    SendMessage(h, WM_SIZE, SIZE_RESTORED, MAKELPARAM(rc.right - rc.left, rc.bottom - rc.top));
     return TRUE;
 }
 DWORD GetMenuCheckMarkDimensions(void) { return MAKELONG(14, 14); }
@@ -553,7 +551,7 @@ static void popup_draw_item(Popup *p, HDC dc, int i)
         W16Bitmap *ck = w16_obm(OBM_CHECK);
         if (ck) {
             /* USER seg10:21DA: BitBlt at the item's left edge, centred down the item (measured on
-             * Clock's Settings menu: Analog and Date checked) */
+             * WINMINE's Game menu and Clock's Settings menu) */
             int cx = r.left, cy = r.top + (r.bottom - r.top - ck->h) / 2;
             HDC tmp = dc;
             int a = cx, b = cy;
@@ -613,16 +611,12 @@ static LRESULT popup_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         OffsetRect(&r, -r.left, -r.top);
         r.right -= 1; r.bottom -= 1; /* shadow column/row */
         FrameRect(dc, &r, w16_sys_brush(COLOR_WINDOWFRAME));
-        /* 1-pixel light-gray shadow to the right and below: a fill, not a mix with what is under it
-         * (measured on Clock's menus: black and dark-gray pixels of the face under the shadow
-         * turn light gray; white ones were seen to as well) */
-        int x0 = h->rw.right - 1, y0 = h->rw.top + 1, y1 = h->rw.bottom;
-        for (int y = y0; y < y1 && y < w16_screen.h; y++)
-            if (x0 >= 0 && x0 < w16_screen.w && y >= 0) w16_screen.px[y * w16_screen.w + x0] = w16_rgb(RGB(192, 192, 192));
-        int yb = h->rw.bottom - 1;
-        for (int x = h->rw.left + 1; x < h->rw.right - 1 && yb < w16_screen.h; x++)
-            if (x >= 0 && x < w16_screen.w && yb >= 0) w16_screen.px[yb * w16_screen.w + x] = w16_rgb(RGB(192, 192, 192));
-        w16_screen_dirty = 1;
+        /* 1-pixel shadow below (x 1 .. w-2) and to the right (y 1 .. h-1): USER seg10:0333 PatBlts
+         * the COLOR_GRAYTEXT brush there (its colour table entry 17 at ds:054E), so dark pixels under
+         * it turn light gray too (measured over WINMINE's board and Clock's face) */
+        HBRUSH sh = w16_sys_brush(COLOR_GRAYTEXT);
+        FillRect(dc, &(RECT){1, r.bottom, r.right, r.bottom + 1}, sh);
+        FillRect(dc, &(RECT){r.right, 1, r.right + 1, r.bottom + 1}, sh);
         ReleaseDC(h, dc);
         return 0;
     }

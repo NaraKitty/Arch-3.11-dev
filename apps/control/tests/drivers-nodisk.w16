@@ -1,0 +1,26 @@
+# Drivers > Add... > Ad Lib with an empty A:: ARCH311_REF_INI=1 tools/run-cp-test.sh apps/control/tests/drivers-nodisk.w16 OUT Drivers
+# Same keys as arch311-ref/scn/drivers-nodisk.scn: VerInstallFile cannot read A:\msadlib.drv, so
+# FileCopy asks for the disk (dialog 1006 with SETUP.INF's [disks] label for disk 5); Cancel ends the
+# install without a message and nothing is written; Close
+# regress: ARCH311_REF_INI=1 sh tools/run-cp-test.sh "$TEST" "$OUT" Drivers
+# compare: drivers-nodisk/05.png 01-insert.png active ignore 320 239 333 261
+# compare: drivers-nodisk/06.png 02-close.png active ignore 320 239 333 261
+# ini: SYSTEM.INI drivers MIDI=
+# ini: CONTROL.INI Userinstallable.drivers MIDI=
+sleep 900
+key tab
+key tab
+key space
+sleep 500
+type a
+sleep 300
+key enter
+sleep 800
+shotcaret shots/01-insert.png
+key esc
+sleep 500
+shot shots/02-close.png
+key esc
+sleep 300
+shot shots/03-closed.png
+quit

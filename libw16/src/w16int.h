@@ -52,6 +52,7 @@ const W16Res *w16_find_res(HINSTANCE m, LPCSTR name, LPCSTR type);
 const uint8_t *w16_res_data(HINSTANCE m, const W16Res *r);
 HINSTANCE w16_system_module(const char *file); /* USER.EXE, VGA.DRV, ... (NULL if absent) */
 int w16_wildmatch(const char *pat, const char *s); /* DOS wildcards, case-insensitive */
+int w16_driver_in_use(LPCSTR file);                /* an installable driver holds the file (driver.c) */
 
 /* ------------------------------------------------------------------ GDI */
 enum { OBJ_PEN = 1, OBJ_BRUSH, OBJ_FONT, OBJ_BITMAP, OBJ_RGN, OBJ_PAL };
@@ -74,6 +75,7 @@ struct W16GdiObj {
         struct { LOGFONT lf; W16Font *f; } font;
         W16Bitmap bmp;
         Region rgn;
+        struct { int n; PALETTEENTRY *e; } pal;
     } u;
 };
 
@@ -125,6 +127,7 @@ void w16_dc_clip_iter_begin(HDC dc, Region *out);
 W16Bitmap *w16_bitmap_of(HBITMAP h);
 HBRUSH w16_sys_brush(int color_index);
 HPEN w16_sys_pen(int color_index);
+void w16_syscolors_realize(void); /* USER's start-up snapping of the WIN.INI colours (sys.c) */
 
 /* OEM bitmaps from the user's display driver (VGA.DRV) */
 W16Bitmap *w16_obm(int id);
@@ -225,11 +228,19 @@ void w16_invalidate_window(HWND h, const RECT *screen_r, int erase, int nc);
 HWND w16_next_to_paint(HWND root);
 int w16_any_paint_pending(void);
 void w16_set_window_rect(HWND h, const RECT *rw, UINT swp);
+void w16_get_minmax_info(HWND h, MINMAXINFO *mm);       /* USER seg6:1A4F (sends WM_GETMINMAXINFO) */
+void w16_clamp_window_size(HWND h, int *cx, int *cy);    /* USER seg1:0000 */
 HWND w16_top_level(HWND h);
 HWND w16_window_under(HWND h, POINT pt); /* hit testing past an HTTRANSPARENT window */
 int w16_window_visible(HWND h); /* visible including ancestors */
+char *w16_ansi_to_utf8(const char *s);   /* malloc'd; cp1252 <-> UTF-8 for the Linux clipboard */
+char *w16_utf8_to_ansi(const char *s);
+void w16_clipboard_on_destroy(HWND h);   /* USER: the owner renders all before WM_DESTROY */
+void w16_clipboard_on_free(HWND h);      /* a freed window leaves the clipboard's records */
+void w16_clipboard_poll(void);           /* the shared clipboard, from the message loop */
 void w16_activate(HWND h, int how);
 void w16_send_paint_cascade(HWND h); /* UpdateWindow semantics */
+UINT w16_paint_msg(HWND h);          /* WM_PAINT, or WM_PAINTICON for an icon with a class icon */
 void w16_destroy_children(HWND h);
 
 /* non-client */
@@ -247,6 +258,9 @@ void w16_track_sb(HWND h, HWND notify, int bar, int x, int y, int ctl);
 void w16_draw_sb_ctl(HDC dc, const RECT *r, int vert, W16Scroll *s, int pressed, int enabled_win, HWND bg);
 int w16_sb_hit(const RECT *r, int vert, W16Scroll *s, int x, int y, RECT *part);
 void w16_iconic_paint(HWND h);
+/* USER's internal WINDOWPOS flags (WM_WINDOWPOSCHANGED): the client area kept its size / place */
+#define W16_SWP_NOCLIENTSIZE 0x0800
+#define W16_SWP_NOCLIENTMOVE 0x1000
 int w16_icon_title_rect(HWND h, RECT *r);   /* screen rectangle of an icon's title (0: not an icon) */
 void w16_invalidate_icon_title(HWND h);
 void w16_paint_icon_titles(HDC desktop_dc); /* the desktop's WM_PAINT draws the icon titles */

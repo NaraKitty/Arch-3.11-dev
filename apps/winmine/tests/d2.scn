@@ -1,0 +1,23 @@
+# Minesweeper Best Times (WINMINE.INI seeded): Esc on the new dialog; again with Reset Scores
+# (Tab, Space) and Esc; Tab to OK and Enter; then Exit
+key alt
+key g
+key t
+shot
+key esc
+shot
+key alt
+key g
+key t
+shot
+key tab
+key space
+shot
+key esc
+shot
+key tab
+key enter
+shot
+key alt
+key g
+key x

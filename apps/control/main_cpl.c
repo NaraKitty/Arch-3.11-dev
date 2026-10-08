@@ -36,13 +36,13 @@ typedef struct {
 } Applet;
 
 static Applet applets[] = {
-    {24, 48, 600, 0, TRUE, 5000, FALSE},   /* Color */
+    {24, 48, 600, 0, TRUE, 5000, TRUE},    /* Color */
     {26, 50, 602, 2, TRUE, 5002, FALSE},   /* Fonts */
     {28, 52, 604, 4, TRUE, 5004, TRUE},    /* Ports */
     {30, 54, 606, 6, TRUE, 5006, TRUE},    /* Mouse */
     {32, 56, 608, 8, TRUE, 5008, TRUE},    /* Desktop */
     {29, 53, 605, 5, TRUE, 5005, TRUE},    /* Keyboard */
-    {25, 49, 601, 1, TRUE, 5001, FALSE},   /* Printers */
+    {25, 49, 601, 1, TRUE, 5001, TRUE},    /* Printers */
     {27, 51, 603, 3, TRUE, 5003, FALSE},   /* International */
     {31, 55, 607, 7, TRUE, 5007, TRUE},    /* Date/Time */
     {34, 58, 610, 10, TRUE, 5010, TRUE},   /* Network */
@@ -227,13 +227,14 @@ LPSTR FindIniKeyByValue(LPCSTR file, LPCSTR section, LPCSTR value)
 }
 
 /* ------------------------------------------------------------------ seg6:0000
- * "Are you sure ... %s ...?" with Yes / No */
+ * "Are you sure ... %s ...?" with Yes / No and the exclamation icon (flags 0x34; real 3.11's
+ * Printers Remove box shows it) */
 BOOL ConfirmRemove(HWND hwnd, LPCSTR name, int idFormat)
 {
     char fmt[0x9e], msg[0x200];
     LoadString(hInstMain, idFormat, fmt, sizeof fmt);
     wsprintf(msg, fmt, name);
-    return MessageBox(hwnd, msg, szCaption, MB_YESNO | MB_ICONQUESTION) == IDYES;
+    return MessageBox(hwnd, msg, szCaption, MB_YESNO | MB_ICONEXCLAMATION) == IDYES;
 }
 
 /* ------------------------------------------------------------------ seg9:005F
@@ -257,12 +258,16 @@ HFILE OpenFileFromWinDir(LPCSTR file, OFSTRUCT *of, UINT style)
 }
 
 /* ------------------------------------------------------------------ seg3:0733: run applet <id>
- * Not ported yet: 0 Color = CreateDialog 100 with seg6:0DC8, then the modal loop seg3:06AE;
- * 1 Printers = dialog 1, seg20:1302 (activates the open one, [0x16], instead when there is one);
- * 2 Fonts = dialog 2, seg9:0CBC; 3 International = dialog 3, seg12:194D. */
+ * Not ported yet: 2 Fonts = dialog 2, seg9:0CBC; 3 International = dialog 3, seg12:194D. */
 static void RunApplet(HWND hwnd, int id)
 {
     switch (id) {
+    case 0:
+        ColorRun(hwnd);     /* CreateDialog 100 with seg6:0DC8, then the loop seg3:06AE */
+        break;
+    case 1:
+        PrintersRun(hwnd);  /* seg3:0782, dialog 1 */
+        break;
     case 4:
         DialogBox(hInstMain, MAKEINTRESOURCE(4), hwnd, PortsDlgProc);
         break;
@@ -356,7 +361,7 @@ LRESULT Main_CPlApplet(HWND hwndCPl, UINT msg, LPARAM lParam1, LPARAM lParam2)
         return 0;
     }
     case CPL_EXIT:
-        if (--cInit == 0) { /* seg3:0371 frees GDI objects that ported applets keep */ }
+        if (--cInit == 0) ColorExit();     /* seg3:0371 frees the GDI objects applets keep */
         return 0;
     }
     /* messages 100 (Printers for Print Manager) and 101 (seg3:0010 for Setup) are private

@@ -1,0 +1,80 @@
+# Color applet: Arizona, the palette, a custom colour (hue 40, sat 200, lum 100) added and the
+# selector closed, Tab Tab Tab to OK and Space (SetSysColors: the Control Panel repaints in Arizona),
+# then Settings > Exit. Same keys as arch311-ref/scn/color-ok.scn; compare in 16 colours
+# (W16_COLORS=16). Frame 05 is the Control Panel after OK: everything but its icons (the branch has
+# other applets) and the rig's mouse pointer is compared.
+# regress: W16_COLORS=16 sh tools/run-cp-test.sh "$TEST" "$OUT"
+# compare: color-ok/02.png 02.png active
+# compare: color-ok/03.png 03.png active ignore 320 240 332 260
+# compare: color-ok/04.png 04.png active ignore 320 240 332 260
+# compare: color-ok/05.png 05.png ignore 4 42 426 213 ignore 320 240 332 260
+# ini: WIN.INI colors Background=0 64 128
+# ini: WIN.INI colors AppWorkspace=255 255 255
+# ini: WIN.INI colors Window=255 255 255
+# ini: WIN.INI colors WindowText=0 0 0
+# ini: WIN.INI colors Menu=255 255 255
+# ini: WIN.INI colors MenuText=0 0 0
+# ini: WIN.INI colors ActiveTitle=64 128 128
+# ini: WIN.INI colors InactiveTitle=192 192 192
+# ini: WIN.INI colors TitleText=255 255 255
+# ini: WIN.INI colors ActiveBorder=255 128 64
+# ini: WIN.INI colors InactiveBorder=192 192 192
+# ini: WIN.INI colors WindowFrame=0 0 0
+# ini: WIN.INI colors Scrollbar=192 192 192
+# ini: WIN.INI colors ButtonFace=192 192 192
+# ini: WIN.INI colors ButtonShadow=128 128 128
+# ini: WIN.INI colors ButtonText=0 0 0
+# ini: WIN.INI colors GrayText=128 128 128
+# ini: WIN.INI colors Hilight=0 128 128
+# ini: WIN.INI colors HilightText=255 255 255
+# ini: WIN.INI colors InactiveTitleText=0 0 0
+# ini: WIN.INI colors ButtonHilight=255 255 255
+# ini: CONTROL.INI current color schemes=Arizona
+# ini: CONTROL.INI [Custom Colors] ColorA=12C2C2
+# ini: CONTROL.INI [Custom Colors] ColorB=FFFFFF
+# ini: CONTROL.INI [Custom Colors] ColorP=FFFFFF
+sleep 400
+shot shots/01.png
+key enter
+key down
+key tab
+key tab
+key space
+key tab
+key tab
+key tab
+key space
+key 4
+key 0
+key tab
+key 2
+key 0
+key 0
+key tab
+key 1
+key 0
+key 0
+key tab
+key tab
+key tab
+key tab
+key space
+sleep 400
+shot shots/02.png
+key tab
+key space
+sleep 400
+shot shots/03.png
+key tab
+key tab
+key tab
+sleep 400
+shot shots/04.png
+key space
+sleep 600
+shot shots/05.png
+key alt
+key s
+key x
+sleep 400
+quit

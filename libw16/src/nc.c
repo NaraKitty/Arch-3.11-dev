@@ -136,12 +136,17 @@ static void obm_stretch(HDC dc, int id, int x, int y, int w, int h)
     }
 }
 
+/* USER paints frames, captions and scroll-bar parts with its system-colour brushes (PatBlt), so a
+ * colour the display cannot show solid is dithered by the driver as for any solid brush - measured:
+ * real 3.11 after MAIN.CPL Color applies Arizona (ActiveTitle 64 128 128, ActiveBorder 255 128 64) */
 static void fill(HDC dc, int l, int t, int r, int b, COLORREF c)
 {
     int a = l, bb = t, cc = r, d = b;
     w16_lp_to_dp(dc, &a, &bb);
     w16_lp_to_dp(dc, &cc, &d);
-    w16_fill_solid_dev(dc, &(RECT){a, bb, cc, d}, w16_rgb(c));
+    HBRUSH br = CreateSolidBrush(c);
+    w16_fill_rect_dev(dc, &(RECT){a, bb, cc, d}, br);
+    DeleteObject(br);
 }
 
 static void draw_frame(HWND h, HDC dc, int active)
@@ -632,11 +637,13 @@ void w16_maximize(HWND h)
     SendMessage(h, WM_MOVE, 0, MAKELPARAM(h->rc.left, h->rc.top));
 }
 
+/* Restoring does not make the icon's place stick: USER's MinMaximize (seg6:1BC2) forgets the icon
+ * position and takes a free slot (seg4:0000) on the next minimize unless the checkpoint says the icon
+ * was moved (flag set at seg6:123B when a move ends on an icon: track_rect below). */
 void w16_restore(HWND h)
 {
     RECT old = h->rw, title;
     int was_min = (h->style & WS_MINIMIZE) != 0;
-    if (was_min) h->iconpos = (POINT){h->rw.left, h->rw.top}, h->has_iconpos = 1;
     w16_icon_title_rect(h, &title);
     h->style &= ~(WS_MINIMIZE | WS_MAXIMIZE);
     w16_invalidate_screen_rect(&old);
@@ -711,27 +718,6 @@ void w16_icon_slot_in(HWND h, POINT *pt)
     OffsetRect(&s, -pc.left, -pc.top);
     pt->x = sx / 2 - hx + s.left;
     pt->y = s.top;
-}
-
-/* USER seg6:18E0 + 1A4F: the MINMAXINFO a window starts from, then WM_GETMINMAXINFO (an MDI child
- * answers with its client's area). UNTESTED for windows that do not answer: the non-sizable default
- * (screen plus a border on each side) is not measured */
-static void get_minmax(HWND h, MINMAXINFO *mm)
-{
-    int fx = GetSystemMetrics(SM_CXFRAME), fy = GetSystemMetrics(SM_CYFRAME);
-    int bx = GetSystemMetrics(SM_CXBORDER), by = GetSystemMetrics(SM_CYBORDER);
-    memset(mm, 0, sizeof *mm);
-    mm->ptReserved = (POINT){icon_wnd_cx(), icon_wnd_cy()};
-    if (h->style & WS_THICKFRAME) {
-        mm->ptMaxSize = (POINT){w16_screen.w + 2 * fx, w16_screen.h + 2 * fy};
-        mm->ptMaxPosition = (POINT){-fx, -fy};
-    } else {
-        mm->ptMaxSize = (POINT){w16_screen.w + 2 * bx, w16_screen.h + 2 * by};
-        mm->ptMaxPosition = (POINT){-bx, -by};
-    }
-    mm->ptMinTrackSize = (POINT){GetSystemMetrics(SM_CXMINTRACK), GetSystemMetrics(SM_CYMINTRACK)};
-    mm->ptMaxTrackSize = mm->ptMaxSize;
-    SendMessage(h, WM_GETMINMAXINFO, 0, (LPARAM)mm);
 }
 
 /* seg6:1E58: the last window below h among its siblings (as far as they share h's topmost state)
@@ -809,7 +795,7 @@ void w16_min_maximize(HWND h, int cmd, int keep_hidden)
             if (keep_hidden) swp |= SWP_NOACTIVATE;
             if (h->style & WS_MINIMIZE) h->cp_flags |= 4;
             else h->cp_flags &= ~4;
-            get_minmax(h, &mm);
+            w16_get_minmax_info(h, &mm); /* an MDI child answers with its client's area */
             if (!w16_valid(h)) return;
         }
         if (h->style & WS_MINIMIZE) {
@@ -1056,6 +1042,9 @@ static void track_rect(HWND h, int hit, POINT start)
         if (h->parent && h->parent != w16_desktop) pr = h->parent->rc;
         SetWindowPos(h, NULL, r.left - pr.left, r.top - pr.top, r.right - r.left, r.bottom - r.top,
                      SWP_NOZORDER | SWP_NOACTIVATE);
+        /* an icon moved by the user keeps its place (USER seg6:123B sets the checkpoint flag); the
+         * checkpoint's ptMin is in the parent's client coordinates (a child icon's too) */
+        if (IsIconic(h)) h->iconpos = (POINT){r.left - pr.left, r.top - pr.top}, h->has_iconpos = 1;
     }
 }
 

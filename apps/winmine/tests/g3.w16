@@ -1,0 +1,11 @@
+# Minesweeper: a 30 x 24 custom board with 10 mines (g3.ini, WINMINE_SEED=1). The window does not fit
+# 480 lines, so AdjustWindow moves it up (client at 79,28). One click in the middle opens 708 of the
+# 710 free boxes through the 100-entry open-area queue. No real-3.11 frames (the rig cannot click);
+# the board was checked against a model of the decoded game logic.
+# regress: WINMINE_INI=apps/winmine/tests/g3.ini sh apps/winmine/tests/run.sh "$TEST" "$OUT"
+sleep 500
+shot shots/01.png
+click 323 267
+sleep 400
+shot shots/02.png
+quit
