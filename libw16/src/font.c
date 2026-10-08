@@ -93,6 +93,16 @@ W16Font *w16_font_realize(const LOGFONT *lf)
     w16_fonts_init();
     for (Realized *r = realized; r; r = r->next)
         if (!memcmp(&r->lf, lf, sizeof *lf)) return r->f;
+    /* a TrueType face (Arial, Times New Roman, ...) when TrueType is on and FreeType is there */
+    W16Font *tt = w16_tt_realize(lf);
+    if (tt) {
+        Realized *r = malloc(sizeof *r);
+        r->lf = *lf;
+        r->f = tt;
+        r->next = realized;
+        realized = r;
+        return tt;
+    }
     const char *face = lf->lfFaceName[0] ? substitute(lf->lfFaceName) : NULL;
     if (!face) {
         int fam = lf->lfPitchAndFamily & 0xF0, pitch = lf->lfPitchAndFamily & 3;
@@ -182,6 +192,10 @@ void w16_draw_text_dev(HDC dc, W16Font *f, int x, int y, const char *s, int n, u
     if (dc->target && dc->target->mono) fg = fg == 0xFFFFFF ? 0xFFFFFF : 0;
     int h = f->height;
     int x0 = x;
+    if (f->tt) {
+        w16_tt_draw_text(dc, f, x, y, s, n, fg, dx, charextra, &e, t);
+        for (int i = 0; i < n; i++) x += dx ? dx[i] : f->widths[(unsigned char)s[i]] + charextra;
+    } else
     for (int i = 0; i < n; i++) {
         int ch = (unsigned char)s[i];
         int gw;

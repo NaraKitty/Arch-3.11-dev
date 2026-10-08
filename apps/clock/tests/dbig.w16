@@ -1,0 +1,11 @@
+# The digital clock in a 400 x 400 window (CLOCK.INI Options=0,0,1,0,0,0 and Position): the time is
+# big enough (cyTime + cxDigit >= 90) to be drawn raised, Arial at 77 pixels per em over the date at
+# 57; the line heights are the font's VDMX cell (87 and 65), which places the time line. 9:30:03
+# as in default.w16.
+# reference: clock-def.scn with -PrivateIni 'CLOCK.INI:Clock/Options=0,0,1,0,0,0','CLOCK.INI:Clock/Position=40,30,440,430'
+# KNOWN DIFFERENCE (max 49): pixels on diagonal outline edges where 3.1's scan converter differs.
+# regress: ARCH311_CLOCK="2026-10-08 09:30:02" sh apps/clock/tests/clock.sh "$TEST" "$OUT" "Options=0,0,1,0,0,0" "Position=40,30,440,430"
+# compare: clock-dbig/01.png 01.png ignore 320 240 333 261 max 49
+sleep 150
+shot shots/01.png
+quit

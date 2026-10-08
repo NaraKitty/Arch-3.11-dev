@@ -140,7 +140,11 @@ struct W16Font {
     const uint8_t *fnt;  /* raw FNT (inside module data) */
     int v3;
     struct W16Font *next;
+    struct W16TT *tt;    /* a TrueType font (truetype.c) instead of a raster one */
 };
+W16Font *w16_tt_realize(const LOGFONT *lf); /* NULL: not a TrueType face, or no FreeType */
+void w16_tt_draw_text(HDC dc, W16Font *f, int x, int y, const char *s, int n, uint32_t fg, const int *dx,
+                      int charextra, const Region *clip, W16Bitmap *t);
 W16Font *w16_font_realize(const LOGFONT *lf);
 W16Font *w16_font_system(void);
 int w16_text_width(W16Font *f, const char *s, int n);
