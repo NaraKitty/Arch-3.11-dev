@@ -1,0 +1,30 @@
+# Calculator, Edit > Paste in the scientific view: "((1+2)*3@-2#)%7+4!=" (parentheses, x^2, x^3,
+# Mod, n!), then typed 5 and the same text pasted again
+# Reference run only (the port side is calc-paste2.w16, which puts the text on the clipboard with
+# "clip"): Program Manager is the shell and WIN.INI run=calc.exe notepad.exe; Notepad opens
+# SYSTEM\cp2.txt (holding the text), selects and copies it and closes, then Calculator pastes.
+shot
+key alt
+type fo
+shot
+type system\cp2.txt
+key enter
+shot
+key alt
+type ea
+key alt
+type ec
+key alt
+type fx
+shot
+key alt
+type vs
+shot
+key alt
+type ep
+shot
+type 5
+shot
+key alt
+type ep
+shot

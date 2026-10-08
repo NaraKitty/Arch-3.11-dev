@@ -1,0 +1,31 @@
+# Calculator, Edit > Paste in the scientific view: ":5F0&3C|1^FF=~<4=" (Hex by its paste code, And,
+# Or, Xor, Not, Lsh), then the word sizes Word, Byte and Dword
+# Reference run only (the port side is calc-paste3.w16, which puts the text on the clipboard with
+# "clip"): Program Manager is the shell and WIN.INI run=calc.exe notepad.exe; Notepad opens
+# SYSTEM\cp3.txt (holding the text), selects and copies it and closes, then Calculator pastes.
+shot
+key alt
+type fo
+shot
+type system\cp3.txt
+key enter
+shot
+key alt
+type ea
+key alt
+type ec
+key alt
+type fx
+shot
+key alt
+type vs
+shot
+key alt
+type ep
+shot
+key f3
+shot
+key f4
+shot
+key f2
+shot

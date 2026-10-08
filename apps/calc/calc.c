@@ -18,6 +18,18 @@
  * Deliberate differences: none in behaviour. Where 3.1 reads or writes memory it does not own
  * (DisplayNum after F-E formatting, deep parenthesis/precedence nesting) the port stays inside
  * its own buffers; see the comments there.
+ *
+ * Checked against real 3.11 frame by frame (apps/calc/tests, tools/regress.sh; the rig types keys,
+ * and text that needs Shift or Ctrl reaches Calculator through Edit > Paste): both views and the
+ * switch between them with WIN.INI [SciCalc] layout, entry and number formatting, the four
+ * operations, =, C, Back, +/-, 1/x, the scientific functions in degrees, radians and grads with Inv
+ * and Hyp, powers, logarithms, Int, dms, pi, F-E, Exp, precedence, errors and the error state,
+ * hex/oct/bin with the word sizes, the menus and About, Edit > Copy and Paste, and by pasted text
+ * memory, parentheses, n!, x^2, x^3, Mod, the bitwise operators and the statistics box.
+ * UNTESTED: the mouse (HitTest, FlashKey from a click), Help (WinHelp and HelpError), the busy
+ * clipboard and out-of-memory messages, WIN.INI [SciCalc] background, displays with other than
+ * 16 colours, the statistics box's CAD button and its resizing, and the FP exception paths that
+ * Calculator's own range checks keep out of reach (SignalHandler).
  */
 #include <stdint.h>
 #include <stdlib.h>

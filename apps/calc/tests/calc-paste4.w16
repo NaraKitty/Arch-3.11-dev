@@ -1,0 +1,55 @@
+# Calculator, Edit > Paste in the scientific view: ":s1\2\3\4\:d" (Sta opens the statistics box,
+# Dat adds 1 to 4, s), then the box's LOAD, CD and RET buttons by their mnemonics, 5 added with Ins
+# (Dat) and the text pasted again
+# Port side: the text goes onto the clipboard with "clip"; the reference frames come from
+# calc-paste4.scn (Program Manager shell, Notepad copies the text; its frames before
+# Calculator pastes are not compared, only those of Calculator's window); recorded with
+# dosbox-x_MinGWx64_SDL2.exe (its FPU computes with the host x87, as a real 387 would).
+# regress: ARCH311_APP=apps/build/calc sh tools/run-cp-test.sh "$TEST" "$OUT"
+# compare: calc-paste4/01.png 01.png active ignore 320 240 332 260
+# compare: calc-paste4/02.png 02.png active ignore 320 240 332 260
+# compare: calc-paste4/03.png 03.png 136 110 394 271 ignore 320 240 332 260
+# compare: calc-paste4/03.png 03.png 154 110 636 447 ignore 320 240 332 260
+# compare: calc-paste4/04.png 04.png 136 110 394 271 ignore 320 240 332 260
+# compare: calc-paste4/04.png 04.png 154 110 636 447 ignore 320 240 332 260
+# compare: calc-paste4/05.png 05.png 136 110 394 271 ignore 320 240 332 260
+# compare: calc-paste4/05.png 05.png 154 110 636 447 ignore 320 240 332 260
+# compare: calc-paste4/06.png 06.png 136 110 394 271 ignore 320 240 332 260
+# compare: calc-paste4/06.png 06.png 154 110 636 447 ignore 320 240 332 260
+# compare: calc-paste4/07.png 07.png 136 110 394 271 ignore 320 240 332 260
+# compare: calc-paste4/07.png 07.png 154 110 636 447 ignore 320 240 332 260
+# compare: calc-paste4/08.png 08.png 136 110 394 271 ignore 320 240 332 260
+# compare: calc-paste4/08.png 08.png 154 110 636 447 ignore 320 240 332 260
+# ini: WIN.INI SciCalc layout=0
+sleep 400
+sleep 400
+shot shots/01.png
+key alt
+key v
+key s
+sleep 400
+shot shots/02.png
+clip :s1\2\3\4\:d
+key alt
+key e
+key p
+sleep 400
+shot shots/03.png
+key l
+sleep 400
+shot shots/04.png
+key c
+sleep 400
+shot shots/05.png
+key r
+sleep 400
+shot shots/06.png
+key 5
+key insert
+sleep 400
+shot shots/07.png
+key alt
+key e
+key p
+sleep 400
+shot shots/08.png

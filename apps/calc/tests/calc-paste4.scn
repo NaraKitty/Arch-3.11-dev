@@ -1,0 +1,38 @@
+# Calculator, Edit > Paste in the scientific view: ":s1\2\3\4\:d" (Sta opens the statistics box,
+# Dat adds 1 to 4, s), then the box's LOAD, CD and RET buttons by their mnemonics, 5 added with Ins
+# (Dat) and the text pasted again
+# Reference run only (the port side is calc-paste4.w16, which puts the text on the clipboard with
+# "clip"): Program Manager is the shell and WIN.INI run=calc.exe notepad.exe; Notepad opens
+# SYSTEM\cp4.txt (holding the text), selects and copies it and closes, then Calculator pastes.
+shot
+key alt
+type fo
+shot
+type system\cp4.txt
+key enter
+shot
+key alt
+type ea
+key alt
+type ec
+key alt
+type fx
+shot
+key alt
+type vs
+shot
+key alt
+type ep
+shot
+type l
+shot
+type c
+shot
+type r
+shot
+type 5
+key insert
+shot
+key alt
+type ep
+shot
