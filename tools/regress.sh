@@ -13,7 +13,8 @@
 # 320,240: "ignore 320 240 332 260") and port frames never do. "# ini: FILE SECTION KEY=VALUE" lines
 # check what the run left in $OUT/ini/FILE (tools/run-cp-test.sh copies the INI files there) against
 # what real 3.11 wrote; a SECTION with spaces goes in brackets ("# ini: CONTROL.INI [Custom Colors]
-# ColorA=12C2C2"), and "KEY=" checks that the key is absent or empty. Prints a PASS, FAIL or SKIP
+# ColorA=12C2C2"), and "KEY=" checks that the key is absent or empty. "# file: OUTFILE REFFILE [TOOL]"
+# compares a file the run wrote with one a reference run wrote (see below). Prints a PASS, FAIL or SKIP
 # (no reference frame on this machine) line per check and exits with status 1 if anything failed.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -98,5 +99,16 @@ for t in "${tests[@]}"; do
         if [ "$got" = "$val" ]; then echo "PASS $n: $file [$sect] $key=$val"
         else echo "FAIL $n: $file [$sect] $key is '$got', real 3.11 wrote '$val'"; fail=1; fi
     done < <(sed -n 's/^# ini: //p' "$t")
+    # "# file: OUTFILE REFFILE [TOOL]": a file the run left ($OUT/OUTFILE) against one a reference run
+    # left ($ARCH311_REF/REFFILE): byte for byte, or as "python3 TOOL OUT REF" judges (exit 0 = same)
+    while read -r pf rf tool; do
+        p="$o/$pf" r="$ref/$rf"
+        if [ ! -f "$r" ]; then echo "SKIP $n: no reference file $rf"; continue; fi
+        if [ ! -f "$p" ]; then echo "FAIL $n: the run left no $pf"; fail=1; continue; fi
+        if [ -n "$tool" ]; then res=$(python3 "$repo/$tool" "$p" "$r" 2>&1); st=$?
+        else res=$(cmp "$p" "$r" 2>&1); st=$?; fi
+        if [ $st = 0 ]; then echo "PASS $n: $pf = $rf"
+        else echo "FAIL $n: $pf differs from $rf: $(printf '%s' "$res" | head -3 | tr '\n' ' ')"; fail=1; fi
+    done < <(sed -n 's/^# file: //p' "$t")
 done
 exit $fail

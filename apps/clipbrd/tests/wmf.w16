@@ -1,0 +1,45 @@
+# Clipboard Viewer: the keys of arch311-ref/scn/clipbrd-wmf.scn (tools/ref311/scenario.py w16)
+# regress: sh apps/clipbrd/tests/run.sh "$TEST" "$OUT"
+sleep 400
+key alt
+key f
+key o
+key s
+key y
+key s
+key t
+key e
+key m
+key backslash
+key c
+key b
+key w
+key m
+key f
+key period
+key c
+key l
+key p
+key enter
+sleep 400
+shot shots/01.png
+key alt
+key d
+sleep 400
+shot shots/02.png
+key esc
+key esc
+key alt
+key f
+key a
+key w
+key m
+key f
+key period
+key c
+key l
+key p
+key enter
+sleep 400
+shot shots/03.png
+quit
