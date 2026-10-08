@@ -2,7 +2,10 @@
 # Same keys as arch311-ref/scn/drivers-remmap.scn: Remove, Yes, "The MIDI Mapper driver has been
 # removed..." (Don't Restart Now), the list without it, close
 # regress: ARCH311_REF_INI=1 sh tools/run-cp-test.sh "$TEST" "$OUT" Drivers
-# compare: drivers-remmap/03.png 01-confirm.png active ignore 320 239 333 261
+# The confirmation is a MessageBox: libw16's is not yet USER's layout (the port of USER's MessageBox,
+# seg1:9B91, is on the International branch; with it this frame differs only in the exclamation icon's
+# image). Enable by turning "pending-compare:" into "compare:" once it is on dev:
+# pending-compare: drivers-remmap/03.png 01-confirm.png active ignore 320 239 333 261
 # compare: drivers-remmap/04.png 02-restart.png active ignore 320 239 333 261
 # compare: drivers-remmap/05.png 03-removed.png active ignore 320 239 333 261
 # ini: SYSTEM.INI drivers midimapper=

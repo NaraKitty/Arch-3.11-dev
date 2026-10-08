@@ -484,3 +484,41 @@ FreeType's; glyph positions and metrics match); CLOCK.INI values as 3.11 writes 
 after the merge: 106 checks, all PASS. UNTESTED: the ChooseFont dialog, TrueType cases Clock does not use
 (positive lfHeight/VDMX cell lookup, lfWidth, simulated bold/italic, symbol fonts, underline/strikeout),
 EnumFonts listing TrueType faces, flat digits on true-colour displays, -ldl on glibc < 2.34.
+
+### Session 9 (Oct 8, Drivers worktree) - DRIVERS.CPL, installable drivers, VER.DLL
+Drivers applet (apps/control/drvcpl.c = DRIVERS.CPL seg1 + seg2, every live function: dialogs 1001
+Drivers, 1003 Add, 1002 Add Unlisted, 1006 Install Driver (path / insert-disk modes), 1004 System
+Setting Change, 1005 Driver Exists, 38 Browse hook; the list from SYSTEM.INI [MCI]/[Drivers] with
+CONTROL.INI [drivers.desc] / SETUP.INF / NE descriptions; Add from SETUP.INF or an OEMSETUP.INF with its
+INF reader and FileCopy over VerInstallFile, [386Enh] device= rewrite, aliases, [boot] drivers=;
+Remove with RenumberAliases), registered as DRIVERS.CPL after MAIN.CPL as 3.11 loads it.
+16-bit drivers never run: libw16/src/driver.c ports USER's installable-driver layer (OpenDriver/
+CloseDriver/SendDriverMessage/GetDriverModuleHandle/DefDriverProc, seg41 + seg2) whose modules are
+native stand-ins answering DRV_QUERYCONFIGURE/INSTALL/REMOVE as each 3.11 driver's DriverProc does
+(table in driver.c: MCIWAVE, MCISEQ, MCICDA, TIMER, MIDIMAP, MSADLIB, MPU401, SNDBLST, SNDBLST2; Setup
+enabled/disabled and the restart prompts checked on the rig); DRV_CONFIGURE shows nothing (TODO: native
+ports of the drivers' setup dialogs, w16_register_driver takes a file name over). OpenDriver fails only
+for a missing file or one without a DriverProc export (MMSOUND.DRV), as USER does.
+Verified (tools/regress.sh, apps/control/tests/drivers*.w16 vs arch311-ref/scn/drivers-*.scn): opening
+and walking the list, the Add list, Add Timer (Driver Exists -> Current, restart prompt), Add Ad Lib
+from A: (files copied, device=vadlibd.386), Unlisted path dialog twice, insert-disk prompt + Cancel,
+Remove (No / Yes, two drivers) - every compared frame 0 px; SYSTEM.INI and CONTROL.INI after each run
+byte-identical to the real run's except the rig's own shell= line and CONTROL.EXE's [MMCPL] block.
+Pending: the three Remove confirmation frames (MessageBox, "pending-compare:" lines) wait for USER's
+MessageBox from the International branch (with it they differ only in the icon: that branch draws
+IDI_EXCLAMATION's monochrome image where 3.11 shows the 16-colour one). Real 3.11 removing "[MCI] MIDI
+Sequencer" says "The [MCI] MIDI  driver has been removed": RemoveBootDriver's StrStrI scans DGROUP past
+[boot] drivers= and cuts "Sequencer" out of the description buffer - fixed here as the brief asks
+(drivers-remyes ignores that text). Browse (COMMDLG on template 38) works but differs from 3.11
+(caption "Open" instead of the template's "Browse", the current directory highlighted, the volume
+label): commdlg.c's business, not compared.
+libw16: VER.DLL (ver.c: VerInstallFile/VerFindFile/GetFileVersionInfo(Size)/VerQueryValue from VER.DLL
+seg3, LZOpenFile's "X.EX_" fallback and SZDD expansion; checked with a scratch harness: SZDD source
+expanded byte-exact, mismatch -> temp.000 -> VIFF_FORCEINSTALL, missing source, VerFindFile flags);
+GetWinFlags; lstrcmp/lstrcmpi with USER seg11's sort weights; sorted list boxes put "[..." last (USER
+seg43:0614 - real 3.11 lists "MIDI Mapper, Timer, [MCI] ..."); <windir>\X.INI is the profile file
+(DRIVERS.CPL rewrites SYSTEM.INI as a file); WritePrivateProfileString(NULL,...) and a default that is
+the output buffer. tools/run-cp-test.sh: ARCH311_A_FILES="NAME ..." puts ripped files on A:.
+UNTESTED: KWAJ-compressed sources (TODO), OEMSETUP.INF installs (dialog 1002), related drivers (Sound
+Blaster + msadlib), alias numbering beyond one, [boot] drivers= drivers, file-in-use (3.1's MMSYSTEM
+keeps [drivers] open from boot; nothing does here), CD-ROM default source (no MSCDEX), Help, Restart Now.

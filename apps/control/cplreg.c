@@ -1,6 +1,6 @@
 /* The applet modules of arch311's Control Panel, in the order CONTROL.EXE loads them: MAIN.CPL
  * first (ported from 3.11; its Network entry runs arch311's Network dialog), then the other .CPL
- * files as 3.11 Setup installs them (CPWIN386 is not ported yet; DRIVERS and SND are). Volume is an
+ * files as 3.11 Setup installs them (CPWIN386 and DRIVERS are not ported yet, SND is). Volume is an
  * arch311 applet. */
 #include "cpl.h"
 
