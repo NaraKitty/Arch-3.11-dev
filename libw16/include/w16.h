@@ -1329,6 +1329,8 @@ int lstrcmp(LPCSTR a, LPCSTR b);
 int lstrcmpi(LPCSTR a, LPCSTR b);
 LPSTR AnsiUpper(LPSTR s);
 LPSTR AnsiLower(LPSTR s);
+UINT AnsiUpperBuff(LPSTR s, UINT n);
+UINT AnsiLowerBuff(LPSTR s, UINT n);
 LPSTR AnsiNext(LPCSTR s);
 LPSTR AnsiPrev(LPCSTR start, LPCSTR s);
 /* KEYBOARD: OEM <-> ANSI. libw16's DOS layer already hands out ANSI names (OpenFile, DlgDirList),

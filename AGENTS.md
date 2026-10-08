@@ -741,3 +741,32 @@ Verified (WSL, merged with dev 4b82b47): `ARCH311_REF=/mnt/c/Users/pikac/arch311
 -> 482 PASS, 2 FAIL (winmine-g: Alt on WINMINE's icon dropped its system menu; fixed - a top-level
 window with a menu bar keeps dev's behaviour when iconic), then winmine-g, the SysEdit min/max/next/
 keys tests and clock icon/dicon re-run: all PASS (484 checks, 0 FAIL).
+### Session 9 (Oct 8) - multi-line EDIT control from USER (seg30-32)
+libw16/src/edit.c: the multi-line half is now USER's own code, routine by routine (each commented with
+its seg:offset): MLCreate/ECCreate, ECSetFont (GetCharWidth table less the overhang), MLSize,
+MLBuildchLines (hard breaks, 1024-char lines, word wrap after the last space via ECWord, one space kept
+at a break, incremental rebuild while typing), ECTabTheTextOut (default stops 8 x USER's average width,
+EM_SETTABSTOPS = MulDiv(stop, ave, 4)), MLDrawText (opaque cells, highlight runs, rest of line erased),
+MLPaint (no background fill: WM_ERASEBKGND fills), MLIchToXYPos, MLMouseToIch, MLSetCaretPosition,
+MLScrollHandler (page = lines-1; SB_TOP/BOTTOM unhandled; ScrollDC), MLEnsureCaretVisible (a third of
+the width, in average characters), MLKeyDown (Up/Down/PgUp/PgDn are simulated clicks; Left/Right without
+Shift collapse at the caret moved by one, not at the selection's end), MLChar, MLMouseMotion (drag
+auto-scroll on a timer), ECInsertText/ECDeleteText/MLUndo (3.1's insert/delete undo records, undo of an
+undo redoes), EM_FMTLINES soft breaks, EM_* as seg32. WM_GETDLGCODE of a multi-line edit is
+WANTALLKEYS always (Tab/Enter/Esc handled by the edit in dialogs, as USER). The single-line half is
+unchanged. libw16: AnsiUpperBuff/AnsiLowerBuff. The decode is in the session scratchpad
+(decode-edit-ml.md, never commit).
+Tests apps/notepad/tests/edit-{hscroll,select,wrap,tabs,vscroll,bs}.w16 against real Notepad typing the
+same keys (arch311-ref/scn/edit-*.scn): every compared frame 0 px apart, caret position included
+(shotcaret where the reference caret was on). Verified behaviours: horizontal scroll by 25 characters
+at the edge, Home/End scrolling, Up through mouse hit testing, Select All rendering, Left after Select All
+(caret at len-1), Find selection + Right, word wrap incl. a word longer than the line, tab stops,
+typing past the bottom, Page Up/Down (a Page Down from the top of 24 lines leaves only 3 in view, as
+3.1), Backspace/Delete joining lines, Undo and undo of the undo. Whole suite after merging dev 4b82b47:
+487 checks, all PASS (31 of them the new edit tests).
+UNTESTED against 3.11 (the rig types no key combinations and cannot click): Shift/Ctrl selections and
+word moves (ECWord ported literally), mouse selection/drag/double click, EM_FMTLINES, EM_SETTABSTOPS,
+ES_CENTER/ES_RIGHT (Date & Time fields still pass their tests), read-only and dialog Tab/Enter/Esc paths.
+Rig: AUTOTYPE stops typing when another DOSBox-X window starts (takes the focus) - long typing fails
+whenever other agents capture; the recorder in this session used a BitBlt grab (no PrintWindow hang).
+Caret-only moves never make a new frame (tolerance > caret) - type a marker after a move.

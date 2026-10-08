@@ -1,0 +1,77 @@
+# Notepad: Select All over three lines, Left from the selection (3.1 moves from the caret), Find selections, Right
+# Reference: real 3.11 Notepad typing the same keys (arch311-ref/scn/edit-select.scn, frames shots/edit-select);
+# frames where 3.11 only moved the caret are merged by the recorder, so some shots have none.
+# regress: sh tools/run-app-test.sh apps/build/notepad "$TEST" "$OUT"
+# compare: edit-select/02.png 01.png active ignore 316 228 333 261
+# compare: edit-select/03.png 02.png active ignore 316 228 333 261
+# compare: edit-select/04.png 03.png active ignore 316 228 333 261
+# compare: edit-select/05.png 04.png active ignore 316 228 333 261
+# compare: edit-select/06.png 05.png active ignore 316 228 333 261
+sleep 400
+key f
+key i
+key r
+key s
+key t
+key space
+key l
+key i
+key n
+key e
+key enter
+key s
+key e
+key c
+key o
+key n
+key d
+key space
+key l
+key i
+key n
+key e
+key space
+key i
+key s
+key space
+key l
+key o
+key n
+key g
+key e
+key r
+key enter
+key t
+key h
+key i
+key r
+key d
+key alt
+key e
+key a
+sleep 400
+shotcaret shots/01.png
+key left
+sleep 400
+shotcaret shots/02.png
+key up
+key up
+key home
+key alt
+key s
+key f
+key l
+key i
+key n
+key e
+key enter
+key esc
+sleep 400
+shotcaret shots/03.png
+key f3
+sleep 400
+shotcaret shots/04.png
+key right
+sleep 400
+shotcaret shots/05.png
+quit
