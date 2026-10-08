@@ -4,6 +4,7 @@
 # ARGS are the program's command line (e.g. an applet name for the Control Panel).
 # Script commands (libw16/src/msg.c): sleep MS | key alt+f | type TEXT | click X Y | shot FILE.png
 # (caret hidden) | shotcaret FILE.png (caret shown) | quit
+# Shots left in the script when the program ends are taken of the screen it leaves.
 # The app's C: drive is $HOME unless ~/.config/arch311/drives says otherwise.
 set -e
 app=$(realpath "$1"); script=$(realpath "$2"); out=${3:-test-out}

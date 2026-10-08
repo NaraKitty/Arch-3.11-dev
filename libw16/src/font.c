@@ -489,9 +489,13 @@ int DrawText(HDC dc, LPCSTR s, int n, LPRECT r, UINT fmt)
             if (c == '\t' && (fmt & DT_EXPANDTABS)) cw = tabw - (w % tabw);
             else if (c == '&' && !noprefix) { if (j + 1 < n && s[j + 1] == '&') { j++; cw = f->widths['&']; } else cw = 0; }
             else cw = f->widths[(unsigned char)c] + dc->charextra;
-            if ((fmt & DT_WORDBREAK) && !(fmt & DT_SINGLELINE) && w + cw > width && j > i) {
+            /* USER seg6:07A8: the line breaks before a word whose extent (overhang included) passes
+             * the right edge; the line's first word stays whole however wide it is (MAIN.CPL's
+             * 35-px "&Name:" static shows its colon on 3.11) */
+            if ((fmt & DT_WORDBREAK) && !(fmt & DT_SINGLELINE) && w + cw + f->bold_sim > width && j > i) {
                 if (c == ' ') break;
                 if (last_break > i) { j = last_break; break; }
+                while (j < n && s[j] != ' ' && s[j] != '\t' && s[j] != '\r' && s[j] != '\n') j++;
                 break;
             }
             if (c == ' ') last_break = j;
@@ -572,7 +576,9 @@ void w16_draw_gray_text(HDC dc, int x, int y, const char *s, int n, int noprefix
 
 /* Grayed text where GRAYTEXT would vanish into the background (push buttons: GRAYTEXT ==
  * BTNFACE on VGA): like GrayString with the 50% gray brush, only every other text pixel is
- * drawn, in the normal text colour. MEASURE: checkerboard phase vs. real 3.11. */
+ * drawn, in the normal text colour. GrayString grays the text in a bitmap of its own, so the
+ * checkerboard starts at the text's origin, not the screen's (measured on 3.11: the Desktop
+ * applet's disabled "Test" and "Setup..." buttons, 27 px apart, have the same phase) */
 void w16_draw_stippled_text(HDC dc, int x, int y, const char *s, int n, int noprefix, COLORREF fg)
 {
     TEXTMETRIC tm;
@@ -587,9 +593,7 @@ void w16_draw_stippled_text(HDC dc, int x, int y, const char *s, int n, int nopr
     SetTextColor(dc, old);
     for (int j = 0; j < h; j++)
         for (int i = 0; i < w; i++) {
-            int dx = x + i, dy = y + j;
-            w16_lp_to_dp(dc, &dx, &dy);
-            if ((dx + dy) & 1) {
+            if ((i + j) & 1) {
                 COLORREF c = save[j * w + i];
                 if (c != (COLORREF)-1 && GetPixel(dc, x + i, y + j) != c) SetPixel(dc, x + i, y + j, c);
             }

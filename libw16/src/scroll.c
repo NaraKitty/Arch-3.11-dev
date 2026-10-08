@@ -229,6 +229,24 @@ LRESULT w16_scrollbar_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     case WM_CREATE: {
         W16Scroll *s = bar_of(h, SB_CTL);
         s->min = 0; s->max = 0; s->pos = 0;
+        /* SBS_TOPALIGN / SBS_BOTTOMALIGN (horizontal) and SBS_LEFTALIGN / SBS_RIGHTALIGN (vertical)
+         * give the bar the system thickness at that edge of its rectangle (measured on 3.11: the
+         * Desktop applet's 10-unit blink-rate bar is 17 px high from its top) */
+        if (!(h->style & SBS_SIZEBOX) && (h->style & (SBS_TOPALIGN | SBS_BOTTOMALIGN))) {
+            RECT r = h->rw, pr = h->parent && h->parent != w16_desktop ? h->parent->rc : (RECT){0, 0, 0, 0};
+            OffsetRect(&r, -pr.left, -pr.top);
+            if (h->style & SBS_VERT) {
+                int cx = GetSystemMetrics(SM_CXVSCROLL);
+                if (h->style & SBS_RIGHTALIGN) r.left = r.right - cx;
+                r.right = r.left + cx;
+            } else {
+                int cy = GetSystemMetrics(SM_CYHSCROLL);
+                if (h->style & SBS_BOTTOMALIGN) r.top = r.bottom - cy;
+                r.bottom = r.top + cy;
+            }
+            SetWindowPos(h, NULL, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                         SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+        }
         return 0;
     }
     case WM_PAINT: {
