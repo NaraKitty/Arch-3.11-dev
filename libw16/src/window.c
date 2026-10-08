@@ -1305,6 +1305,8 @@ static HBITMAP load_wallpaper(LPCSTR file)
     _llseek(f, 0, 0);
     uint8_t *d = n > 14 ? malloc(n) : NULL;
     if (d && (LONG)_lread(f, d, (UINT)n) == n && d[0] == 'B' && d[1] == 'M') {
+        /* compared with 3.11 for winlogo.bmp (16 colours) only; how VGA shows 256-colour files
+         * (256COLOR.BMP) is UNTESTED */
         HBITMAP w16_bitmap_from_dib(const uint8_t *d, int len, int force_color);
         bm = w16_bitmap_from_dib(d + 14, (int)n - 14, 1);
     }
@@ -1402,7 +1404,8 @@ void w16_paint_desktop(HDC dc, const RECT *r)
 }
 
 /* USER seg41:0D6E: a new border width grows or shrinks each sizable window around its client area
- * (a minimised one's restored rectangle), then everything is drawn again */
+ * (a minimised one's restored rectangle), then everything is drawn again. Compared with 3.11 for the
+ * Control Panel's window (border 3 -> 5); minimised windows and child windows are UNTESTED. */
 static void border_resize(HWND h, int dx, int dy)
 {
     for (; h; h = h->next) {

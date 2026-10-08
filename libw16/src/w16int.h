@@ -330,6 +330,9 @@ extern int w16_metric[SM_CMETRICS];
 void w16_sys_init(void);
 const char *w16_config_dir(void);
 extern int w16_border_width;
+/* the next five are kept, reported and written as USER does; nothing acts on them yet (TODO,
+ * UNTESTED: icon arrangement and title wrapping, the sizing grid when moving and sizing, Alt+Tab
+ * switching, starting the screen saver after the timeout) */
 extern int w16_icon_spacing;            /* SPI_ICONHORIZONTALSPACING (USER [0xc0]) */
 extern int w16_icon_title_wrap;         /* SPI_GET/SETICONTITLEWRAP ([0x1b2]) */
 extern int w16_grid;                    /* sizing grid in pixels, 8 * GridGranularity, at least 1 ([0x6e8]) */

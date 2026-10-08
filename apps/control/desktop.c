@@ -461,7 +461,9 @@ static void InitDesktopLists(HWND hDlg)
         SendMessage(hCtl, CB_SELECTSTRING, (WPARAM)-1, (LPARAM)name);
         free(name);
     } else {
-        LoadString(hInstMain, IDS_UNLISTED, szKey, 10);   /* "Unlisted " (cut to 9) */
+        /* "Unlisted " (cut to 9). The pattern box is a drop-down list, which answers WM_SETTEXT
+         * with CB_ERR, so on 3.11 the field stays empty (measured: desk-nowall) */
+        LoadString(hInstMain, IDS_UNLISTED, szKey, 10);
         SendMessage(hCtl, WM_SETTEXT, 0, (LPARAM)szKey);
     }
 
@@ -633,7 +635,8 @@ static void ScanSaverDir(HWND hCombo, LPSTR dir, LPSTR pattern, BOOL fAnyDesc)
 
 /* ------------------------------------------------------------------ seg18:1B5D
  * the savers (*.SCR in the Windows and system directories, Idle-Wild *.IW beside IWLIB.DLL) and
- * "(None)"; the one SYSTEM.INI [boot] SCRNSAVE.EXE names is selected */
+ * "(None)"; the one SYSTEM.INI [boot] SCRNSAVE.EXE names is selected. (UNTESTED: Idle-Wild, which
+ * the 3.11 install does not have.) */
 static void FillSaverCombo(HWND hCombo)
 {
     char szNone[0x10], szWinDir2[0x78], szSysDir2[0x78], szPattern[10], szDir[0x78];
@@ -735,6 +738,7 @@ BOOL DesktopDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
         return TRUE;
 
     case WM_DROPFILES:
+        /* a file dropped on the dialog becomes the wallpaper name (UNTESTED: the rig cannot drag) */
         DragQueryFile((HANDLE)wParam, 0, szBuf, sizeof szBuf);
         SetDlgItemText(hDlg, IDC_WALLPAPER, szBuf);
         DragFinish((HANDLE)wParam);
