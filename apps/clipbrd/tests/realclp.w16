@@ -1,0 +1,83 @@
+# Clipboard Viewer: the keys of arch311-ref/scn/clipbrd-realclp.scn (tools/ref311/scenario.py w16)
+# Port only: opens the .CLP files real 3.11's viewer saved in the bmp, wmf and text reference runs
+# (BMP.CLP, WMF.CLP, TEXT.CLP from the rig, as RBMP/RWMF/RTEXT.CLP) and compares what it shows with
+# the frames real 3.11 showed for the same content.
+# regress: CLIPBRD_REF_CLP="clipbrd-bmp/BMP.CLP clipbrd-wmf/WMF.CLP clipbrd-text/TEXT.CLP" sh apps/clipbrd/tests/run.sh "$TEST" "$OUT"
+# compare: clipbrd-bmp/04.png 01.png ignore 320 240 333 261
+# compare: clipbrd-bmp/07.png 02.png ignore 320 240 333 261
+# compare: clipbrd-wmf/03.png 03.png ignore 320 240 333 261 max 48
+# compare: clipbrd-text/03.png 04.png ignore 320 240 333 261
+# regress: sh apps/clipbrd/tests/run.sh "$TEST" "$OUT"
+sleep 400
+key alt
+key f
+key o
+key s
+key y
+key s
+key t
+key e
+key m
+key backslash
+key r
+key b
+key m
+key p
+key period
+key c
+key l
+key p
+key enter
+sleep 400
+shot shots/01.png
+key alt
+key d
+key e
+sleep 400
+shot shots/02.png
+key alt
+key f
+key o
+key s
+key y
+key s
+key t
+key e
+key m
+key backslash
+key r
+key w
+key m
+key f
+key period
+key c
+key l
+key p
+key enter
+key y
+sleep 400
+shot shots/03.png
+key alt
+key f
+key o
+key s
+key y
+key s
+key t
+key e
+key m
+key backslash
+key r
+key t
+key e
+key x
+key t
+key period
+key c
+key l
+key p
+key enter
+key y
+sleep 400
+shot shots/04.png
+quit

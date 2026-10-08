@@ -9,7 +9,7 @@
 #   C:\WINDOWS\SYSTEM holds the test files that mkclp.py writes - where the reference runs' -Files
 #   put them.
 # - CLIPBRD_REF_CLP="RUN/FILE ..." also puts .CLP files that real 3.11 saved in reference runs
-#   ($ARCH311_REF/run-RUN/WINDOWS/FILE) into C:\WINDOWS\SYSTEM as RUN-FILE (skipped when missing).
+#   ($ARCH311_REF/run-RUN/WINDOWS/FILE) into C:\WINDOWS\SYSTEM as RFILE (skipped when missing).
 # - CLIPBRD_NOTEPAD=SCRIPT first runs Notepad headless with that W16 script on the same drive and
 #   clipboard, so the viewer starts with what Notepad copied.
 # - The .CLP files the viewer saved in C:\WINDOWS are copied to OUTDIR/files when the run ends.
@@ -39,7 +39,7 @@ fi
 python3 "$here/mkclp.py" "$fx/c/WINDOWS/SYSTEM"
 for rf in ${CLIPBRD_REF_CLP:-}; do
     src="$ref/run-${rf%%/*}/WINDOWS/${rf#*/}"
-    [ -n "$ref" ] && [ -f "$src" ] && cp "$src" "$fx/c/WINDOWS/SYSTEM/${rf%%/*}-${rf#*/}"
+    [ -n "$ref" ] && [ -f "$src" ] && cp "$src" "$fx/c/WINDOWS/SYSTEM/R${rf#*/}"
 done
 printf 'C=%s\n' "$fx/c" > "$fx/config/arch311/drives"
 export XDG_CONFIG_HOME="$fx/config" ARCH311_CLIPBOARD="$fx/clip" W16_COLORS=${W16_COLORS:-16}

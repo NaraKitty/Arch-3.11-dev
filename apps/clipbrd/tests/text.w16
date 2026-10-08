@@ -1,4 +1,14 @@
 # Clipboard Viewer: the keys of arch311-ref/scn/clipbrd-text.scn (tools/ref311/scenario.py w16)
+# Opens SYSTEM\CBTEXT.CLP (40 lines of text with tabs, one line broken at the window's width, OEM
+# text), scrolls by lines and pages, shows the OEM text, saves TEXT.CLP.
+# compare: clipbrd-text/03.png 01.png ignore 320 240 333 261
+# compare: clipbrd-text/04.png 02.png ignore 320 240 333 261
+# compare: clipbrd-text/05.png 03.png ignore 320 240 333 261
+# compare: clipbrd-text/06.png 04.png ignore 320 240 333 261
+# compare: clipbrd-text/07.png 05.png ignore 320 240 333 261
+# compare: clipbrd-text/08.png 06.png ignore 320 240 333 261
+# compare: clipbrd-text/10.png 07.png ignore 320 240 333 261
+# file: files/text.clp run-clipbrd-text/WINDOWS/TEXT.CLP apps/clipbrd/tests/clpcmp.py
 # regress: sh apps/clipbrd/tests/run.sh "$TEST" "$OUT"
 sleep 400
 key alt
