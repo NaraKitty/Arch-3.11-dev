@@ -457,6 +457,7 @@ BOOL SetWindowPos(HWND h, HWND after, int x, int y, int cx, int cy, UINT fl)
     }
     if (fl & SWP_HIDEWINDOW) {
         if (h->style & WS_VISIBLE) {
+            if (IsIconic(h)) w16_invalidate_icon_title(h);
             h->style &= ~WS_VISIBLE;
             w16_invalidate_screen_rect(&h->rw);
             if (h->parent && h->parent != w16_desktop) w16_invalidate_window(h->parent, &h->rw, 1, 1);
@@ -467,6 +468,7 @@ BOOL SetWindowPos(HWND h, HWND after, int x, int y, int cx, int cy, UINT fl)
         if (!(h->style & WS_VISIBLE)) {
             h->style |= WS_VISIBLE;
             w16_invalidate_window(h, NULL, 1, 1);
+            if (IsIconic(h)) w16_invalidate_icon_title(h);
         }
     }
     if (fl & SWP_FRAMECHANGED) w16_invalidate_window(h, NULL, 1, 1);
@@ -751,6 +753,7 @@ BOOL DestroyWindow(HWND h)
             c = n;
         }
     if (h->style & WS_VISIBLE) {
+        if (IsIconic(h)) w16_invalidate_icon_title(h);
         h->style &= ~WS_VISIBLE;
         if (h->parent == w16_desktop) w16_invalidate_screen_rect(&h->rw);
         else w16_invalidate_window(h->parent, &h->rw, 1, 1);
@@ -803,9 +806,13 @@ static BOOL show_window(HWND h, int cmd)
         if (!(h->style & WS_VISIBLE)) { h->style |= WS_VISIBLE; SendMessage(h, WM_SHOWWINDOW, TRUE, 0); }
         w16_minimize(h);
         if (cmd == SW_SHOWMINIMIZED) w16_activate(h, WA_ACTIVE);
-        else if (cmd == SW_MINIMIZE && w16_active == h) {
+        else if (cmd == SW_MINIMIZE && h->parent == w16_desktop) {
+            /* USER seg6:1D96: the first visible, enabled window that is not an icon becomes active,
+             * else the icon itself (real 3.11's Clock started minimised shows an active title) */
+            HWND next = h;
             for (HWND c = w16_desktop->child; c; c = c->next)
-                if ((c->style & WS_VISIBLE) && c != h && !IsIconic(c)) { w16_activate(c, WA_ACTIVE); break; }
+                if ((c->style & WS_VISIBLE) && !(c->style & WS_DISABLED) && c != h && !IsIconic(c)) { next = c; break; }
+            w16_activate(next, WA_ACTIVE);
         }
         return was;
     case SW_SHOWMAXIMIZED:
@@ -1015,6 +1022,9 @@ int GetWindowText(HWND h, LPSTR buf, int cb)
 int GetWindowTextLength(HWND h) { return w16_valid(h) ? (int)SendMessage(h, WM_GETTEXTLENGTH, 0, 0) : 0; }
 void SetWindowText(HWND h, LPCSTR s) { if (w16_valid(h)) SendMessage(h, WM_SETTEXT, 0, (LPARAM)s); }
 
+/* GWL_ID / GWW_ID of a window that is not a child is its menu handle: USER keeps a top-level window's
+ * menu in the ID field (Clock removes and restores its menu bar with SetWindowWord(GWW_ID)). A menu
+ * handle needs the pointer-sized w16_Get/SetWindowPtr here. */
 intptr_t w16_GetWindowPtr(HWND h, int i)
 {
     if (!w16_valid(h)) return 0;
@@ -1022,7 +1032,7 @@ intptr_t w16_GetWindowPtr(HWND h, int i)
     case GWL_WNDPROC: return (intptr_t)h->proc;
     case GWL_STYLE: return (LONG)h->style;
     case GWL_EXSTYLE: return h->exstyle;
-    case GWL_ID: return h->id;
+    case GWL_ID: return (h->style & WS_CHILD) ? (intptr_t)h->id : (intptr_t)h->menu;
     case GWL_HINSTANCE: return (intptr_t)h->inst;
     case GWW_HWNDPARENT: return (intptr_t)GetParent(h);
     }
@@ -1041,7 +1051,10 @@ intptr_t w16_SetWindowPtr(HWND h, int i, intptr_t v)
     case GWL_WNDPROC: h->proc = (WNDPROC)v; return o;
     case GWL_STYLE: h->style = (DWORD)v; return o;
     case GWL_EXSTYLE: h->exstyle = (DWORD)v; return o;
-    case GWL_ID: h->id = (UINT)v; return o;
+    case GWL_ID:
+        if (h->style & WS_CHILD) h->id = (UINT)v;
+        else h->menu = (HMENU)v; /* no redraw: the caller recalculates the frame (SWP_FRAMECHANGED) */
+        return o;
     case GWL_HINSTANCE: h->inst = (HINSTANCE)v; return o;
     }
     if (i >= 0 && i + (int)sizeof(intptr_t) <= h->cbextra + 64) memcpy(h->extra + i, &v, sizeof v);
@@ -1448,8 +1461,10 @@ LRESULT w16_desktop_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     case WM_PAINT: {
         PAINTSTRUCT ps;
         BeginPaint(h, &ps);
+        /* icons of minimised windows paint as windows themselves; their titles (in USER separate
+         * windows of their own) are drawn here, under every window */
+        w16_paint_icon_titles(ps.hdc);
         EndPaint(h, &ps);
-        /* icons of minimised windows sit on the desktop: they paint as windows themselves */
         return 0;
     }
     }

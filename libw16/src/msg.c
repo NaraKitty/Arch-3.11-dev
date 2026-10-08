@@ -967,7 +967,7 @@ LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
             h->active_frame = wp != 0;
             w16_nc_paint(h, wp != 0);
         }
-        if (IsIconic(h)) w16_invalidate_screen_rect(&(RECT){h->rw.left - 24, h->rw.top, h->rw.right + 24, h->rw.bottom + 32});
+        if (IsIconic(h)) w16_invalidate_icon_title(h); /* the title shows the activation */
         return TRUE;
     case WM_NCHITTEST: return w16_nc_hittest(h, (SHORT)LOWORD(lp), (SHORT)HIWORD(lp));
     case WM_NCLBUTTONDOWN: return w16_nc_lbuttondown(h, (int)wp, (SHORT)LOWORD(lp), (SHORT)HIWORD(lp));
@@ -999,14 +999,15 @@ LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         if (LOWORD(wp) != WA_INACTIVE && !HIWORD(wp)) SetFocus(h);
         return 0;
     case WM_SETTEXT:
+        if (IsIconic(h)) w16_invalidate_icon_title(h); /* the old title's area */
         free(h->text);
         h->text = strdup(lp ? (const char *)lp : "");
-        if (w16_has_caption(h->style) && w16_window_visible(h)) {
+        if (w16_has_caption(h->style) && w16_window_visible(h) && !IsIconic(h)) {
             HDC dc = GetWindowDC(h);
             w16_draw_caption(h, dc, h->parent == w16_desktop && h == w16_active);
             ReleaseDC(h, dc);
         }
-        if (IsIconic(h)) w16_invalidate_screen_rect(&(RECT){h->rw.left - 24, h->rw.bottom, h->rw.right + 24, h->rw.bottom + 32});
+        if (IsIconic(h)) w16_invalidate_icon_title(h);
         return TRUE;
     case WM_GETTEXT: {
         int n = (int)wp;

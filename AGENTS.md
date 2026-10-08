@@ -464,3 +464,23 @@ Rig notes: the frame recorder drops a shot identical to the previous one, so cou
 changed; a letter typed while a control wants characters (the colour grids) is no mnemonic; after a
 message box closed with "n", real 3.11 leaves one black pixel at the Color dialog's client origin
 (both runs, not understood; ignored in color-mbox.w16).
+
+### Session 7 (Oct 8) - Clock (CLOCK.EXE) and TrueType
+apps/clock/clock.c ports CLOCK.EXE (seg1): analog and digital faces, the Settings menu, Always on Top,
+CLOCK.INI (Maximized, Options, Position, sFont) as 3.1 reads/writes it, a minimised clock that keeps
+ticking with its icon title, SizeFont, raised digits, MulDiv hand geometry with ROP2 erasing, DOS time
+(ARCH311_CLOCK honoured). Set Font... builds the real CHOOSEFONT and calls a ChooseFont stub (FALSE)
+until COMMDLG's font dialog is ported. libw16: TrueType through FreeType (libw16/src/truetype.c) -
+FreeType is dlopen()ed at run time (libfreetype.so.6) with the few API structs/functions declared by
+hand (WSL has no FreeType headers; switch to <ft2build.h> once libfreetype-dev is installed), v35
+interpreter; without FreeType, TTEnable=0 or no .TTF files it falls back to raster fonts. tmAscent/
+tmDescent come from the font's VDMX table as 3.1 does. Also: VGA.DRV's line pixel rule, menu check
+mark/shadow/system-box details, iconic windows 36x36 with USER's icon slots and titles,
+SM_CXICONSPACING 75 / SM_CYICONSPACING 72 or 59 (IconTitleWrap), w16_dos_gettime/getdate,
+ref-run.ps1 -PrivateIni 'FILE:section/key=value'.
+Verified (regress.sh): every Clock frame 0 px apart except the digital faces' text (default max 10 px,
+dbig max 49 px: single pixels on diagonal outline edges where 3.1's scan converter differs from
+FreeType's; glyph positions and metrics match); CLOCK.INI values as 3.11 writes them. Whole suite on dev
+after the merge: 106 checks, all PASS. UNTESTED: the ChooseFont dialog, TrueType cases Clock does not use
+(positive lfHeight/VDMX cell lookup, lfWidth, simulated bold/italic, symbol fonts, underline/strikeout),
+EnumFonts listing TrueType faces, flat digits on true-colour displays, -ldl on glibc < 2.34.
