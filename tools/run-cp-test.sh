@@ -1,6 +1,8 @@
 #!/bin/sh
 # Runs a Control Panel test script headless from a fresh, private setup state:
-#   tools/run-cp-test.sh apps/control/tests/TEST.w16 [OUTDIR]
+#   tools/run-cp-test.sh apps/control/tests/TEST.w16 [OUTDIR [APPLET NAME]]
+# With an applet name ("Ports", "Date/Time") the Control Panel opens that applet at once, as
+# CONTROL.EXE NAME does, and quits when it closes; scripts then need no icon navigation.
 # - WIN.INI, SYSTEM.INI and CONTROL.INI are seeded from the ripped .SRC templates in a private
 #   XDG_CONFIG_HOME, so parallel runs and the user's own settings are left alone; they are copied to
 #   OUTDIR/ini when the run ends.
@@ -15,6 +17,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
 script=$(realpath "$1")
 out=$(realpath -m "${2:-test-out}")
+if [ $# -ge 2 ]; then shift 2; else set --; fi
 fx=$(mktemp -d)
 trap 'rm -rf "$fx"' EXIT
 files=${ARCH311_ASSETS:-${XDG_DATA_HOME:-$HOME/.local/share}/arch311}/files
@@ -36,7 +39,7 @@ fi
 printf 'A=%s\nC=%s\n' "$fx/a" "$fx/c" > "$fx/config/arch311/drives"
 status=0
 XDG_CONFIG_HOME="$fx/config" ARCH311_SIMULATE=${ARCH311_SIMULATE:-1} ARCH311_WAVEDEVS=${ARCH311_WAVEDEVS:-0} \
-    sh "$repo/tools/run-app-test.sh" "$repo/apps/build/control" "$script" "$out" || status=$?
+    sh "$repo/tools/run-app-test.sh" "$repo/apps/build/control" "$script" "$out" "$*" || status=$?
 mkdir -p "$out/ini"
 cp "$fx"/config/arch311/*.INI "$out/ini/" 2>/dev/null || true
 echo "INI files after the run: $out/ini"

@@ -1323,6 +1323,24 @@ typedef struct {
 int w16_find_first(LPCSTR spec, UINT attr, W16FINDDATA *f);
 int w16_find_next(W16FINDDATA *f);
 void w16_find_close(W16FINDDATA *f);
+/* COMM (comm.c): COM1..4 are Linux's ttyS0..3 */
+#define SETXOFF 1
+#define SETXON 2
+#define SETRTS 3
+#define CLRRTS 4
+#define SETDTR 5
+#define CLRDTR 6
+#define RESETDEV 7
+#define GETMAXLPT 8
+#define GETMAXCOM 9
+#define GETBASEIRQ 10
+LONG EscapeCommFunction(int cid, int func);
+/* ExitWindows: the program's windows are asked (WM_QUERYENDSESSION) and told (WM_ENDSESSION), then
+ * the program ends; restarting or rebooting the arch311 session is not wired up yet (UNTESTED) */
+#define EW_RESTARTWINDOWS 0x42
+#define EW_REBOOTSYSTEM 0x43
+#define EW_EXITANDEXECAPP 0x44
+BOOL ExitWindows(DWORD code, UINT reserved);
 /* there are no critical-error boxes to suppress; the mode is kept for callers that restore it */
 #define SEM_FAILCRITICALERRORS 0x0001
 #define SEM_NOGPFAULTERRORBOX 0x0002

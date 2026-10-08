@@ -63,3 +63,6 @@ out/
 *.so
 __pycache__/
 *.pyc
+
+# ---------------------------------------------------------------- tool working copies (git worktrees)
+.claude/

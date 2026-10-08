@@ -9,7 +9,7 @@ extern HINSTANCE hInstMain;     /* the user's ripped MAIN.CPL: dialogs, icons, s
 extern DWORD dwContext;         /* help context of the running applet (5000 + applet id) */
 extern UINT wHelpMessage;       /* RegisterWindowMessage("ShellHelp") */
 extern char szCaption[];        /* [0x1f6a] string 1, "Control Panel" */
-extern char szClose[];          /* [0x1730] string 9, "Close" */
+extern char szClose[];          /* [0x1730] string 9, "Close": Cancel buttons say it once a change is saved */
 extern char szWinDir[];         /* [0x1fca] the Windows directory with a backslash */
 extern char szSysDir[];         /* [0x102a] the system directory with a backslash */
 extern char szControlIni[];     /* [0xe7c] "<Windows directory>\control.ini" */
@@ -44,5 +44,8 @@ BOOL DateTimeDlgProc(HWND, UINT, WPARAM, LPARAM);  /* seg8:077C, dialog 7 */
 BOOL DesktopDlgProc(HWND, UINT, WPARAM, LPARAM);   /* seg18:1419, dialog 8 */
 BOOL RegisterArrowClass(HINSTANCE hInst);          /* seg2:060E, "cpArrow" */
 void NetworkDialog(HWND owner);                    /* arch311: replaces WNetDeviceMode */
+BOOL PortsDlgProc(HWND, UINT, WPARAM, LPARAM);     /* seg19:062E, dialog 4 */
+int DoPortSettings(HWND hwndOwner, int iPort);     /* seg19:04C6, dialog 19 (also Printers' Connect) */
+BOOL RestartDlgProc(HWND, UINT, WPARAM, LPARAM);   /* seg9:05A9, dialog 37 (Ports, Fonts) */
 
 #endif

@@ -973,6 +973,22 @@ BOOL EnumWindows(WNDENUMPROC fn, LPARAM lp)
     return TRUE;
 }
 
+/* ExitWindows: every top-level window may refuse (WM_QUERYENDSESSION), then all are told the session
+ * ends (WM_ENDSESSION) and the program exits. 3.1 then quits or restarts Windows (EW_RESTARTWINDOWS)
+ * or reboots; asking the arch311 session for that is TODO (UNTESTED). */
+static BOOL query_end(HWND h, LPARAM lp) { (void)lp; return SendMessage(h, WM_QUERYENDSESSION, 0, 0) != 0; }
+static BOOL tell_end(HWND h, LPARAM lp) { SendMessage(h, WM_ENDSESSION, (WPARAM)lp, 0); return TRUE; }
+BOOL ExitWindows(DWORD code, UINT reserved)
+{
+    (void)reserved;
+    if (!EnumWindows(query_end, 0)) {
+        EnumWindows(tell_end, FALSE);
+        return FALSE;
+    }
+    EnumWindows(tell_end, TRUE);
+    exit((int)(code & 0xFF));
+}
+
 /* ------------------------------------------------------------------ text, longs, words */
 int GetWindowText(HWND h, LPSTR buf, int cb)
 {
