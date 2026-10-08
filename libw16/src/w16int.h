@@ -52,6 +52,7 @@ const W16Res *w16_find_res(HINSTANCE m, LPCSTR name, LPCSTR type);
 const uint8_t *w16_res_data(HINSTANCE m, const W16Res *r);
 HINSTANCE w16_system_module(const char *file); /* USER.EXE, VGA.DRV, ... (NULL if absent) */
 int w16_wildmatch(const char *pat, const char *s); /* DOS wildcards, case-insensitive */
+int w16_driver_in_use(LPCSTR file);                /* an installable driver holds the file (driver.c) */
 
 /* ------------------------------------------------------------------ GDI */
 enum { OBJ_PEN = 1, OBJ_BRUSH, OBJ_FONT, OBJ_BITMAP, OBJ_RGN, OBJ_PAL };
