@@ -113,7 +113,11 @@ int DoDialogBoxParam(int id, HWND hwnd, DLGPROC proc, DWORD dwHelp, LPARAM lPara
     return r;
 }
 
-/* ------------------------------------------------------------------ seg3:0733: run applet <id> */
+/* ------------------------------------------------------------------ seg3:0733: run applet <id>
+ * Not ported yet: 0 Color = CreateDialog 100 with seg6:0DC8, then the modal loop seg3:06AE;
+ * 1 Printers = dialog 1, seg20:1302 (activates the open one, [0x16], instead when there is one);
+ * 2 Fonts = dialog 2, seg9:0CBC; 3 International = dialog 3, seg12:194D; 4 Ports = dialog 4,
+ * seg19:062E; 8 Desktop = dialog 8, seg18:1419. */
 static void RunApplet(HWND hwnd, int id)
 {
     switch (id) {
