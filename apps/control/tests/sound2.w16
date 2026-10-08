@@ -1,5 +1,11 @@
 # Sound applet with a wave device: ARCH311_WAVEDEVS=1 sh tests/sound.sh tests/sound2.w16
 # Same keys as arch311-ref/scn/sound2.scn: Critical Stop gets chimes.wav, then OK
+# regress: ARCH311_WAVEDEVS=1 sh apps/control/tests/sound.sh "$TEST" "$OUT"
+# compare: sound2/02.png 01-open.png active ignore 320 240 333 261
+# compare: sound2/03.png 02-critical.png active ignore 320 240 333 261
+# compare: sound2/04.png 03-files.png active ignore 320 240 333 261
+# compare: sound2/05.png 04-chimes.png active ignore 320 240 333 261
+# ini: WIN.INI sounds SystemHand=C:\WINDOWS\CHIMES.WAV,Critical Stop
 sleep 600
 shot shots/01-open.png
 key down
