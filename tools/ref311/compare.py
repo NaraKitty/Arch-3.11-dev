@@ -153,6 +153,8 @@ def cmd_runs(args):
 def cmd_crop(args):
     w, h, px = read_png(args[0])
     x0, y0, x1, y1, k = (int(v) for v in args[1:6])
+    x0, x1 = max(0, min(x0, w)), max(0, min(x1, w))
+    y0, y1 = max(0, min(y0, h)), max(0, min(y1, h))
     out = bytearray()
     for y in range(y0, y1):
         line = bytearray()
