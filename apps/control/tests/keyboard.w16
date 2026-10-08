@@ -1,8 +1,5 @@
-# Keyboard applet (MAIN.CPL dialog 5): second in the window, after Mouse
+# Keyboard applet (MAIN.CPL dialog 5): tools/run-cp-test.sh apps/control/tests/keyboard.w16 OUT Keyboard
 sleep 600
-key right
-key enter
-sleep 500
 shot shots/01-keyboard.png
 key right
 key right

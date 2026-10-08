@@ -7,7 +7,7 @@ key tab
 key space
 key enter
 sleep 500
-shot shots/01-com1-settings.png
+shotcaret shots/01-com1-settings.png
 key tab
 key tab
 key tab
@@ -17,7 +17,7 @@ key tab
 key tab
 key space
 sleep 500
-shot shots/02-advanced.png
+shotcaret shots/02-advanced.png
 key tab
 key down
 sleep 300

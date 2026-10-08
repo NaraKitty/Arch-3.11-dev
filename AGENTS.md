@@ -339,11 +339,37 @@ libw16 findings:
 - Tab/arrow navigation from a control's child window (a combo's edit) moves on from the control itself.
 - Owner-drawn buttons get a real DRAWITEMSTRUCT and ODA_FOCUS / ODA_SELECT notifications.
 - Icon statics fall back to system icons (dialog 37's IDI_EXCLAMATION).
-- Known difference: in a combo box's edit (3.1 creates it with internal style 0x200) real 3.11 shows a
-  14-row selection (the edit's client inset 2 px top and bottom) and a 1-px caret on the last highlight
-  column; libw16 draws the text line (13 rows) and its 2-px caret after it. Plain edits (Date/Time) do
-  show 13 rows and a 2-px caret. TODO: decode USER's edit control (single-line formatting rect, caret).
+- (Fixed below: combo-box edit selection and caret.)
 Tests: run-cp-test.sh/run-app-test.sh pass an applet name as the Control Panel's command line
 ("control NAME" opens it, seg1:10A7), so applet tests no longer depend on the icon order; smoke.w16
 reaches Volume with End. Rig: DOSBox-X AUTOTYPE has no key combinations - `key alt+x` in a .scn aborts the
 rest of the run; navigate with tab/space instead.
+
+Edit control geometry from USER (libw16/src/edit.c; seg26-seg30). A WS_BORDER edit takes the style off at
+WM_NCCREATE and draws a one-pixel DF_WINDOWFRAME frame inside its client area (GetWindowLong shows no
+WS_BORDER, as in 3.1). Every edit gets the system font first, which fixes the "system" average width and
+height (8 and 16 on VGA). Average width = USER's routine behind GetDialogBaseUnits (now
+w16_ave_char_width). Single-line: formatting rect = client inset by min(avg, 8)/2 and min(height, 16)/4,
+at most one line tall; drawing clipped to the inset client; each selection run spans its GetTextExtent
+(overhang included) and is filled a pixel taller above and below; caret 1 px wide when the font's average
+width is under the system font's (else 2), line height + 1 tall, at the extent less the overhang, kept
+inside the rect; ES_AUTOHSCROLL scrolls by first visible character (quarter width left, three quarters
+right); mouse hit test uses half the average width. Multi-line: inset 4/4 (system font) and a whole number
+of lines tall (no partial line at the bottom), frame drawn round the window rect. WM_SETFONT on a focused
+edit makes a 2 x line-height caret (3.1 does this for single-line edits too). Verified: Ports (both
+scenarios) now pixel-identical in every dialog frame including the combo edits' selection and caret;
+Keyboard, Mouse, Sound (with and without a wave device) unchanged; Notepad hello unchanged (cursor and
+caret-blink pixels only). UNTESTED against 3.11: bordered multi-line edits, password edits, scrolling of
+long single-line text, the caret at the start of an empty edit (GetTextExtent of 0 characters returns 0
+in libw16; 3.1's GDI value unknown).
+Tests: keyboard/mouse/datetime/sound*.w16 now open their applet by name (third argument of
+run-cp-test.sh; sound.sh passes Sound) instead of counting icons, which broke when Ports was ported;
+ports2.w16 shoots the caret where the reference caught it. The Date & Time references (shots/datetime*)
+show the rig's own clock (e.g. 10/8/26 9:30:26), not 11/8/93, so only their layout compares with the
+port's ARCH311_CLOCK run; the layout is unchanged.
+Combo-box edits as 3.1 creates them (seg34): ES_NOHIDESEL plus USER's internal 0x200 (W16_ES_COMBOBOX),
+ES_AUTOHSCROLL / ES_OEMCONVERT only from CBS_AUTOHSCROLL / CBS_OEMCONVERT; the combo clears the edit's
+selection when the focus leaves (seg33 kill-focus helper). SLKeyDown (seg28:0A93): a combo's edit sends
+F4, Page Up/Down and Up/Down to the combo; other single-line edits move Up/Down as Left/Right and ignore
+Page Up/Down. SLInsertText (seg28:0719): without ES_AUTOHSCROLL a single-line edit accepts only what fits
+beside the rest of the text (EN_MAXTEXT for the rest). Ports frames unchanged (pixel-identical dialogs).
