@@ -1,0 +1,11 @@
+# USER's MessageBox against real 3.11: DRIVERS.CPL's "required driver" question (string 2037, caption
+# 2036, MB_YESNO | MB_ICONEXCLAMATION) for MIDI Mapper, whose lines break elsewhere than
+# drivers-remno's (arch311-ref/scn/drivers-remmap.scn); Yes by its mnemonic.
+# regress: sh tools/run-app-test.sh apps/build/mbox "$TEST" "$OUT" 0x34 DRIVERS.CPL:2036 DRIVERS.CPL:2037 MIDI Mapper
+# compare: drivers-remmap/03.png 01-box.png active ignore 320 240 332 260
+# ini: MBOX.INI mbox result=6
+sleep 400
+shot shots/01-box.png
+type y
+sleep 300
+quit

@@ -1,0 +1,11 @@
+# USER's MessageBox against real 3.11: MAIN.CPL's remove confirmation (seg6:0000: string 236 with
+# the scheme name, MB_YESNO | MB_ICONEXCLAMATION) as Control Panel > Color > Remove Scheme shows it
+# for Bordeaux (arch311-ref/scn/color-mbox1.scn, a first line of 308 px); No by its mnemonic.
+# regress: sh tools/run-app-test.sh apps/build/mbox "$TEST" "$OUT" 0x34 MAIN.CPL:1 MAIN.CPL:236 Bordeaux
+# compare: color-mbox1/02.png 01-box.png active ignore 320 240 332 260
+# ini: MBOX.INI mbox result=7
+sleep 400
+shot shots/01-box.png
+type n
+sleep 300
+quit

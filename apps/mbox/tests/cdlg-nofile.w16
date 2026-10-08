@@ -1,0 +1,12 @@
+# USER's MessageBox against real 3.11: COMMDLG's missing file box (string 391 with the name, the Open
+# dialog's title as caption, MB_OK | MB_ICONEXCLAMATION; line breaks in the text) as Notepad's
+# File > Open shows it (arch311-ref/scn/cdlg-missing.scn, first box); Esc answers it (a lone OK takes
+# IDCANCEL's ID, MessageBox still returns IDOK).
+# regress: sh tools/run-app-test.sh apps/build/mbox "$TEST" "$OUT" 0x30 Open COMMDLG.DLL:391 nofile.txt
+# compare: cdlg-missing/04.png 01-box.png active ignore 320 240 332 260
+# ini: MBOX.INI mbox result=1
+sleep 400
+shot shots/01-box.png
+key esc
+sleep 300
+quit

@@ -421,3 +421,45 @@ NEXT: USER's MessageBox layout (seg42:04F5: text limit cxScreen/8*5 - 2*(cyBorde
 space, sizes through dialog units; DrawText's CALCRECT width of a wrapped line includes its break space;
 open: two real boxes 384 and 388 px wide both have their left edge at x=128, client at 133, which the
 dialog-unit path (client x = 2 * units) cannot give); then the desktop settings' effects in the WM.
+
+### Session 8 (Oct 8) - International applet (MAIN.CPL seg10-14), USER's MessageBox
+apps/control/intl.c ports dialog 3 "International" (IntlDlgProc seg12:194D) with its Date (seg11:0824),
+Time (seg14:0000), Number (seg13:0000) and Currency (seg10:0139) dialogs and their helpers: countries
+from CONTROL.INF [country], languages and keyboard layouts from SETUP.INF (seg23 INF reader, through
+libw16's new LZOpenFile/LZRead/LZSeek/LZClose - plain files only, TODO SZDD), the samples from the clock
+(ARCH311_CLOCK as datetime.c, nanosecond offset so a script's sleeps decide each sample's second), and
+WIN.INI [intl] written as 3.11 writes it. Language / keyboard changes write SYSTEM.INI [boot]
+language.dll (SystemParametersInfo SPI_SETLANGDRIVER: written only, the DLL is not loaded), [boot.
+description] and [keyboard] keyboard.dll; no driver files are copied (installer dialogs 23/30/38 not
+ported) and the layout is not applied (TODO: map it to XKB).
+libw16: DrawText per USER seg6:0571 (tab rule, centring on the full extent incl. trailing blanks, word
+wrap, DT_CALCRECT); BM_SETCHECK per seg25:1E1B (radio buttons move WS_TABSTOP); KERNEL's profile writer
+(seg1:6CEC, merged with session 7's: strings cut at control characters and trailing blanks, a key keeps
+its line up to '='); USER's MessageBox (seg1:9B91 / SoftModalMessageBox seg42:04F5 / its dialog
+procedure seg42:0101): an in-memory template (button width = the longest label without its prefix +
+"0" twice, text wrapped to >= 5/8 of the screen less margins and icon, centred, cascaded per open box,
+sizes through dialog units), default button focused, Close removed without Cancel, a lone OK answers
+Esc, task-modal boxes without owner disable the task's windows (seg42:0000/0073); no MessageBeep (3.1's
+MessageBox never beeps). The x=128 puzzle is CS_BYTEALIGNWINDOW: the dialog class moves the frame to
+the nearest multiple of 8 (window.c already does). Icons: USER's GetIconId choice (seg12:040C: the icon
+size with the display's colour count, else the most colours under it), and GetDeviceCaps no longer
+calls a true-colour screen 1 plane x 1 bit. SetFocus (seg1:381D) focuses its window after activating
+the top-level one whatever the activation did; WM_INITDIALOG returns the dialog procedure's FALSE
+(seg25:051C), so a dialog that focuses a control itself keeps it (MB_DEFBUTTON2 boxes did not).
+DialogBox of a child window belongs to its top-level window (seg25:08EB). MAIN.CPL's ConfirmRemove is
+MB_YESNO | MB_ICONEXCLAMATION (seg6:0040 pushes 0x34; was MB_ICONQUESTION).
+apps/mbox: a test program showing one MessageBox whose caption and text are MODULE:ID string resources
+read at run time (no Windows text in the repo); apps/mbox/tests compare it with real 3.11 boxes of
+other programs' runs. Tests use ARCH311_REF_INI=1 (session 7's name for the pristine INI files).
+Verified (WSL): `ARCH311_REF=/mnt/c/Users/pikac/arch311-ref tools/regress.sh -o ~/regress-intl-all` ->
+187 PASS, 0 FAIL, 0 SKIP: International intl*.w16 (every compared frame 0 px apart outside the mouse
+pointer; WIN.INI [intl] values; SYSTEM.INI [boot]/[keyboard] for intl-langkbd with the rig's A: floppy
+holding the language/keyboard files), and 11 message boxes 0 px apart: intl-numerr, desk-nowall (215),
+color-mbox1/2, drivers-remno/remmap, c386-badbg, cdlg-missing (2), cdlg-save (2, one MB_DEFBUTTON2) with
+the button each run pressed (MBOX.INI result). UNTESTED against 3.11: three-button boxes (no reference),
+nested boxes' cascade, task-modal disabling, MB_SYSTEMMODAL (USER draws SysErrorBox seg1:9325 for no
+icon / MB_ICONHAND - TODO, libw16 shows the dialog box; DS_SYSMODAL has no SetSysModalWindow), the
+International Help buttons, error box 808 and the validation boxes other than 800, LZEXPAND-compressed
+INF files. libw16's commdlg.c asks "Replace existing file?" without MB_DEFBUTTON2 (real COMMDLG: No is
+the default, cdlg-save/07) - for the COMMDLG port. Rig: the recorder (WinCap) sometimes hangs - run
+captures one per call in the foreground; Git Bash's grep hides CRs, check line endings in WSL.

@@ -233,7 +233,8 @@ BOOL ConfirmRemove(HWND hwnd, LPCSTR name, int idFormat)
     char fmt[0x9e], msg[0x200];
     LoadString(hInstMain, idFormat, fmt, sizeof fmt);
     wsprintf(msg, fmt, name);
-    return MessageBox(hwnd, msg, szCaption, MB_YESNO | MB_ICONQUESTION) == IDYES;
+    /* 0x34 at seg6:0040; the Color applet's remove box (arch311-ref color-mbox1) shows its "!" icon */
+    return MessageBox(hwnd, msg, szCaption, MB_YESNO | MB_ICONEXCLAMATION) == IDYES;
 }
 
 /* ------------------------------------------------------------------ seg9:005F

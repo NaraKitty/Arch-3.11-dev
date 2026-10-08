@@ -1,0 +1,12 @@
+# USER's MessageBox against real 3.11: DRIVERS.CPL's "required driver" question (strings 2037 with
+# the driver name and 2036 as the caption, MB_YESNO | MB_ICONEXCLAMATION; four lines with a blank
+# one) as Control Panel > Drivers > Remove asks it for [MCI] MIDI Sequencer
+# (arch311-ref/scn/drivers-remno.scn); No by its mnemonic.
+# regress: sh tools/run-app-test.sh apps/build/mbox "$TEST" "$OUT" 0x34 DRIVERS.CPL:2036 DRIVERS.CPL:2037 '[MCI] MIDI Sequencer'
+# compare: drivers-remno/04.png 01-box.png active ignore 320 240 332 260
+# ini: MBOX.INI mbox result=7
+sleep 400
+shot shots/01-box.png
+type n
+sleep 300
+quit

@@ -244,6 +244,8 @@ static int run_modal(HWND h, HWND owner)
 
 int DialogBoxIndirectParam(HINSTANCE h, const void *tmpl, HWND owner, DLGPROC proc, LPARAM lp)
 {
+    /* USER seg25:08EB: the dialog box of a child window belongs to that window's top-level window */
+    if (owner && w16_valid(owner) && (owner->style & WS_CHILD)) owner = w16_top_level(owner);
     HWND d = create_dialog(h, tmpl, owner, proc, lp, 1);
     if (!d) return -1;
     return run_modal(d, owner);
@@ -361,6 +363,9 @@ LRESULT w16_dialog_wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp)
                 return r;
             return d->msgresult ? d->msgresult : r;
         }
+        /* USER's DefDlgProc returns the dialog procedure's own answer to WM_INITDIALOG (seg25:051C):
+         * FALSE when it placed the focus itself */
+        if (m == WM_INITDIALOG) return FALSE;
     }
     if (m == WM_INITDIALOG) return TRUE;
     return DefDlgProc(h, m, wp, lp);
@@ -624,9 +629,13 @@ BOOL IsDialogMessage(HWND dlg, LPMSG m)
 /* ------------------------------------------------------------------ MessageBox */
 /* USER's MessageBox (seg1:9B91) and SoftModalMessageBox (seg42:04F5): the box is a dialog template
  * that USER builds in memory from pixel sizes measured in the system font, run by
- * DialogBoxIndirectParam with USER's own dialog procedure (seg42:0101). It does not beep: 3.1
- * applications call MessageBeep themselves. The tables are USER's: buttons per MB_ type, where each
- * type starts in the button list, and for each entry its label and command ID. */
+ * DialogBoxIndirectParam with USER's own dialog procedure (seg42:0101). Sizes and places pass through
+ * dialog units (client x = 2 * units with the system font's 8-px average), and the dialog class is
+ * CS_BYTEALIGNWINDOW, so the frame's left edge then moves to the nearest multiple of 8: boxes 384 and
+ * 388 px wide both start at x=128. The text is wrapped by DrawText's DT_CALCRECT, whose width of a
+ * wrapped line includes the blank it broke at. It does not beep: 3.1 applications call MessageBeep
+ * themselves. The tables are USER's: buttons per MB_ type, where each type starts in the button
+ * list, and for each entry its label and command ID. */
 static const BYTE mb_count[6] = {1, 2, 3, 3, 2, 2};
 static const BYTE mb_first[6] = {0, 0, 2, 5, 5, 8};
 static const BYTE mb_label[10] = {1, 2, 6, 5, 7, 3, 4, 2, 5, 2};
@@ -783,6 +792,7 @@ static BOOL mb_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
 int MessageBox(HWND owner, LPCSTR text, LPCSTR caption, UINT type)
 {
     static int inited;
+    if (owner && !w16_valid(owner)) return 0; /* USER's parameter check (seg1:AB5D) fails the call */
     if (!inited) { mb_init(); inited = 1; }
     if (!caption) caption = mb_error;
     int kind = type & MB_TYPEMASK;

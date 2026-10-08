@@ -1,0 +1,11 @@
+# USER's MessageBox against real 3.11: CPWIN386.CPL's invalid background value (string 292, caption
+# 256, MB_OK | MB_ICONEXCLAMATION; one short line, the box as wide as its caption wants) as 386
+# Enhanced shows it (arch311-ref/scn/c386-badbg.scn); Enter answers OK.
+# regress: sh tools/run-app-test.sh apps/build/mbox "$TEST" "$OUT" 0x30 CPWIN386.CPL:256 CPWIN386.CPL:292
+# compare: c386-badbg/05.png 01-box.png active ignore 320 240 332 260
+# ini: MBOX.INI mbox result=1
+sleep 400
+shot shots/01-box.png
+key enter
+sleep 300
+quit
