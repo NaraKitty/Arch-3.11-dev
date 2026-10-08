@@ -370,6 +370,9 @@ static int next_tab(int x, int origin, int ntabs, const int *tabs, int avg)
 static int tabbed(HDC dc, int x, int y, LPCSTR s, int n, int ntabs, const int *tabs, int origin, int draw)
 {
     W16Font *f = w16_dc_font(dc);
+    TEXTMETRIC tm;
+    /* USER seg6:0992: without tab stops a tab is 8 of USER's average characters (seg2:0410) */
+    int avg = w16_ave_char_width(dc, &tm);
     int cx = x;
     int start = 0;
     for (int i = 0; i <= n; i++) {
@@ -378,7 +381,7 @@ static int tabbed(HDC dc, int x, int y, LPCSTR s, int n, int ntabs, const int *t
             if (draw && i > start) TextOut(dc, cx, y, s + start, i - start);
             cx += seg;
             if (i < n) {
-                int nx = next_tab(cx, origin, ntabs, tabs, f->avgw);
+                int nx = next_tab(cx, origin, ntabs, tabs, avg);
                 if (draw && dc->bkmode == OPAQUE) {
                     int a = cx, b2 = y, c = nx, d = y + f->height;
                     w16_lp_to_dp(dc, &a, &b2);

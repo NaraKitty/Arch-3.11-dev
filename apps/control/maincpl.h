@@ -49,5 +49,6 @@ void NetworkDialog(HWND owner);                    /* arch311: replaces WNetDevi
 BOOL PortsDlgProc(HWND, UINT, WPARAM, LPARAM);     /* seg19:062E, dialog 4 */
 int DoPortSettings(HWND hwndOwner, int iPort);     /* seg19:04C6, dialog 19 (also Printers' Connect) */
 BOOL RestartDlgProc(HWND, UINT, WPARAM, LPARAM);   /* seg9:05A9, dialog 37 (Ports, Fonts) */
+void PrintersRun(HWND hwnd);                       /* seg3:0782 + seg20:1302, dialog 1 (CUPS) */
 
 #endif
