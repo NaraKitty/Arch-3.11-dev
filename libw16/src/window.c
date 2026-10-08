@@ -308,6 +308,17 @@ HDC BeginPaint(HWND h, LPPAINTSTRUCT ps)
     rgn_copy(&upd, &h->upd);
     rgn_and(&upd, &h->rc);
     rgn_and_rgn(&dc->vis, &upd);
+    /* Without WS_CLIPCHILDREN the parent paints (and erases) over its children, so as in
+     * RedrawWindow's default the children under the update region repaint after it - even
+     * one that an earlier UpdateWindow had already validated. */
+    if (!(h->style & WS_CLIPCHILDREN))
+        for (HWND c = h->child; c; c = c->next) {
+            if (!(c->style & WS_VISIBLE)) continue;
+            for (int i = 0; i < upd.n; i++) {
+                RECT s;
+                if (IntersectRect(&s, &upd.r[i], &c->rw)) w16_invalidate_window(c, &s, TRUE, 1);
+            }
+        }
     RECT b;
     rgn_bounds(&upd, &b);
     if (!IsRectEmpty(&b)) OffsetRect(&b, -h->rc.left, -h->rc.top);

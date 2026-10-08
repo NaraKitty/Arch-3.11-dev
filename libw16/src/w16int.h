@@ -51,6 +51,7 @@ HINSTANCE w16_module_open(const char *file); /* from assets/files, cached */
 const W16Res *w16_find_res(HINSTANCE m, LPCSTR name, LPCSTR type);
 const uint8_t *w16_res_data(HINSTANCE m, const W16Res *r);
 HINSTANCE w16_system_module(const char *file); /* USER.EXE, VGA.DRV, ... (NULL if absent) */
+int w16_wildmatch(const char *pat, const char *s); /* DOS wildcards, case-insensitive */
 
 /* ------------------------------------------------------------------ GDI */
 enum { OBJ_PEN = 1, OBJ_BRUSH, OBJ_FONT, OBJ_BITMAP, OBJ_RGN, OBJ_PAL };
@@ -313,6 +314,7 @@ void w16_draw_prefix_text(HDC dc, int x, int y, const char *s, int n, int nopref
 int w16_prefix_text_width(HDC dc, const char *s, int n);
 char w16_mnemonic(const char *s);
 void w16_draw_gray_text(HDC dc, int x, int y, const char *s, int n, int noprefix);
+void w16_draw_stippled_text(HDC dc, int x, int y, const char *s, int n, int noprefix, COLORREF fg);
 void w16_notify_parent(HWND h, int code);
 
 /* system parameters */

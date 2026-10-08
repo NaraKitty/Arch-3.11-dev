@@ -61,6 +61,7 @@ static int name_or_ord(const uint8_t **p, const char **name)
     return 0;
 }
 
+static int tabbable(HWND c);
 static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC proc, LPARAM lp, int modal)
 {
     DWORD style = u32(t);
@@ -171,6 +172,8 @@ static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC 
     if (!first) first = GetNextDlgTabItem(h, NULL, FALSE);
     dd->focus = first;
     if (SendMessage(h, WM_INITDIALOG, (WPARAM)first, lp) && w16_valid(h)) {
+        /* WM_INITDIALOG may have disabled or hidden the control picked before it ran */
+        if (first && !tabbable(first)) first = GetNextDlgTabItem(h, first, FALSE);
         if (first) {
             dd->focus = first;
             if (visible || modal) { /* focus is set when shown/activated */ }

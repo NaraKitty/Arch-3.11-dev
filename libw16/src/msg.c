@@ -622,6 +622,11 @@ static int fetch(LPMSG out, HWND h, UINT first, UINT last, int remove, int *wait
             *p = q->next;
             if (qtail == q) qtail = prev;
             free(q);
+            /* GetKeyState semantics: the key state is the one as of the last key message
+             * retrieved, not the live hardware state (matters when input is queued ahead) */
+            UINT km = out->message;
+            if ((km == WM_KEYDOWN || km == WM_SYSKEYDOWN) && out->wParam < 256) w16_keystate[out->wParam] |= 0x80;
+            else if ((km == WM_KEYUP || km == WM_SYSKEYUP) && out->wParam < 256) w16_keystate[out->wParam] &= ~0x80;
         }
         if (out->hwnd && !w16_valid(out->hwnd) && out->hwnd != w16_desktop) { if (remove) return fetch(out, h, first, last, remove, wait); }
         w16_msg_time = out->time;

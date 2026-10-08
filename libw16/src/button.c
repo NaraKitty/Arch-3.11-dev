@@ -82,7 +82,9 @@ static void paint_push(HWND h, HDC dc)
     GetTextMetrics(dc, &tm);
     int x = (rt - l - tw) / 2 + l, y = (bt - t - tm.tmHeight) / 2 + t;
     if (pressed) { x += 2; y += 2; }
-    if (h->style & WS_DISABLED) w16_draw_gray_text(dc, x, y, h->text, n, 0);
+    if ((h->style & WS_DISABLED) && GetSysColor(COLOR_GRAYTEXT) == GetSysColor(COLOR_BTNFACE))
+        w16_draw_stippled_text(dc, x, y, h->text, n, 0, GetSysColor(COLOR_BTNTEXT));
+    else if (h->style & WS_DISABLED) w16_draw_gray_text(dc, x, y, h->text, n, 0);
     else {
         SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
         w16_draw_prefix_text(dc, x, y, h->text, n, 0);

@@ -11,6 +11,8 @@
  *  - the 64 KB edit limit is kept for files (3.1 behaviour), see LoadFile;
  *  - printing goes through libw16's printer DC (CUPS) instead of a Win16 printer driver.
  */
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include "w16.h"
 #include "commdlg.h"
@@ -199,7 +201,7 @@ static void IniInit(void)
 }
 
 /* ------------------------------------------------------------------ seg4: time/date */
-static void GetTimeDate(char *szTime, char *szDate)
+void GetTimeDate(char *szTime, char *szDate) /* also used by print.c */
 {
     time_t t = time(NULL);
     struct tm *tm = localtime(&t);
@@ -1045,7 +1047,7 @@ static BOOL NpInit(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int nC
 }
 
 /* ------------------------------------------------------------------ printing (seg1:1146) */
-/* Printing renders through libw16's printer DC; see printing.c (TODO T-NP-PRINT). */
+/* Printing: print.c (seg1:1146 NpPrintFile). */
 static int NpPrint(void)
 {
     extern int NpPrintFile(HWND hwndNP, HWND hwndEdit, HINSTANCE hInst, const char *title,

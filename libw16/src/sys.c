@@ -586,16 +586,23 @@ static void ci_resolve(char *host)
         char cand[2100];
         snprintf(cand, sizeof cand, "%s/%s", out, c);
         if (access(abs ? cand : cand + 1, F_OK) != 0) {
+            int found = 0;
             DIR *d = opendir(dir);
             if (d) {
                 struct dirent *e;
                 while ((e = readdir(d)))
                     if (!strcasecmp(e->d_name, c)) {
-                        c = e->d_name;
-                        snprintf(cand, sizeof cand, "%s/%s", out, c);
+                        snprintf(cand, sizeof cand, "%s/%s", out, e->d_name);
+                        found = 1;
                         break;
                     }
                 closedir(d);
+            }
+            /* a name that does not exist yet (a file being created): DOS apps pass upper
+             * case, Linux convention is lower case */
+            if (!found) {
+                AnsiLower(c);
+                snprintf(cand, sizeof cand, "%s/%s", out, c);
             }
         }
         snprintf(out, sizeof out, "%s", cand);
@@ -727,4 +734,59 @@ HFILE OpenFile(LPCSTR name, OFSTRUCT *of, UINT style)
         return 1;
     }
     return fd;
+}
+
+/* ------------------------------------------------------------------ current drive / directory (INT 21h 0Eh/19h/3Bh/47h) */
+static char drive_dir[26][260]; /* DOS keeps one current directory per drive */
+
+/* "X:\A\..\B\." -> "X:\B" (upper case, no trailing backslash except the root) */
+static void norm_dos(LPCSTR in, char *out, size_t cb)
+{
+    char full[520], *parts[64];
+    int n = 0;
+    full_dos_path(in, full, sizeof full);
+    char drv = toupper((unsigned char)full[0]);
+    char *save;
+    for (char *c = strtok_r(full + 2, "\\/", &save); c && n < 64; c = strtok_r(NULL, "\\/", &save)) {
+        if (!strcmp(c, ".")) continue;
+        if (!strcmp(c, "..")) { if (n) n--; continue; }
+        parts[n++] = c;
+    }
+    size_t o = snprintf(out, cb, "%c:", drv);
+    if (!n) snprintf(out + o, cb - o, "\\");
+    for (int i = 0; i < n && o < cb; i++) o += snprintf(out + o, cb - o, "\\%s", parts[i]);
+    AnsiUpper(out);
+}
+
+int w16_drive_root(char letter, char *root, size_t cb)
+{
+    load_drives();
+    letter = toupper((unsigned char)letter);
+    for (int i = 0; i < ndrives; i++)
+        if (drives[i].letter == letter) {
+            if (root) snprintf(root, cb, "%s", drives[i].root);
+            return 0;
+        }
+    return -1;
+}
+
+void w16_getcwd(LPSTR dos, size_t cb) { snprintf(dos, cb, "%c:%s", cur_drive, cur_dir); }
+
+int w16_chdir(LPCSTR dos)
+{
+    char n[300], host[2048];
+    struct stat st;
+    if (dos[0] && dos[1] == ':' && !dos[2]) { /* "X:" selects the drive, keeping its directory */
+        char d = toupper((unsigned char)dos[0]);
+        if (d < 'A' || d > 'Z' || w16_drive_root(d, NULL, 0)) return -2;
+        const char *keep = drive_dir[d - 'A'][0] ? drive_dir[d - 'A'] : "\\";
+        snprintf(n, sizeof n, "%c:%s", d, keep);
+    } else
+        norm_dos(dos, n, sizeof n);
+    if (w16_drive_root(n[0], NULL, 0)) return -2;
+    if (w16_dos_to_host(n, host, sizeof host) || stat(host, &st) || !S_ISDIR(st.st_mode)) return -1;
+    cur_drive = n[0];
+    snprintf(cur_dir, sizeof cur_dir, "%s", n + 2);
+    snprintf(drive_dir[cur_drive - 'A'], sizeof drive_dir[0], "%s", cur_dir);
+    return 0;
 }

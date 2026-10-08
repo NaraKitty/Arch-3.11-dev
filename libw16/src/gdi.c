@@ -2,6 +2,7 @@
  * The display is emulated as the 3.11 VGA driver sees it: 16 colours by default
  * (W16_COLORS=256|24 for richer output on modern screens). */
 #include "w16int.h"
+#include "commdlg.h" /* Escape / SP_* */
 #include <math.h>
 
 W16Bitmap w16_screen;
@@ -1292,4 +1293,20 @@ int w16_screenshot(const char *path)
     free(z);
     fclose(f);
     return 0;
+}
+
+/* GDI Escape: the 3.x printing interface. TODO(T-PRN-01): render printer DCs to PDF and hand
+ * them to CUPS; until then printer DCs refuse STARTDOC so apps show their "cannot print" box. */
+int Escape(HDC dc, int esc, int cb, LPCSTR in, void *out)
+{
+    (void)cb; (void)in; (void)out;
+    if (!dc) return SP_ERROR;
+    switch (esc) {
+    case 8: /* QUERYESCSUPPORT */
+        return 0;
+    case SETABORTPROC:
+        return 1;
+    default:
+        return SP_ERROR;
+    }
 }

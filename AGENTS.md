@@ -18,8 +18,13 @@ agents can continue.
    add animations/effects the original lacked.
 6. Append to ADRs in `docs/DECISIONS.md`; do not silently change decisions.
 
-## Current state (end of session 1)
-DONE and verified:
+## Current state
+**Latest (session 3): Notepad runs end to end on Linux** (`make -C apps`, then
+`tools/run-app-test.sh apps/build/notepad apps/notepad/tests/smoke.w16`). See the session 3 log below.
+The session-1 notes that follow are historical; `docs/`, `tools/extract_media.py`, `make-profile.sh`
+etc. are referenced but were never committed - `tools/rip` replaced the extraction tooling.
+
+Session 1, DONE and verified:
 - `tools/extract_media.py` + `tools/kwajexpand.c` expanded all 462 files from the owner's six floppy
   images (Windows for Workgroups 3.11); none left compressed.
 - `tools/inventory.py` -> `docs/INVENTORY.md`: 39 NE EXEs, 207 NE DLL/drivers, 29 LE VxDs, 8 DOS MZ.
@@ -99,3 +104,32 @@ run Notepad under W16_HEADLESS + W16_SCRIPT and pixel-diff against the DOSBox-X 
 (tools/compare, palette-index compare), then Calculator, Clock, Write, Paintbrush, ...
 Push: this session could not write to GitHub (repos not in its authorized set); the owner pushes a
 git bundle with "Arch-3.11-dev push/push-to-github.bat" in the disks folder.
+
+### Session 3 (Claude Code on the owner's PC, Oct 7 2026)
+Build host: WSL Ubuntu 22.04 on the owner's Windows PC (gcc 11, libsdl2-dev 2.0.20). The session-2
+cloud sandbox's DOSBox-X rig scripts were never committed and are lost; DOSBox-X is installed on the
+owner's PC at C:\DOSBox-X for the next comparison pass.
+Done and verified here (commands: `make -C libw16`, `make -C apps`, the smoke script above, headless):
+- libw16 builds and links on Linux. Fixed: strcasestr without _GNU_SOURCE (64-bit pointer truncation),
+  menu loop never called TranslateMessage (menu mnemonics dead for real keyboards too), key state
+  updated before queued key messages ran (Ctrl+Home etc. seen as Home), dialogs focusing a control
+  WM_INITDIALOG disabled, disabled push-button text invisible (now stippled as 3.1 does when
+  GRAYTEXT == BTNFACE), combo boxes drawing their template WS_VSCROLL as a scroll bar, parent paint
+  erasing a child that UpdateWindow had already validated (Notepad's text vanished after File>Open).
+- New: libw16/src/commdlg.c (GetOpen/SaveFileName, FindText/ReplaceText, PrintDlg + Print Setup with
+  CUPS printers via lpstat, GetFileTitle, CommDlgExtendedError) on the ripped COMMDLG.DLL templates
+  1536-1541, strings and folder/drive bitmap 576; libw16/src/shell.c (ShellAbout on SHELL.DLL 100);
+  per-drive current directory (w16_chdir/w16_getcwd/w16_drive_root); GDI Escape stub.
+- New: apps/notepad/print.c, ported from seg1:0FC6-21B6 (AbortProc, abort dialog, margins->device
+  units, &f &p[+n] &t &d &l &c &r headers/footers, tab expansion, page loop); apps/Makefile.
+- Smoke test passes: typing, menus, Find (match highlighted), Save As writes ~/hello.txt with CRLF and
+  the tab byte intact, Open lists and reloads it, Print Setup, About.
+- Decision: names that do not exist yet are created lower case on Linux (DOS apps pass upper case);
+  existing files still match case-insensitively.
+UNTESTED: real printing (printer DCs are info-only - T-PRN-01; no CUPS in WSL), the Help buttons,
+Replace dialog, OFN hooks/templates, layout constants marked MEASURE in commdlg.c, ShellAbout texts
+(101/112/115) and the stipple phase - all need the DOSBox-X comparison.
+Known: Print Setup opened via Alt+F,R shows focus on "Portrait" (likely the 'r' mnemonic reaching the
+dialog) - check against real 3.11.
+NEXT: rebuild the DOSBox-X reference rig on the owner's PC and pixel-compare Notepad + the common
+dialogs; then T-PRN-01 (printer DC -> PDF -> CUPS); then Calculator, Clock.

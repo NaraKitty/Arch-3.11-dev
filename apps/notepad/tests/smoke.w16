@@ -1,0 +1,50 @@
+# functional pass: find, save as, reopen, about, print setup
+sleep 300
+type Hello from Windows 3.11 Notepad, running natively on Linux.
+key enter
+type Second line	with a tab.
+key ctrl+home
+key alt+s
+key f
+sleep 150
+type Linux
+sleep 100
+shot shots/11-find-typed.png
+key enter
+sleep 150
+key esc
+sleep 150
+shot shots/12-found.png
+key alt+f
+key a
+sleep 200
+type hello.txt
+sleep 100
+shot shots/13-saveas-typed.png
+key enter
+sleep 300
+shot shots/14-saved.png
+key alt+f
+key n
+sleep 200
+key alt+f
+key o
+sleep 300
+shot shots/15-open.png
+type hello.txt
+key enter
+sleep 300
+shot shots/16-reopened.png
+key alt+f
+key r
+sleep 300
+shot shots/17-printsetup.png
+key esc
+sleep 100
+key alt+h
+key a
+sleep 200
+shot shots/18-about.png
+key enter
+sleep 100
+quit

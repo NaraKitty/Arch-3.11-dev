@@ -598,6 +598,9 @@ LRESULT w16_combobox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     case WM_NCCREATE: {
         c = calloc(1, sizeof *c);
         h->ctl = c;
+        /* WS_VSCROLL in a template means the drop-down list scrolls; the combo itself has
+         * no scroll bars and draws its own frame */
+        h->style &= ~(WS_VSCROLL | WS_HSCROLL | WS_BORDER);
         return DefWindowProc(h, m, wp, lp);
     }
     case WM_CREATE: {

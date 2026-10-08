@@ -534,3 +534,30 @@ void w16_draw_gray_text(HDC dc, int x, int y, const char *s, int n, int noprefix
     w16_draw_prefix_text(dc, x, y, s, n, noprefix);
     SetTextColor(dc, old);
 }
+
+/* Grayed text where GRAYTEXT would vanish into the background (push buttons: GRAYTEXT ==
+ * BTNFACE on VGA): like GrayString with the 50% gray brush, only every other text pixel is
+ * drawn, in the normal text colour. MEASURE: checkerboard phase vs. real 3.11. */
+void w16_draw_stippled_text(HDC dc, int x, int y, const char *s, int n, int noprefix, COLORREF fg)
+{
+    TEXTMETRIC tm;
+    GetTextMetrics(dc, &tm);
+    int w = w16_prefix_text_width(dc, s, n), h = tm.tmHeight;
+    if (w <= 0 || h <= 0) return;
+    COLORREF *save = malloc(sizeof *save * w * h);
+    for (int j = 0; j < h; j++)
+        for (int i = 0; i < w; i++) save[j * w + i] = GetPixel(dc, x + i, y + j);
+    COLORREF old = SetTextColor(dc, fg);
+    w16_draw_prefix_text(dc, x, y, s, n, noprefix);
+    SetTextColor(dc, old);
+    for (int j = 0; j < h; j++)
+        for (int i = 0; i < w; i++) {
+            int dx = x + i, dy = y + j;
+            w16_lp_to_dp(dc, &dx, &dy);
+            if ((dx + dy) & 1) {
+                COLORREF c = save[j * w + i];
+                if (c != (COLORREF)-1 && GetPixel(dc, x + i, y + j) != c) SetPixel(dc, x + i, y + j, c);
+            }
+        }
+    free(save);
+}

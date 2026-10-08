@@ -828,6 +828,7 @@ static void run_tracking(Track *t, int start_open, int keyboard)
         case WM_SYSKEYDOWN: {
             int vk = (int)m.wParam;
             HMENU bar = h->menu;
+            TranslateMessage(&m); /* like USER's menu loop: letters arrive as WM_CHAR for the mnemonics */
             switch (vk) {
             case VK_ESCAPE:
                 if (t->npop > 1) close_popups(t, t->npop - 1);

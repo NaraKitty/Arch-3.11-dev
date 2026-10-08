@@ -137,6 +137,37 @@ typedef struct {
 #define PDERR_CREATEICFAILURE 0x100A
 #define PDERR_PRINTERNOTFOUND 0x100B
 
+#define FNERR_SUBCLASSFAILURE 0x3001
+#define FNERR_INVALIDFILENAME 0x3002
+#define FNERR_BUFFERTOOSMALL 0x3003
+#define FRERR_BUFFERLENGTHZERO 0x4001
+
+/* print.h subset: what the 3.x apps read from PRINTDLG.hDevNames / hDevMode */
+typedef struct {
+    WORD wDriverOffset, wDeviceOffset, wOutputOffset, wDefault;
+} DEVNAMES, *LPDEVNAMES;
+#define DN_DEFAULTPRN 0x0001
+typedef struct {
+    char dmDeviceName[32];
+    WORD dmSpecVersion, dmDriverVersion, dmSize, dmDriverExtra;
+    DWORD dmFields;
+    short dmOrientation, dmPaperSize, dmPaperLength, dmPaperWidth, dmScale, dmCopies, dmDefaultSource,
+        dmPrintQuality, dmColor, dmDuplex;
+} DEVMODE, *LPDEVMODE;
+#define DM_ORIENTATION 0x0001L
+#define DM_PAPERSIZE 0x0002L
+#define DM_COPIES 0x0100L
+#define DMORIENT_PORTRAIT 1
+#define DMORIENT_LANDSCAPE 2
+#define DMPAPER_LETTER 1
+#define DMPAPER_EXECUTIVE 7
+#define DMPAPER_A4 9
+#define DMPAPER_A5 11
+#define DMPAPER_B5 13
+#define DMPAPER_LEGAL 5
+#define DMPAPER_ENV_10 20
+#define DMPAPER_ENV_DL 27
+
 BOOL GetOpenFileName(OPENFILENAME *ofn);
 BOOL GetSaveFileName(OPENFILENAME *ofn);
 HWND FindText(FINDREPLACE *fr);

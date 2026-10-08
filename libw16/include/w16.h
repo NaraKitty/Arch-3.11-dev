@@ -1287,6 +1287,9 @@ HFILE _lclose(HFILE f);
 /* "C:\\FOO\\BAR.TXT" <-> "/home/user/FOO/BAR.TXT" (drive map in ~/.config/arch311/drives) */
 int w16_dos_to_host(LPCSTR dos, char *host, size_t cb);
 int w16_host_to_dos(const char *host, LPSTR dos, size_t cb);
+int w16_drive_root(char letter, char *root, size_t cb); /* 0 if the drive letter is mapped */
+void w16_getcwd(LPSTR dos, size_t cb);                  /* "C:\\WINDOWS" */
+int w16_chdir(LPCSTR dos);                              /* "X:", "..", "X:\\DIR": 0, -1 no path, -2 no drive */
 
 /* USER: classes / windows */
 ATOM RegisterClass(const WNDCLASS *wc);
