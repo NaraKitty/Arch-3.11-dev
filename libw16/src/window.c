@@ -604,8 +604,15 @@ HWND SetFocus(HWND h)
         for (HWND p = h; p && p != w16_desktop; p = p->parent)
             if ((p->style & WS_DISABLED) && p != h) return old;
         HWND top = w16_top_level(h);
-        if (top != w16_active) w16_activate(top, WA_ACTIVE);
-        if (w16_focus != old) return old; /* activation moved focus */
+        if (top != w16_active) {
+            /* USER seg1:381D: the top-level window is activated first, then the focus goes to h
+             * whatever the activation did with it (a message box's WM_INITDIALOG focuses its
+             * default button while the activation would pick the first one) */
+            w16_activate(top, WA_ACTIVE);
+            if (!w16_valid(h)) return old;
+            old = w16_focus;
+            if (h == old) return old;
+        }
     }
     w16_focus = h;
     if (w16_valid(old)) SendMessage(old, WM_KILLFOCUS, (WPARAM)h, 0);
@@ -772,6 +779,7 @@ HWND CreateWindow(LPCSTR cls, LPCSTR title, DWORD style, int x, int y, int cx, i
 
 static void destroy_rec(HWND h)
 {
+    w16_clipboard_on_destroy(h);
     SendMessage(h, WM_DESTROY, 0, 0);
     for (HWND c = h->child; c;) {
         HWND n = c->next;
@@ -788,6 +796,7 @@ static void free_rec(HWND h)
         c = n;
     }
     SendMessage(h, WM_NCDESTROY, 0, 0);
+    w16_clipboard_on_free(h);
     w16_timers_on_destroy(h);
     w16_caret_on_destroy(h);
     if (w16_focus == h) w16_focus = NULL;

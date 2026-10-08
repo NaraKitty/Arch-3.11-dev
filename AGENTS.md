@@ -54,6 +54,9 @@ NOTHING BOOTS YET.
 | T-DOS-01 | MS-DOS Prompt starts the built-in DOSBox (C: = arch311's C: drive, 3.11's prompt banner) | ADR-006; needs DOSBox installed |
 | T-WM-APPS | Test real Linux apps under arch311-wm + Qt/GTK styles: Krita first (owner), a GTK app, a CEF window | docs/WM.md; needs an X server (Xvfb) and the apps installed |
 | T-THEME-DARK | Light/Dark toggle in the theme manager: sets only the freedesktop/GTK/Qt colour-scheme preference for Linux apps, never the arch311 theme's look | After the theme manager and the other themes' colours (docs/THEMES.md) |
+| T-MEDIA-01 | MP3 and MP4 players (owner supplies the 3.11 programs): UI decompiled 1:1, playback through libVLC | ADR-007; needs libvlc installed |
+| T-PM-LINUX | Program Manager: Krita item in Accessories (3.11-style icon), Media group with the players | ADR-008; after the Program Manager port |
+| T-ASSOC | Preferred applications: WIN.INI [Extensions] + Associate dialog kept, players default for their formats, synced with xdg-mime | ADR-008 |
 | T-TERM-01 | Port TERMINAL.EXE with a pseudo-terminal back end: the Linux terminal in 3.11's Terminal look | ADR-006 |
 
 ## Known quirks and findings
@@ -586,3 +589,49 @@ the output buffer. tools/run-cp-test.sh: ARCH311_A_FILES="NAME ..." puts ripped 
 UNTESTED: KWAJ-compressed sources (TODO), OEMSETUP.INF installs (dialog 1002), related drivers (Sound
 Blaster + msadlib), alias numbering beyond one, [boot] drivers= drivers, file-in-use (3.1's MMSYSTEM
 keeps [drivers] open from boot; nothing does here), CD-ROM default source (no MSCDEX), Help, Restart Now.
+
+
+### Session 10 (Oct 8, International applet worktree) - International applet (MAIN.CPL seg10-14), USER's MessageBox
+apps/control/intl.c ports dialog 3 "International" (IntlDlgProc seg12:194D) with its Date (seg11:0824),
+Time (seg14:0000), Number (seg13:0000) and Currency (seg10:0139) dialogs and their helpers: countries
+from CONTROL.INF [country], languages and keyboard layouts from SETUP.INF (seg23 INF reader, through
+libw16's LZOpenFile/LZRead/LZSeek/LZClose - plain files only, TODO SZDD), the samples from the clock
+(ARCH311_CLOCK as datetime.c, nanosecond offset so a script's sleeps decide each sample's second), and
+WIN.INI [intl] written as 3.11 writes it. Language / keyboard changes write SYSTEM.INI [boot]
+language.dll (SystemParametersInfo SPI_SETLANGDRIVER: written only, the DLL is not loaded), [boot.
+description] and [keyboard] keyboard.dll; no driver files are copied (installer dialogs 23/30/38 not
+ported) and the layout is not applied (TODO: map it to XKB).
+libw16: DrawText per USER seg6:0571 (merged into Color's port of the same routine); BM_SETCHECK per
+seg25:1E1B (radio buttons move WS_TABSTOP); KERNEL's profile writer (seg1:6CEC, merged with session
+7's: strings cut at control characters and trailing blanks, a key keeps its line up to '=').
+MessageBox: dev's port (Printers, seg42:04F5) is kept, with what this branch's own port had more:
+task-modal boxes without an owner disable the task's windows (seg42:0000/0073), USER's label set
+incl. "&Close" (114) and PSMGetTextExtent's "&&", the arrow cursor while the box is up, -1 -> 0, a
+NULL text leaves the text static out, an invalid owner fails the call (seg1:AB5D). No MessageBeep
+(3.1's MessageBox never beeps). The x=128 puzzle is CS_BYTEALIGNWINDOW: "#32770" moves the frame to
+the nearest multiple of 8 (window.c already does). Icons: USER's GetIconId choice (seg12:040C: the
+icon size with the display's colour count, else the most colours under it) - IDI_EXCLAMATION's
+16-colour image, not the monochrome one; GetDeviceCaps no longer calls a true-colour screen 1 plane x
+1 bit. Dialog manager: SetFocus (seg1:381D) focuses its window after activating the top-level one
+whatever the activation did; WM_INITDIALOG returns the dialog procedure's FALSE (seg25:051C); no
+focus is kept for RestoreDlgFocus while WM_INITDIALOG runs (hwndFocusSave is 0 then) - together an
+MB_DEFBUTTON2 box keeps No focused and default; a child window's DialogBox belongs to its top-level
+window (seg25:08EB).
+apps/mbox: a test program showing one MessageBox whose caption and text are MODULE:ID string resources
+read at run time (no Windows text in the repo); apps/mbox/tests compare it with real 3.11 boxes of
+programs not ported yet (COMMDLG Open/Save As, 386 Enhanced) and check the answer (ini/MBOX.INI).
+Tests use ARCH311_REF_INI=1 (session 7's name for the pristine INI files).
+Verified (WSL, merged with dev ca655a4): `ARCH311_REF=/mnt/c/Users/pikac/arch311-ref tools/regress.sh`
+-> 464 PASS, 0 FAIL, 0 SKIP. International intl*.w16: every compared frame 0 px apart outside the mouse
+pointer, WIN.INI [intl] values, SYSTEM.INI [boot]/[keyboard] for intl-langkbd. Message boxes, all 0 px
+apart: intl-numerr, desk-nowall (215), color-mbox1/2 and color-remove (in the Color tests),
+drivers-remno/remyes/remmap (the Drivers tests' former pending-compare lines), c386-badbg,
+cdlg-missing (2), cdlg-save (2, one MB_DEFBUTTON2) with the button each run pressed; the Drivers and
+Ports restart dialogs with IDI_EXCLAMATION still match. UNTESTED against 3.11: three-button boxes (no
+reference), nested boxes' cascade, task-modal disabling, MB_SYSTEMMODAL (USER draws SysErrorBox
+seg1:9325 for no icon / MB_ICONHAND - TODO, libw16 shows the dialog box; DS_SYSMODAL has no
+SetSysModalWindow), the International Help buttons, error box 808 and the validation boxes other than
+800, LZEXPAND-compressed INF files. libw16's commdlg.c asks "Replace existing file?" without
+MB_DEFBUTTON2 (real COMMDLG: No is the default, cdlg-save/07) - for the COMMDLG port. Rig: the recorder
+(WinCap) sometimes hangs - run captures one per call in the foreground; Git Bash's grep hides CRs,
+check line endings in WSL.
