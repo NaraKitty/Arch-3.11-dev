@@ -95,6 +95,7 @@ typedef void *FARPROC;
 #define GetGValue(c) ((BYTE)((c) >> 8))
 #define GetBValue(c) ((BYTE)((c) >> 16))
 #define MAKEINTRESOURCE(i) ((LPCSTR)(uintptr_t)(WORD)(i))
+#define MAKEINTATOM(i) ((LPCSTR)(uintptr_t)(WORD)(i))
 #define IS_INTRESOURCE(p) (((uintptr_t)(p) >> 16) == 0)
 #ifndef max
 #define max(a, b) ((a) > (b) ? (a) : (b))
@@ -386,6 +387,7 @@ typedef struct {
 #define GCW_HBRBACKGROUND (-10)
 #define GCW_HCURSOR (-12)
 #define GCW_HICON (-14)
+#define GCL_WNDPROC (-24)
 
 /* GetWindow */
 #define GW_HWNDFIRST 0
@@ -1391,6 +1393,7 @@ WORD SetWindowWord(HWND h, int idx, WORD v);
 intptr_t w16_GetWindowPtr(HWND h, int idx);
 intptr_t w16_SetWindowPtr(HWND h, int idx, intptr_t v);
 LONG GetClassLong(HWND h, int idx);
+intptr_t w16_GetClassPtr(HWND h, int idx); /* GetClassLong(GCL_WNDPROC) etc. at pointer size */
 WORD GetClassWord(HWND h, int idx);
 WORD SetClassWord(HWND h, int idx, WORD v);
 intptr_t w16_SetClassPtr(HWND h, int idx, intptr_t v);

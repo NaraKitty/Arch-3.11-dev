@@ -1085,6 +1085,19 @@ WORD SetWindowWord(HWND h, int i, WORD v)
 }
 LONG GetClassLong(HWND h, int i) { (void)h; (void)i; return 0; }
 WORD GetClassWord(HWND h, int i) { (void)h; (void)i; return 0; }
+/* GetClassLong for what does not fit in 32 bits here: GCL_WNDPROC is the class's window procedure
+ * (COMMDLG's subclass procedures call it rather than the window's own, seg2:1978/1A12) */
+intptr_t w16_GetClassPtr(HWND h, int i)
+{
+    if (!w16_valid(h)) return 0;
+    switch (i) {
+    case GCL_WNDPROC: return (intptr_t)h->cls->wc.lpfnWndProc;
+    case GCW_HBRBACKGROUND: return (intptr_t)h->cls->wc.hbrBackground;
+    case GCW_HCURSOR: return (intptr_t)h->cls->wc.hCursor;
+    case GCW_HICON: return (intptr_t)h->cls->wc.hIcon;
+    }
+    return 0;
+}
 intptr_t w16_SetClassPtr(HWND h, int i, intptr_t v)
 {
     if (!w16_valid(h)) return 0;
@@ -1099,9 +1112,19 @@ intptr_t w16_SetClassPtr(HWND h, int i, intptr_t v)
 WORD SetClassWord(HWND h, int i, WORD v) { return (WORD)w16_SetClassPtr(h, i, v); }
 
 /* ------------------------------------------------------------------ properties */
+/* a property is named by a string or by an integer atom (MAKEINTATOM: COMMDLG keeps its instance
+ * data under atom 0xA000); an atom is kept as "#n", a form no string name uses here */
+static const char *prop_name(LPCSTR name, char *buf)
+{
+    if (!IS_INTRESOURCE(name)) return name;
+    snprintf(buf, 16, "#%u", (unsigned)(uintptr_t)name);
+    return buf;
+}
 BOOL SetProp(HWND h, LPCSTR name, HANDLE v)
 {
+    char atom[16];
     if (!w16_valid(h)) return FALSE;
+    name = prop_name(name, atom);
     for (W16Prop *p = h->props; p; p = p->next)
         if (!strcasecmp(p->name, name)) { p->val = v; return TRUE; }
     W16Prop *p = calloc(1, sizeof *p);
@@ -1113,14 +1136,18 @@ BOOL SetProp(HWND h, LPCSTR name, HANDLE v)
 }
 HANDLE GetProp(HWND h, LPCSTR name)
 {
+    char atom[16];
     if (!w16_valid(h)) return NULL;
+    name = prop_name(name, atom);
     for (W16Prop *p = h->props; p; p = p->next)
         if (!strcasecmp(p->name, name)) return p->val;
     return NULL;
 }
 HANDLE RemoveProp(HWND h, LPCSTR name)
 {
+    char atom[16];
     if (!w16_valid(h)) return NULL;
+    name = prop_name(name, atom);
     for (W16Prop **p = &h->props; *p; p = &(*p)->next)
         if (!strcasecmp((*p)->name, name)) {
             W16Prop *q = *p;
