@@ -1,0 +1,93 @@
+# Calculator: View > Scientific, then results that depend on the FPU (sin 180 shows the x87's
+# 66-bit pi: a host-double FPU gives -1.209802949635e-015 instead)
+# Generated from calc-fpu.scn by tools/ref311/scenario.py w16; reference frames: arch311-ref/shots/calc-fpu,
+# recorded with dosbox-x_MinGWx64_SDL2.exe (its FPU computes with the host x87, as a real 387 would).
+# regress: ARCH311_APP=apps/build/calc sh tools/run-cp-test.sh "$TEST" "$OUT"
+# compare: calc-fpu/01.png 01.png active ignore 320 240 332 260
+# compare: calc-fpu/02.png 02.png active ignore 320 240 332 260
+# compare: calc-fpu/03.png 03.png active ignore 320 240 332 260
+# compare: calc-fpu/04.png 04.png active ignore 320 240 332 260
+# compare: calc-fpu/05.png 05.png active ignore 320 240 332 260
+# compare: calc-fpu/06.png 06.png active ignore 320 240 332 260
+# compare: calc-fpu/07.png 07.png active ignore 320 240 332 260
+# compare: calc-fpu/08.png 08.png active ignore 320 240 332 260
+# compare: calc-fpu/09.png 09.png active ignore 320 240 332 260
+# compare: calc-fpu/10.png 10.png active ignore 320 240 332 260
+# compare: calc-fpu/11.png 11.png active ignore 320 240 332 260
+# compare: calc-fpu/12.png 12.png active ignore 320 240 332 260
+sleep 400
+sleep 400
+shot shots/01.png
+key alt
+key v
+key s
+sleep 400
+shot shots/02.png
+key 1
+key 8
+key 0
+key s
+sleep 400
+shot shots/03.png
+key esc
+key 2
+key n
+sleep 400
+shot shots/04.png
+key esc
+key 2
+key y
+key 0
+key period
+key 5
+key equals
+sleep 400
+shot shots/05.png
+key esc
+key 1
+key i
+key n
+sleep 400
+shot shots/06.png
+key esc
+key 4
+key 5
+key t
+sleep 400
+shot shots/07.png
+key esc
+key 0
+key period
+key 1
+key n
+sleep 400
+shot shots/08.png
+key esc
+key 7
+key l
+sleep 400
+shot shots/09.png
+key esc
+key 1
+key i
+key s
+sleep 400
+shot shots/10.png
+key esc
+key 3
+key period
+key 7
+key y
+key 2
+key period
+key 9
+key equals
+sleep 400
+shot shots/11.png
+key esc
+key 6
+key 0
+key o
+sleep 400
+shot shots/12.png
+quit

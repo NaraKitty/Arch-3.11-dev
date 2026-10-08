@@ -120,11 +120,13 @@ static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC 
     if (!(wstyle & WS_CHILD)) { wx -= fl; wy -= ft; }
     int ww = rc.right + fl + fr, wh = rc.bottom + ft + fb;
     if (!(wstyle & WS_CHILD)) {
-        /* keep on screen */
-        if (wx + ww > w16_screen.w) wx = w16_screen.w - ww;
-        if (wy + wh > w16_screen.h) wy = w16_screen.h - wh;
-        if (wx < 0) wx = 0;
+        /* keep on screen, USER seg24:043D: the bottom edge at most 4 pixels above the screen's
+         * (less the Kanji window, none here), the top on it, the right edge at most 4 pixels inside,
+         * the left on it - Calculator's template asks for x 620 and lands at 154 */
+        if (wy + wh > w16_screen.h - 4) wy = w16_screen.h - 4 - wh;
         if (wy < 0) wy = 0;
+        if (wx + ww > w16_screen.w - 4) wx = w16_screen.w - 4 - ww;
+        if (wx < 0) wx = 0;
     }
     const char *cls = clsname && *clsname ? clsname : "#32770";
     W16Dialog *dd = calloc(1, sizeof *dd);

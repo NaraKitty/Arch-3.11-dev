@@ -552,6 +552,14 @@ static void synth_key(const char *spec)
         else if (!strcasecmp(tok, "pageup")) v = VK_PRIOR;
         else if (!strcasecmp(tok, "pagedown")) v = VK_NEXT;
         else if (!strcasecmp(tok, "insert")) v = VK_INSERT;
+        /* the numeric keypad, as DOSBox-X's AUTOTYPE names its keys */
+        else if (!strcasecmp(tok, "kp_plus")) v = VK_ADD;
+        else if (!strcasecmp(tok, "kp_minus")) v = VK_SUBTRACT;
+        else if (!strcasecmp(tok, "kp_multiply")) v = VK_MULTIPLY;
+        else if (!strcasecmp(tok, "kp_divide")) v = VK_DIVIDE;
+        else if (!strcasecmp(tok, "kp_period")) v = VK_DECIMAL;
+        else if (!strcasecmp(tok, "kp_enter")) v = VK_RETURN;
+        else if (!strncasecmp(tok, "kp_", 3) && isdigit((unsigned char)tok[3]) && !tok[4]) v = VK_NUMPAD0 + tok[3] - '0';
         else if (!strcasecmp(tok, "semicolon")) v = 0xBA;
         else if (!strcasecmp(tok, "equals")) v = 0xBB;
         else if (!strcasecmp(tok, "comma")) v = 0xBC;
@@ -635,6 +643,18 @@ static int script_step(void)
                     fclose(rf);
                 }
             }
+            continue;
+        }
+        if (!strcmp(cmd, "clip")) {
+            /* TEXT onto the clipboard as CF_TEXT, as another program's Edit > Copy would put it */
+            HGLOBAL g = GlobalAlloc(GHND, strlen(arg) + 1);
+            char *d = GlobalLock(g);
+            strcpy(d, arg);
+            GlobalUnlock(g);
+            OpenClipboard(NULL);
+            EmptyClipboard();
+            SetClipboardData(CF_TEXT, g);
+            CloseClipboard();
             continue;
         }
         if (!strcmp(cmd, "quit")) exit(0);

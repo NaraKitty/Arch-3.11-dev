@@ -383,6 +383,7 @@ typedef struct {
 #define DWL_MSGRESULT 0
 #define DWL_DLGPROC 4
 #define DWL_USER 8
+#define DLGWINDOWEXTRA 30 /* window extra bytes a dialog-class window needs */
 #define GCW_HBRBACKGROUND (-10)
 #define GCW_HCURSOR (-12)
 #define GCW_HICON (-14)

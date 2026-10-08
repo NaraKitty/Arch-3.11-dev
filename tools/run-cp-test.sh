@@ -11,10 +11,13 @@
 #   With ARCH311_REF set to the reference rig (the folder with c-pristine), the files are placed in
 #   WINDOWS and SYSTEM exactly as in its pristine install, so directory listings match real 3.11.
 # ARCH311_SIMULATE (default 1), ARCH311_WAVEDEVS (default 0, the rig's DOSBox has no sound card) and
-# ARCH311_CLOCK pass through.
+# ARCH311_CLOCK pass through. ARCH311_APP runs another program the same way (a path from the repo,
+# e.g. ARCH311_APP=apps/build/calc; default apps/build/control).
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
+app=${ARCH311_APP:-apps/build/control}
+case $app in /*) ;; *) app="$repo/$app" ;; esac
 script=$(realpath "$1")
 out=$(realpath -m "${2:-test-out}")
 if [ $# -ge 2 ]; then shift 2; else set --; fi
@@ -39,7 +42,7 @@ fi
 printf 'A=%s\nC=%s\n' "$fx/a" "$fx/c" > "$fx/config/arch311/drives"
 status=0
 XDG_CONFIG_HOME="$fx/config" ARCH311_SIMULATE=${ARCH311_SIMULATE:-1} ARCH311_WAVEDEVS=${ARCH311_WAVEDEVS:-0} \
-    sh "$repo/tools/run-app-test.sh" "$repo/apps/build/control" "$script" "$out" "$*" || status=$?
+    sh "$repo/tools/run-app-test.sh" "$app" "$script" "$out" "$*" || status=$?
 mkdir -p "$out/ini"
 cp "$fx"/config/arch311/*.INI "$out/ini/" 2>/dev/null || true
 echo "INI files after the run: $out/ini"
