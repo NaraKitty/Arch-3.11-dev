@@ -1816,7 +1816,7 @@ static BOOL FileDlgCommand(HWND hDlg, WPARAM wID, LPARAM lParam, PFILEINST p, BO
             RECT rc;
             SendMessage(GetDlgItem(hDlg, edt1), WM_GETTEXT, 0x100, (LPARAM)g_szTmp1);
             i = (int)SendMessage(hLB, LB_FINDSTRING, iCaret, (LPARAM)g_szTmp1);
-            if (i != LB_ERR) {
+            if (i != LB_ERR && g_cyFont) { /* (g_cyFont is set by then; the test keeps a divide by 0 out) */
                 iTop = (int)SendMessage(hLB, LB_GETTOPINDEX, 0, 0L);
                 GetClientRect(hLB, &rc);
                 if ((WORD)i < (WORD)iTop || (WORD)i >= (WORD)(iTop + (WORD)rc.bottom / (WORD)g_cyFont)) {
