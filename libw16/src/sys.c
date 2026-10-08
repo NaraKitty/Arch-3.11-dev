@@ -696,7 +696,7 @@ HFILE OpenFile(LPCSTR name, OFSTRUCT *of, UINT style)
     char h[2048];
     if (of) {
         memset(of, 0, sizeof *of);
-        of->cBytes = sizeof *of;
+        of->cBytes = sizeof *of > 255 ? 255 : sizeof *of; /* BYTE field; our szPathName is 260 */
         of->fFixedDisk = 1;
         full_dos_path(name, of->szPathName, sizeof of->szPathName);
     }

@@ -292,8 +292,11 @@ static int vk_to_char(int vk, int shift, int ctrl, int caps)
 {
     if (ctrl) {
         if (vk >= 'A' && vk <= 'Z') return vk - 'A' + 1;
-        if (vk == 0xDB) return 27; if (vk == 0xDC) return 28; if (vk == 0xDD) return 29;
-        if (vk == VK_BACK) return 127; if (vk == VK_RETURN) return 10;
+        if (vk == 0xDB) return 27;
+        if (vk == 0xDC) return 28;
+        if (vk == 0xDD) return 29;
+        if (vk == VK_BACK) return 127;
+        if (vk == VK_RETURN) return 10;
         return 0;
     }
     if (vk >= 'A' && vk <= 'Z') return (shift ^ caps) ? vk : vk + 32;

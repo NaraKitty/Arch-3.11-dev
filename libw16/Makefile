@@ -1,7 +1,7 @@
 # libw16 - native Win16 USER/GDI/KERNEL reimplementation (64-bit, SDL2)
 CC ?= cc
 CFLAGS ?= -O2 -g
-CFLAGS += -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Wno-missing-field-initializers \
+CFLAGS += -std=gnu11 -D_GNU_SOURCE -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Wno-missing-field-initializers \
           -Iinclude $(shell sdl2-config --cflags)
 SRC := $(wildcard src/*.c)
 OBJ := $(SRC:src/%.c=build/%.o)
