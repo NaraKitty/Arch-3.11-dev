@@ -97,7 +97,7 @@
 #define HC_INSTALLDRV 0x21FF
 
 #define DLGC_NOTBUTTON_MASK 0xDF
-#define CONTROL_INI "CONTROL.INI"
+#define CONTROL_INI szControlIni /* [0xE7C] "<Windows directory>\control.ini" */
 
 /* +0 dns, +2 retry, +4 driver[16], +0x14 port, +0x16 name, +0x18 "Name\0Port\0" in 3.1; the
  * offsets are pointers here and the port has room for any port name */
@@ -186,19 +186,8 @@ static LPSTR StrRStr(LPCSTR s, LPCSTR pat)
     return NULL;
 }
 
-/* seg4:019E: leading and trailing blanks (spaces only) removed in place */
-static void TrimSpaces(LPSTR s)
-{
-    LPSTR p = s;
-    while (*p == ' ') p++;
-    if (p != s) memmove(s, p, strlen(p) + 1);
-    p = s + strlen(s);
-    if (p != s) {
-        p--;
-        while (p >= s && *p == ' ') p--;
-        p[1] = 0;
-    }
-}
+/* (TrimSpaces seg4:019E, StrNCmpPrefix seg4:02B4 and ConfirmRemove seg6:0000 are shared,
+ * main_cpl.c) */
 
 /* seg1:184F: unsigned decimal, digits only, 16-bit */
 static WORD StrToUInt(LPCSTR s)
@@ -206,24 +195,6 @@ static WORD StrToUInt(LPCSTR s)
     WORD n = 0;
     for (; (BYTE)(*s - '0') <= 9; s++) n = (WORD)(n * 10 + (*s - '0'));
     return n;
-}
-
-/* seg4:02B4: signed compare of up to n chars, stopping at a NUL in either string */
-static int StrNCmpSigned(LPCSTR a, LPCSTR b, int n)
-{
-    for (int i = 0; i < n && a[i] && b[i]; i++) {
-        if ((signed char)b[i] > (signed char)a[i]) return -1;
-        if ((signed char)b[i] < (signed char)a[i]) return 1;
-    }
-    return 0;
-}
-
-/* seg1:061C: a backslash at the end ("" becomes "\"); returns the end */
-static LPSTR AddBackslash(LPSTR s)
-{
-    LPSTR e = s + strlen(s);
-    if (!*s || e[-1] != '\\') { *e++ = '\\'; *e = 0; }
-    return e;
 }
 
 /* seg12:178F: the text between the first two '"' */
@@ -241,15 +212,6 @@ static int GetQuotedField(LPSTR dst, LPCSTR src)
     return n;
 }
 
-/* seg6:0000 (Color applet's code): "Are you sure ...?" boxes */
-static BOOL ConfirmBox(HWND hwnd, LPCSTR arg, int idFmt)
-{
-    char fmt[0x9E], buf[0x186];
-    LoadString(hInstMain, idFmt, fmt, sizeof fmt);
-    wsprintf(buf, fmt, arg);
-    return MessageBox(hwnd, buf, szCaption, MB_YESNO | MB_ICONEXCLAMATION) == IDYES;
-}
-
 /* arch311: a CUPS tool failed; its message in the box MAIN.CPL shows its errors in */
 static void CupsError(HWND hwnd)
 {
@@ -264,8 +226,8 @@ static BOOL SameDevice(LPCSTR a, LPCSTR b)
 }
 
 /* ------------------------------------------------------------------ seg20:04A0 / 04D3 */
-static BOOL IsComPort(LPCSTR s) { return lstrlen(s) == 5 && !StrNCmpSigned(s, "COM", 3); }
-static BOOL IsLptPort(LPCSTR s) { return lstrlen(s) == 5 && !StrNCmpSigned(s, "LPT", 3); }
+static BOOL IsComPort(LPCSTR s) { return lstrlen(s) == 5 && !StrNCmpPrefix(s, "COM", 3); }
+static BOOL IsLptPort(LPCSTR s) { return lstrlen(s) == 5 && !StrNCmpPrefix(s, "LPT", 3); }
 
 /* ------------------------------------------------------------------ seg20:0000 */
 /* (Setup mode says "Continue": not ported) */
@@ -1142,7 +1104,7 @@ static void RemovePrinter(HWND hDlg)
     SendMessage(hListInstalled, LB_GETTEXT, iSel, (LPARAM)text);
     PRINTERINFO *p = GetPrinterInfo(hListInstalled, iSel);
     if (!p) { MyMessageBox(hDlg, 0, 1, MB_ICONASTERISK); return; }
-    if (ConfirmBox(hDlg, p->name, 237)) { /* "Are you sure you want to remove the %s printer?" */
+    if (ConfirmRemove(hDlg, p->name, 237)) { /* "Are you sure you want to remove the %s printer?" */
         /* 3.1 deletes the entry and then tells the driver (CallDevInstall with no new port) when no
          * other entry has the text; the queue goes first here, so a refusal keeps the entry */
         if (!cups_delete_queue(p->name)) {
@@ -1595,7 +1557,7 @@ static BOOL InstallDriverDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
         if (wParam == IDOK) {
             GetDlgItemText(hDlg, IDC_DRVPATH, szInstallPath, 0x9E);
             TrimSpaces(szInstallPath);
-            AddBackslash(szInstallPath);
+            AddBackslash(szInstallPath); /* (3.1: seg1:061C, the same for a path) */
             EndDialog(hDlg, 1);
             return TRUE;
         }

@@ -1,4 +1,6 @@
 # Keyboard applet (MAIN.CPL dialog 5): tools/run-cp-test.sh apps/control/tests/keyboard.w16 OUT Keyboard
+# regress: sh tools/run-cp-test.sh "$TEST" "$OUT" Keyboard
+# compare: keyboard/02.png 04-test.png active
 sleep 600
 shot shots/01-keyboard.png
 key right

@@ -56,12 +56,30 @@ static HICON load_group(HINSTANCE m, LPCSTR name, int cursor)
     if (!g) return NULL;
     const uint8_t *d = w16_res_data(m, g);
     int n = u16(d + 4), best = -1, bestscore = -1;
+    if (!cursor) {
+        /* an icon: the image nearest the 32x32 icon size, then the one whose colour count is
+         * nearest the VGA display's 16 (VGA.DRV's OIC_NOTE has an 8-colour image in bright blue
+         * and a 16-colour one in dark blue; 3.11 shows the dark blue one) */
+        int bestd = 1 << 30, bestc = 1 << 30;
+        for (int i = 0; i < n; i++) {
+            const uint8_t *e = d + 6 + i * 14;
+            int w = e[0] ? e[0] : 256, h = e[1] ? e[1] : 256, dd = abs(32 - w) + abs(32 - h);
+            if (dd < bestd) bestd = dd;
+        }
+        for (int i = 0; i < n; i++) {
+            const uint8_t *e = d + 6 + i * 14;
+            int w = e[0] ? e[0] : 256, h = e[1] ? e[1] : 256, bpp = u16(e + 6);
+            if (abs(32 - w) + abs(32 - h) != bestd) continue;
+            int ncol = e[2] ? e[2] : (bpp && bpp < 8 ? 1 << bpp : 256);
+            if (abs(16 - ncol) < bestc) { bestc = abs(16 - ncol); best = u16(e + 12); }
+        }
+        n = 0;
+    }
     for (int i = 0; i < n; i++) {
         const uint8_t *e = d + 6 + i * 14;
         int w, h, bpp, id = u16(e + 12);
-        if (cursor) { w = u16(e); h = u16(e + 2) / 2; bpp = u16(e + 6); }
-        else { w = e[0] ? e[0] : 256; h = e[1] ? e[1] : 256; bpp = u16(e + 6); if (!bpp) bpp = e[2] == 2 ? 1 : 4; }
-        /* VGA: prefer 32x32 at <=4 bpp, like the display driver's icon selection */
+        w = u16(e); h = u16(e + 2) / 2; bpp = u16(e + 6);
+        /* VGA: prefer 32x32 at <=4 bpp, like the display driver's cursor selection */
         int score = (w == 32 && h == 32 ? 100 : 0) + (bpp <= 4 ? bpp * 4 : 1);
         if (score > bestscore) { bestscore = score; best = id; }
     }

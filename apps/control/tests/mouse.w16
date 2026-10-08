@@ -1,5 +1,7 @@
 # Mouse applet (MAIN.CPL dialog 6): tools/run-cp-test.sh apps/control/tests/mouse.w16 OUT Mouse
 # Same keys as arch311-ref/scn/mouse.scn
+# regress: sh tools/run-cp-test.sh "$TEST" "$OUT" Mouse
+# compare: mouse/02.png 01-mouse.png active
 sleep 600
 shotcaret shots/01-mouse.png
 key right

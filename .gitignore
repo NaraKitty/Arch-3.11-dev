@@ -54,6 +54,15 @@ work/
 *.bmp
 *.BMP
 *.asm
+# 3.1 settings files (test runs seed them from the ripped .SRC templates) and screenshots
+*.INI
+*.ini
+*.SRC
+*.GRP
+*.grp
+*.png
+*.PNG
+test-out/
 
 # ---------------------------------------------------------------- build output
 build/

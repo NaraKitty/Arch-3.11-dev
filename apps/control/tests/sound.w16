@@ -1,5 +1,10 @@
 # Sound applet (SND.CPL dialog 42): opened by name
 # Run through tests/sound.sh. Same keys as arch311-ref/scn/sound.scn
+# regress: sh apps/control/tests/sound.sh "$TEST" "$OUT"
+# compare: sound/02.png 01-sound.png active ignore 320 240 333 261
+# compare: sound/03.png 02-cancel.png active ignore 320 240 333 261
+# compare: sound/04.png 03-help.png active ignore 320 240 333 261
+# compare: sound/05.png 04-enable.png active ignore 320 240 333 261
 sleep 600
 shot shots/01-sound.png
 key down

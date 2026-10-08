@@ -1,5 +1,6 @@
 # Sound applet Test button: ARCH311_WAVEDEVS=1 sh tests/sound.sh tests/sound3.w16 - headless runs
 # log "sndPlaySound plays C:\WINDOWS\CHORD.WAV" (Asterisk's file) instead of playing it
+# regress: ARCH311_WAVEDEVS=1 sh apps/control/tests/sound.sh "$TEST" "$OUT"
 sleep 600
 key alt+t
 sleep 300

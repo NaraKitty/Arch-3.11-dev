@@ -19,8 +19,11 @@ agents can continue.
 6. Append to ADRs in `docs/DECISIONS.md`; do not silently change decisions.
 
 ## Current state
-**Latest (session 3): Notepad runs end to end on Linux** (`make -C apps`, then
-`tools/run-app-test.sh apps/build/notepad apps/notepad/tests/smoke.w16`). See the session 3 log below.
+**Latest (session 6): Notepad and the Control Panel run natively on libw16 (C + SDL2)** - CONTROL.EXE
+with MAIN.CPL's Mouse, Keyboard, Date & Time and Ports, SND.CPL's Sound, and arch311's own Network and
+Volume applets - pixel-identical to real 3.11 wherever compared. Build: `make -C apps`. Regression
+against the real-3.11 reference rig (see session 6): `ARCH311_REF=<rig folder> tools/regress.sh` runs
+every test with a `# regress:` line and checks its `# compare:` frames and `# ini:` values (~30 s).
 The session-1 notes that follow are historical; `docs/`, `tools/extract_media.py`, `make-profile.sh`
 etc. are referenced but were never committed - `tools/rip` replaced the extraction tooling.
 
@@ -373,3 +376,48 @@ selection when the focus leaves (seg33 kill-focus helper). SLKeyDown (seg28:0A93
 F4, Page Up/Down and Up/Down to the combo; other single-line edits move Up/Down as Left/Right and ignore
 Page Up/Down. SLInsertText (seg28:0719): without ES_AUTOHSCROLL a single-line edit accepts only what fits
 beside the rest of the text (EN_MAXTEXT for the rest). Ports frames unchanged (pixel-identical dialogs).
+tools/regress.sh: one command for the whole regression against real 3.11 (WSL: `ARCH311_REF=/mnt/c/Users/
+pikac/arch311-ref tools/regress.sh [-j N] [-o OUT] [-n] [TESTS...]`). A test opts in with a `# regress:`
+line (its command, "$TEST" and "$OUT" quoted), names reference frames with `# compare: REF.png SHOT.png
+[active | x0 y0 x1 y1] [ignore x0 y0 x1 y1]... [max N]` and INI results with `# ini: FILE SECTION
+KEY=VALUE`. `shot`/`shotcaret` now also append the active window's rectangle to shots/rects.txt, so
+"active" crops both frames to the window under test (the Control Panel behind it and the rig's mouse
+pointer, which sits at 320,240, stay out). First run: 30 checks in 30 s, all PASS (Ports both
+scenarios, Sound with and without a wave device, Keyboard, Mouse, Notepad hello; INI values for Ports
+and Sound). New applet tests should carry these lines; I merge branches only with the run green.
+
+### Session 7 (Oct 8) - Desktop applet (MAIN.CPL seg18), desktop pattern and wallpaper in libw16
+apps/control/desktop.c ports dialog 8 "Desktop" (seg18:1419) and dialog 34 "Edit Pattern" (seg18:03A0)
+with all their seg18 helpers; main_cpl.c gains the seg1/seg4/seg6/seg9 helpers they share (IntToStr,
+TrimSpaces, AddBackslash, StrStrI, FindIniKeyByValue, ConfirmRemove, ...); StepField (seg2:0664) moved
+to arrow.c for every cpArrow user. Settings go through SystemParametersInfo with 3.1's SPIF flags and
+land in WIN.INI / CONTROL.INI / SYSTEM.INI byte for byte as real 3.11 writes them (KERNEL's
+WriteProfileString rules: an existing key keeps its spelling, a new key goes after the section's last
+non-blank line). Screen savers are listed from their NE module description, read as data, never run:
+Test and Setup do nothing (TODO: native screen savers).
+libw16: SPI border width / icon spacing / title wrap / grid / screen saver / CoolSwitch / pattern /
+wallpaper as USER seg41:0ED6 (writes only when changed, WM_WININICHANGE only when written); the desktop
+paints its pattern brush (16 numbers, top-left 8x8, clear bits COLOR_BACKGROUND) and the wallpaper tiled
+or centred (USER seg21); a new border width resizes sizable windows; pattern brushes follow the DC origin;
+DrawText keeps a line's first word whole; gray text stipple from the text origin; SBS_TOPALIGN bars;
+CB_DIR; find-first/next for DOS listings; a radio group is entered at its checked button; push-button
+mnemonics click without taking the focus; a dialog without the activation shows no default button; group
+boxes are HTTRANSPARENT and the hit test goes on to the sibling below (spin arrows inside group boxes); a
+drop-down list answers WM_SETTEXT / WM_GETTEXTLENGTH with CB_ERR (seg33:05AE); a combo selects its edit's
+text on CB_SETCURSEL only while focused (seg33:1053); icons: the image nearest 32x32, then the colour
+count nearest 16 (VGA.DRV's "i" box icon is dark blue on 3.11); script shots left when the program ends
+are taken of the screen it leaves (the wallpaper after OK); regress.sh matches "[boot]   " headers.
+Verified (regress.sh, WSL): `ARCH311_REF=/mnt/c/Users/pikac/arch311-ref tools/regress.sh` -> 89 checks,
+all PASS, including 6 Desktop tests against reference runs desk-open, desk-pattern, desk-spin,
+desk-editpat, desk-nowall, desk-center (32 frame checks: every captured dialog frame 0 px apart, the
+desktop after OK 0 px apart outside the real Control Panel; 27 WIN.INI / SYSTEM.INI / CONTROL.INI
+values). Whole-file INI comparisons differ only in the rig's shell=control.exe and NumApps. Not compared:
+message box 215 (libw16's MessageBox is not USER's seg42:04F5 layout: the real box is wider/narrower,
+wraps at a 312 px text limit and centres differently); the rig dropped some frames (noted per test).
+UNTESTED against 3.11: the spin arrows by mouse (desktop-arrows.w16, port only), dropped files,
+Idle-Wild savers, 256-colour wallpapers, minimised windows on a border change, and every effect of the
+stored-only settings (icon spacing / wrap, sizing grid, Alt+Tab, starting a screen saver).
+NEXT: USER's MessageBox layout (seg42:04F5: text limit cxScreen/8*5 - 2*(cyBorder + cxSize) - icon
+space, sizes through dialog units; DrawText's CALCRECT width of a wrapped line includes its break space;
+open: two real boxes 384 and 388 px wide both have their left edge at x=128, client at 133, which the
+dialog-unit path (client x = 2 * units) cannot give); then the desktop settings' effects in the WM.

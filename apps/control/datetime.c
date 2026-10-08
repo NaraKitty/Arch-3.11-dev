@@ -24,12 +24,9 @@ enum { F_HOUR, F_MIN, F_SEC, F_MONTH, F_DAY, F_YEAR, NFIELDS };
 #define IDC_TIMEGROUP 715
 #define TIMER_CLOCK 2
 
-int AdjustArrowWidth(HWND h);   /* arrow.c */
-
 /* ds:04BE: per field the steps for SB_LINEUP/LINEDOWN/PAGEUP/PAGEDOWN, the range, the values codes 4
  * and 5 jump to, and the flags seg2:0664 leaves (2 = passed the top, 4 = passed the bottom) */
-typedef struct { int step[4], max, min, v4, v5; int flag; } Field;
-static Field aField[NFIELDS] = {
+static ARROWSTEP aField[NFIELDS] = {
     {{1, -1, 5, -5}, 23, 0, 12, 12, 0},
     {{1, -1, 5, -5}, 59, 0, 30, 30, 0},
     {{1, -1, 5, -5}, 59, 0, 30, 30, 0},
@@ -327,30 +324,6 @@ static void ReadField(HWND hDlg, int i)
     else SetDate();
 }
 
-/* ------------------------------------------------------------------ seg2:0664
- * one step of a field: the step or jump for the scroll code, kept in range (flag 2 / 4 when it
- * went past the top / bottom) */
-static int StepField(int v, int code, Field *f)
-{
-    int d = 0;
-    switch (code) {
-    case SB_LINEUP: d = f->step[0]; break;
-    case SB_LINEDOWN: d = f->step[1]; break;
-    case SB_PAGEUP: d = f->step[2]; break;
-    case SB_PAGEDOWN: d = f->step[3]; break;
-    case SB_THUMBPOSITION: v = f->v4; break;
-    case SB_THUMBTRACK: v = f->v5; break;
-    case SB_TOP: v = f->max; break;
-    case SB_BOTTOM: v = f->min; break;
-    case SB_ENDSCROLL: break;
-    default: f->flag = 1; break;   /* (overwritten below) */
-    }
-    if (v + d > f->max) { f->flag = 2; return f->max; }
-    if (v + d < f->min) { f->flag = 4; return f->min; }
-    f->flag = 0;
-    return v + d;
-}
-
 static BOOL IsNumber(HWND hDlg, int id)
 {
     char t[5];
@@ -460,7 +433,7 @@ BOOL DateTimeDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
             if (fPM) v += 12;
             if (v % 12 == 0) v -= 12;
         }
-        aValue[i] = StepField(v, (int)wParam, &aField[i]);
+        aValue[i] = StepField((int)wParam, v, &aField[i]);
         if (aField[i].flag & 4) aValue[i] = aField[i].max;          /* below the bottom: wrap */
         else if (aField[i].flag & 2) aValue[i] = aField[i].min;
         if (i == F_HOUR) fPM = aValue[F_HOUR] >= 12;
