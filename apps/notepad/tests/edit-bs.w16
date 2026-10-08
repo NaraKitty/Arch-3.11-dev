@@ -1,0 +1,48 @@
+# Notepad: Backspace and Delete joining lines, Undo from the Edit menu (twice: undo of the undo)
+# Reference: real 3.11 Notepad typing the same keys (arch311-ref/scn/edit-bs.scn, frames shots/edit-bs);
+# frames where 3.11 only moved the caret are merged by the recorder, so some shots have none.
+# regress: sh tools/run-app-test.sh apps/build/notepad "$TEST" "$OUT"
+# compare: edit-bs/02.png 01.png active ignore 316 228 333 261
+# compare: edit-bs/03.png 02.png active ignore 316 228 333 261
+# compare: edit-bs/04.png 03.png active ignore 316 228 333 261
+# compare: edit-bs/05.png 04.png active ignore 316 228 333 261
+# compare: edit-bs/06.png 05.png active ignore 316 228 333 261
+# compare: edit-bs/07.png 06.png active ignore 316 228 333 261
+sleep 400
+key a
+key b
+key c
+key enter
+key d
+key e
+key f
+key home
+key bs
+sleep 400
+shotcaret shots/01.png
+key enter
+sleep 400
+shotcaret shots/02.png
+key up
+key end
+key del
+sleep 400
+shotcaret shots/03.png
+key alt
+key e
+key u
+sleep 400
+shotcaret shots/04.png
+key x
+key y
+key bs
+key bs
+key bs
+sleep 400
+shot shots/05.png
+key alt
+key e
+key u
+sleep 400
+shotcaret shots/06.png
+quit
