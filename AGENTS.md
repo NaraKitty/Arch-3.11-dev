@@ -51,6 +51,8 @@ NOTHING BOOTS YET.
 | T-SB-01 | bwrap + seccomp + Landlock launcher, virtual C:\\ | |
 | T-BR-01 | QtWebEngine browser with IE5 chrome; T-BR-02 Netscape chrome | ADR-003 |
 | T-APP-nn | Optional clean-room native ports (Notepad, Calc, Clock, Winmine, Sol) | Respect `docs/LEGAL.md` |
+| T-DOS-01 | MS-DOS Prompt starts the built-in DOSBox (C: = arch311's C: drive, 3.11's prompt banner) | ADR-006; needs DOSBox installed |
+| T-TERM-01 | Port TERMINAL.EXE with a pseudo-terminal back end: the Linux terminal in 3.11's Terminal look | ADR-006 |
 
 ## Known quirks and findings
 - The media is **Windows for Workgroups 3.11** (NetWare/WINPOPUP files present), not plain 3.11.
@@ -484,6 +486,33 @@ FreeType's; glyph positions and metrics match); CLOCK.INI values as 3.11 writes 
 after the merge: 106 checks, all PASS. UNTESTED: the ChooseFont dialog, TrueType cases Clock does not use
 (positive lfHeight/VDMX cell lookup, lfWidth, simulated bold/italic, symbol fonts, underline/strikeout),
 EnumFonts listing TrueType faces, flat digits on true-colour displays, -ldl on glibc < 2.34.
+
+### Session 7 (Oct 8) - Minesweeper (WINMINE.EXE)
+apps/winmine/winmine.c ports WINMINE.EXE (seg1) function by function, each commented with its offset:
+board, LED counters and face from the program's own colour/monochrome DIBs (Color option, NUMCOLORS),
+timer, first click (a mine there moves to the first free box from the top left), flags and "?" marks,
+chording, the 100-entry open-area queue, Custom Field, Best Times, the name prompt, F4 sound / F5-F6
+menu bar / Esc boss key / XYZZY, sounds through the SOUND voice API, and WINMINE.INI [Minesweeper]
+(3.1 keeps nothing in WIN.INI) read with 3.1's clamps and written in its order. Mines come from MS C's
+rand() (holdrand*214013+2531011, >>16 & 0x7FFF) seeded with LOWORD(GetCurrentTime()); WINMINE_SEED=N
+(read only in InitConst) fixes the seed - apps/winmine/tests/run.sh sets 1, W16_COLORS=16, a private
+config and an optional seeded WINMINE.INI. libw16: CreateDIBitmap, SetDIBitsToDevice (banded), the
+SOUND voice API after MMSOUND.DRV (square wave via sndPlaySound), GetLastActivePopup, ShellAbout as
+SHELL.DLL seg9:013A, menu check mark/GRAYTEXT shadow (seg10:0333), SetWindowPos WM_MOVE/WM_SIZE when
+only the client moves (SetMenu), CreateWindow keeps WS_MINIMIZE windows hidden (seg8:0843), window sizes
+clamped to USER's MINMAXINFO (seg6:1A4F/seg1:0000 in CreateWindow before WM_NCCREATE and in
+DefWindowProc WM_WINDOWPOSCHANGING), WM_PAINTICON / WM_ICONERASEBKGND for icons of classes with an
+icon, icon places stick only when the user moved the icon (seg6:1BC2/123B), script rclick/mclick/
+down/up with shift/ctrl.
+Verified (regress.sh): scenarios a-h against rig runs winmine-a..h - start, Game/Help menus, levels,
+Custom Field 24x20, Best Times seeded/reset, monochrome + Marks off + About (user name and memory figures
+ignored), Menu=1 with F6/F5, Esc to an icon with its title, a 30x24 board (window cut to 484 when created
+minimized, 488 when resized) - every frame 0 px apart outside the rig's pointer; WINMINE.INI
+byte-identical to real 3.11's in b, c, d2, e, f, h. Mouse play (g1, g3) checked pixel for pixel against
+a Python model of the decode (session scratchpad, not committed): 0 px. Whole suite: 177 checks, PASS.
+UNTESTED against 3.11 (the rig cannot click): mouse play, winning, the name prompt (g2 runs port-only),
+the sound itself, EGA (640x350) bitmaps, WinHelp, XYZZY; true-colour displays make WINMINE choose the
+monochrome bitmaps (NUMCOLORS -1) as 3.1 would - tests run with W16_COLORS=16.
 
 ### Session 9 (Oct 8, Drivers worktree) - DRIVERS.CPL, installable drivers, VER.DLL
 Drivers applet (apps/control/drvcpl.c = DRIVERS.CPL seg1 + seg2, every live function: dialogs 1001

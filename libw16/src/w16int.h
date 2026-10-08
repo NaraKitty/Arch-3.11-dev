@@ -225,11 +225,14 @@ void w16_invalidate_window(HWND h, const RECT *screen_r, int erase, int nc);
 HWND w16_next_to_paint(HWND root);
 int w16_any_paint_pending(void);
 void w16_set_window_rect(HWND h, const RECT *rw, UINT swp);
+void w16_get_minmax_info(HWND h, MINMAXINFO *mm);       /* USER seg6:1A4F (sends WM_GETMINMAXINFO) */
+void w16_clamp_window_size(HWND h, int *cx, int *cy);    /* USER seg1:0000 */
 HWND w16_top_level(HWND h);
 HWND w16_window_under(HWND h, POINT pt); /* hit testing past an HTTRANSPARENT window */
 int w16_window_visible(HWND h); /* visible including ancestors */
 void w16_activate(HWND h, int how);
 void w16_send_paint_cascade(HWND h); /* UpdateWindow semantics */
+UINT w16_paint_msg(HWND h);          /* WM_PAINT, or WM_PAINTICON for an icon with a class icon */
 void w16_destroy_children(HWND h);
 
 /* non-client */
@@ -247,6 +250,9 @@ void w16_track_sb(HWND h, HWND notify, int bar, int x, int y, int ctl);
 void w16_draw_sb_ctl(HDC dc, const RECT *r, int vert, W16Scroll *s, int pressed, int enabled_win, HWND bg);
 int w16_sb_hit(const RECT *r, int vert, W16Scroll *s, int x, int y, RECT *part);
 void w16_iconic_paint(HWND h);
+/* USER's internal WINDOWPOS flags (WM_WINDOWPOSCHANGED): the client area kept its size / place */
+#define W16_SWP_NOCLIENTSIZE 0x0800
+#define W16_SWP_NOCLIENTMOVE 0x1000
 int w16_icon_title_rect(HWND h, RECT *r);   /* screen rectangle of an icon's title (0: not an icon) */
 void w16_invalidate_icon_title(HWND h);
 void w16_paint_icon_titles(HDC desktop_dc); /* the desktop's WM_PAINT draws the icon titles */

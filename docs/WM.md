@@ -59,6 +59,6 @@ operating system needs one screen shared by every program, ported or native.
 2. System menu, minimise to desktop icons, maximise/restore, Arrange Icons; desktop wallpaper/pattern.
 3. libw16 per-window presentation on X11; ported programs managed by `arch311-wm`.
 4. Task List (TASKMAN.EXE port), Alt+Tab / Alt+Esc / Ctrl+Esc, Program Manager as the shell, the
-   MS-DOS Prompt item starting the Linux terminal emulator.
+   MS-DOS Prompt item starting the built-in DOSBox and Terminal as the Linux terminal (ADR-006).
 5. GTK and Qt styles.
 6. Switching themes at run time.

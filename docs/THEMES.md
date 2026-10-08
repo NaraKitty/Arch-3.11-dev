@@ -54,7 +54,8 @@ new pieces drawn in the theme's style, such as the Volume, Network and Internet 
 4. **Toolkit styles**: a GTK theme (CSS + assets generated from the theme's measurements) and a Qt
    style, so scroll bars, buttons, check boxes and menus inside Linux applications match.
 5. **Shell and system**: the start-up screen, Program Manager (3.11) or Explorer (95+), sounds.
-   The MS-DOS Prompt item launches the user's Linux terminal emulator.
+   The MS-DOS Prompt item starts the built-in DOSBox; Terminal is the Linux terminal in 3.11's
+   Terminal look (ADR-006).
 
 ## Browsers
 

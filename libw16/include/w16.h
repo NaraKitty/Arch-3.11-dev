@@ -1391,6 +1391,7 @@ void ReleaseCapture(void);
 HWND WindowFromPoint(POINT pt);
 HWND ChildWindowFromPoint(HWND parent, POINT pt);
 HWND FindWindow(LPCSTR cls, LPCSTR title);
+HWND GetLastActivePopup(HWND h);
 LONG GetWindowLong(HWND h, int idx);
 LONG SetWindowLong(HWND h, int idx, LONG v);
 WORD GetWindowWord(HWND h, int idx);
@@ -1460,6 +1461,28 @@ void MessageBeep(UINT t);
 #define SND_NOSTOP 0x0010
 BOOL sndPlaySound(LPCSTR sound, UINT flags);
 UINT waveOutGetNumDevs(void);
+/* SOUND: the 3.x voice interface as 3.11's MMSOUND.DRV (SYSTEM.INI [boot] sound.drv) provides it -
+ * one voice on the PC speaker, played through the sound server (sound.c) */
+#define S_NORMAL 0
+#define S_LEGATO 1
+#define S_STACCATO 2
+#define S_SERDVNA (-1)
+#define S_SEROFM (-2)
+#define S_SERMACT (-3)
+#define S_SERQFUL (-4)
+#define S_SERBDNT (-5)
+#define S_SERDTP (-8)
+#define S_SERDMD (-10)
+#define S_SERDPT (-12)
+#define S_SERDFQ (-13)
+int OpenSound(void);
+void CloseSound(void);
+int SetVoiceQueueSize(int voice, int bytes);
+int SetVoiceNote(int voice, int value, int length, int cdots);
+int SetVoiceAccent(int voice, int tempo, int volume, int mode, int pitch);
+int StartSound(void);
+int StopSound(void);
+int CountVoiceNotes(int voice);
 BOOL Yield(void);
 BOOL GetInputState(void);
 
@@ -1761,6 +1784,28 @@ int AddFontResource(LPCSTR file);
 #define SIMPLEREGION 2
 #define COMPLEXREGION 3
 #define ERROR 0
+
+/* device-independent bitmaps, laid out as in resources and .BMP files (40-byte header, then the
+ * colour table). libw16 reads the header byte by byte, so a pointer into resource data works. */
+typedef struct {
+    DWORD biSize;
+    LONG biWidth, biHeight;
+    WORD biPlanes, biBitCount;
+    DWORD biCompression, biSizeImage;
+    LONG biXPelsPerMeter, biYPelsPerMeter;
+    DWORD biClrUsed, biClrImportant;
+} BITMAPINFOHEADER, *LPBITMAPINFOHEADER;
+typedef struct { BYTE rgbBlue, rgbGreen, rgbRed, rgbReserved; } RGBQUAD;
+typedef struct { BITMAPINFOHEADER bmiHeader; RGBQUAD bmiColors[1]; } BITMAPINFO, *LPBITMAPINFO;
+#define BI_RGB 0L
+#define CBM_INIT 0x04L
+#define DIB_RGB_COLORS 0
+#define DIB_PAL_COLORS 1
+/* a bitmap in the device's format from a DIB (CBM_INIT: with its pixels) */
+HBITMAP CreateDIBitmap(HDC dc, const BITMAPINFOHEADER *bih, DWORD init, const void *bits, const BITMAPINFO *bmi, UINT usage);
+/* scan lines start..start+lines-1 of a bottom-up DIB, source rectangle (xsrc, ysrc) lower left */
+int SetDIBitsToDevice(HDC dc, int x, int y, int cx, int cy, int xsrc, int ysrc, UINT start, UINT lines,
+                      const void *bits, const BITMAPINFO *bmi, UINT usage);
 
 /* SHELL */
 UINT DragQueryFile(HANDLE drop, UINT i, LPSTR buf, UINT cb);
