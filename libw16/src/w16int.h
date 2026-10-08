@@ -144,6 +144,7 @@ struct W16Font {
 W16Font *w16_font_realize(const LOGFONT *lf);
 W16Font *w16_font_system(void);
 int w16_text_width(W16Font *f, const char *s, int n);
+int w16_ave_char_width(HDC dc, TEXTMETRIC *tm); /* USER's average width (GetDialogBaseUnits) */
 void w16_draw_text_dev(HDC dc, W16Font *f, int x, int y, const char *s, int n, uint32_t fg,
                        const int *dx, int charextra);
 void w16_fonts_init(void);
@@ -151,6 +152,7 @@ W16Font *w16_dc_font(HDC dc);
 
 /* ------------------------------------------------------------------ USER: windows */
 #define W16_WND_MAGIC 0x57314E44u
+#define W16_ES_COMBOBOX 0x0200L  /* USER's internal edit style: the edit of a combo box */
 typedef struct W16Class {
     WNDCLASS wc;
     char name[64];

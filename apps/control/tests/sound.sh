@@ -7,7 +7,7 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
 out=$(realpath -m "${2:-test-out}")
-sh "$repo/tools/run-cp-test.sh" "${1:-$here/sound.w16}" "$out"
+sh "$repo/tools/run-cp-test.sh" "${1:-$here/sound.w16}" "$out" Sound
 echo "--- WIN.INI after the test:"
 grep -i -A9 '^\[sounds\]' "$out/ini/WIN.INI" || true
 grep -i '^beep=' "$out/ini/WIN.INI" || true

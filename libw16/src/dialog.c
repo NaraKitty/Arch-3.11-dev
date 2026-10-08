@@ -14,18 +14,24 @@ W16Dialog *w16_dlg(HWND h)
 }
 
 /* ------------------------------------------------------------------ base units */
+/* USER's average character width of the DC's font (seg2:03A4; the edit control uses it too):
+ * tmAveCharWidth for a fixed-pitch font, else the extent of "a".."z" and "A".."Z" over 26, plus one,
+ * halved */
+int w16_ave_char_width(HDC dc, TEXTMETRIC *tm)
+{
+    GetTextMetrics(dc, tm);
+    if (!(tm->tmPitchAndFamily & 1)) return tm->tmAveCharWidth;
+    const char *s = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    return ((LOWORD(GetTextExtent(dc, s, 52)) / 26) + 1) / 2;
+}
+
 static void char_dims(HFONT f, int *cx, int *cy)
 {
     HDC dc = GetDC(NULL);
     HGDIOBJ old = SelectObject(dc, f ? f : GetStockObject(SYSTEM_FONT));
     TEXTMETRIC tm;
-    GetTextMetrics(dc, &tm);
-    *cx = tm.tmAveCharWidth;
+    *cx = w16_ave_char_width(dc, &tm);
     *cy = tm.tmHeight;
-    if (tm.tmPitchAndFamily & 1) { /* variable pitch */
-        const char *s = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-        *cx = ((LOWORD(GetTextExtent(dc, s, 52)) / 26) + 1) / 2;
-    }
     SelectObject(dc, old);
     ReleaseDC(NULL, dc);
 }

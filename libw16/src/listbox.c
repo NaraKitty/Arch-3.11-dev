@@ -705,7 +705,12 @@ LRESULT w16_combobox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         DWORD ls = WS_BORDER | WS_VSCROLL | LBS_NOTIFY | (h->style & CBS_SORT ? LBS_SORT : 0) |
                    (h->style & CBS_OWNERDRAWFIXED ? LBS_OWNERDRAWFIXED : 0) | (h->style & CBS_HASSTRINGS ? LBS_HASSTRINGS : 0) | LBS_NOINTEGRALHEIGHT;
         if (cbtype(h) != CBS_DROPDOWNLIST)
-            c->edit = CreateWindow("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 0, 0, r.right, 1, h, (HMENU)1001, NULL, NULL);
+            /* seg34: the selection stays drawn (the combo clears it when the focus leaves);
+             * scrolling and OEM conversion only when the combo has them */
+            c->edit = CreateWindow("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NOHIDESEL | W16_ES_COMBOBOX |
+                                   (h->style & CBS_AUTOHSCROLL ? ES_AUTOHSCROLL : 0) |
+                                   (h->style & CBS_OEMCONVERT ? ES_OEMCONVERT : 0),
+                                   0, 0, r.right, 1, h, (HMENU)1001, NULL, NULL);
         if (cbtype(h) == CBS_SIMPLE)
             c->list = CreateWindow("LISTBOX", "", WS_CHILD | WS_VISIBLE | ls, 0, 0, r.right, 1, h, (HMENU)1000, NULL, NULL);
         else
@@ -749,6 +754,7 @@ LRESULT w16_combobox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     case WM_KILLFOCUS:
         if ((HWND)wp == c->edit || (HWND)wp == c->list) return 0;
         c->focus = 0;
+        if (c->edit) SendMessage(c->edit, EM_SETSEL, 0, 0); /* CBKillFocusHelper (seg33) */
         cb_show(h, 0);
         InvalidateRect(h, NULL, FALSE);
         w16_notify_parent(h, CBN_KILLFOCUS);
@@ -788,7 +794,11 @@ LRESULT w16_combobox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         if (c->edit && (HWND)W16_CMD_HWND(lp) == c->edit) {
             if (HIWORD(lp) == EN_CHANGE) w16_notify_parent(h, CBN_EDITCHANGE);
             else if (HIWORD(lp) == EN_UPDATE) w16_notify_parent(h, CBN_EDITUPDATE);
-            else if (HIWORD(lp) == EN_KILLFOCUS && w16_focus != h && w16_focus != c->list) { c->focus = 0; w16_notify_parent(h, CBN_KILLFOCUS); }
+            else if (HIWORD(lp) == EN_KILLFOCUS && w16_focus != h && w16_focus != c->list) {
+                c->focus = 0;
+                SendMessage(c->edit, EM_SETSEL, 0, 0); /* CBKillFocusHelper (seg33) */
+                w16_notify_parent(h, CBN_KILLFOCUS);
+            }
         }
         if (cbtype(h) == CBS_SIMPLE && W16_CMD_HWND(lp) == c->list) {
             if (HIWORD(lp) == LBN_SELCHANGE) { cb_text_from_list(h); w16_notify_parent(h, CBN_SELCHANGE); }
