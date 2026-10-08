@@ -1,0 +1,36 @@
+# Drivers > Remove [MCI] MIDI Sequencer: ARCH311_REF_INI=1 tools/run-cp-test.sh apps/control/tests/drivers-remyes.w16 OUT Drivers
+# Same keys as arch311-ref/scn/drivers-remyes.scn: Remove, Yes, System Setting Change (Don't Restart
+# Now), the list without it, close. Real 3.11's restart text reads "The [MCI] MIDI  driver has been
+# removed" (its StrStrI scans past [boot] drivers= and cuts "Sequencer" out of the description);
+# the port fixes that scan (as the brief asks), so the text of that frame is left out of the compare.
+# regress: ARCH311_REF_INI=1 sh tools/run-cp-test.sh "$TEST" "$OUT" Drivers
+# compare: drivers-remyes/03.png 01-sequencer.png active ignore 320 239 333 261
+# compare: drivers-remyes/04.png 02-confirm.png active ignore 320 239 333 261
+# compare: drivers-remyes/05.png 03-restart.png active ignore 320 239 333 261 ignore 85 92 400 140
+# compare: drivers-remyes/06.png 04-removed.png active ignore 320 239 333 261
+# ini: SYSTEM.INI mci Sequencer=
+# ini: SYSTEM.INI mci WaveAudio=mciwave.drv
+# ini: SYSTEM.INI mci CDAudio=mcicda.drv
+# ini: CONTROL.INI drivers.desc mciseq.drv=
+# ini: CONTROL.INI drivers.desc mciwave.drv=[MCI] Sound
+sleep 900
+key down
+key down
+sleep 300
+shot shots/01-sequencer.png
+key tab
+key tab
+key tab
+key space
+sleep 500
+shot shots/02-confirm.png
+key y
+sleep 500
+shot shots/03-restart.png
+key esc
+sleep 400
+shot shots/04-removed.png
+key esc
+sleep 300
+shot shots/05-closed.png
+quit

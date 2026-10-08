@@ -14,6 +14,7 @@
 #   files after the run compare byte for byte with a reference run's (arch311-ref/run-NAME).
 # - ARCH311_INI_DIR=<folder>: its *.INI files are the starting ones (after the above), e.g. a WIN.INI
 #   changed the way a reference run's -WinIni changes it.
+# - ARCH311_A_FILES="NAME ...": those ripped files are on drive A: (a driver disk for Drivers' Add).
 # ARCH311_SIMULATE (default 1), ARCH311_WAVEDEVS (default 0, the rig's DOSBox has no sound card) and
 # ARCH311_CLOCK pass through.
 set -e
@@ -26,6 +27,7 @@ fx=$(mktemp -d)
 trap 'rm -rf "$fx"' EXIT
 files=${ARCH311_ASSETS:-${XDG_DATA_HOME:-$HOME/.local/share}/arch311}/files
 mkdir -p "$fx/config/arch311" "$fx/a" "$fx/c/WINDOWS/SYSTEM" "$fx/c/WINDOWS/TEMP"
+for n in ${ARCH311_A_FILES:-}; do ln -s "$files/$n" "$fx/a/$n"; done
 ref=${ARCH311_REF:-}
 if [ -n "$ref" ] && [ -d "$ref/c-pristine/WINDOWS" ]; then
     for d in "$ref"/c-pristine/WINDOWS/*/; do mkdir -p "$fx/c/WINDOWS/$(basename "$d")"; done

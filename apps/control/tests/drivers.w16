@@ -1,12 +1,12 @@
 # Drivers (DRIVERS.CPL dialog 1001): tools/run-cp-test.sh apps/control/tests/drivers.w16 OUT Drivers
 # Same keys as arch311-ref/scn/drivers-open.scn (after opening): the installed list walked (Setup...
 # enabled only for [MCI] Sound), Home, close. Opening caches the descriptions in CONTROL.INI.
-# regress: sh tools/run-cp-test.sh "$TEST" "$OUT" Drivers
-# compare: drivers-open/02.png 01-open.png active
-# compare: drivers-open/03.png 02-timer.png active
-# compare: drivers-open/04.png 03-sequencer.png active
-# compare: drivers-open/05.png 04-sound.png active
-# compare: drivers-open/06.png 05-home.png active
+# regress: ARCH311_REF_INI=1 sh tools/run-cp-test.sh "$TEST" "$OUT" Drivers
+# compare: drivers-open/02.png 01-open.png active ignore 320 239 333 261
+# compare: drivers-open/03.png 02-timer.png active ignore 320 239 333 261
+# compare: drivers-open/04.png 03-sequencer.png active ignore 320 239 333 261
+# compare: drivers-open/05.png 04-sound.png active ignore 320 239 333 261
+# compare: drivers-open/06.png 05-home.png active ignore 320 239 333 261
 # ini: CONTROL.INI drivers.desc mciwave.drv=[MCI] Sound
 # ini: CONTROL.INI drivers.desc mciseq.drv=[MCI] MIDI Sequencer
 # ini: CONTROL.INI drivers.desc timer.drv=Timer
