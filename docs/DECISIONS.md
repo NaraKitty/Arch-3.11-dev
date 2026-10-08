@@ -99,3 +99,15 @@ directory under GPL v2+, with the original copyright and licence notices kept. I
 (comments, strings, identifiers) is English; anything that is not English is translated when ported.
 Its bitmaps are Calmira's own. Any bitmap that copies Windows 95 art is not committed and is redrawn
 in the theme's style instead.
+
+## ADR-012 (session 7, owner) - Power on straight into the 3.11 desktop
+arch311 boots like a modern OS: there is no DOS prompt, and nobody types `C:`, `cd windows`, `win`.
+The machine boots Linux and goes straight to the 3.11 desktop. Any Linux boot text stays hidden
+behind a quiet boot. The session starts X with arch311-wm and Program Manager as the shell (the
+SYSTEM.INI [boot] shell= program, as on 3.1, so a user can choose File Manager or Calmira, ADR-011).
+A single-user install logs in automatically, like 3.11 with no network logon. With several accounts
+or a password, a logon dialog in 3.11's look (WfW's Logon dialog) asks first. Exit Windows ends the
+session and powers the machine off or restarts it. 3.1's "exit to DOS" has no DOS to return to. The
+only splash that may be shown is the one real 3.11 shows (the Windows logo screen from the user's
+own ripped files), for as long as start-up takes, never longer (hard rule 5). Typing `win` stays
+possible from the MS-DOS Prompt's DOSBox only as the emulated DOS world's own business (ADR-006).
