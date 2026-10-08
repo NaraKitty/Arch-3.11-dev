@@ -1,6 +1,7 @@
 # Color applet: palette, "Define Custom Colors..." (the modeless Custom Color Selector), hue 40,
 # saturation 200 and luminosity 100 typed, "Add Color" (first custom box), Close. Same keys as
-# arch311-ref/scn/color-custom.scn; compare in 16 colours (tests/color.sh).
+# arch311-ref/scn/color-custom.scn; compare in 16 colours (tests/color.sh). Frames 02-05 keep the
+# edits' caret: the reference caught it on.
 sleep 400
 shot shots/01.png
 key enter
@@ -11,23 +12,23 @@ key tab
 key tab
 key space
 sleep 400
-shot shots/02.png
+shotcaret shots/02.png
 key 4
 key 0
 sleep 400
-shot shots/03.png
+shotcaret shots/03.png
 key tab
 key 2
 key 0
 key 0
 sleep 400
-shot shots/04.png
+shotcaret shots/04.png
 key tab
 key 1
 key 0
 key 0
 sleep 400
-shot shots/05.png
+shotcaret shots/05.png
 key tab
 key tab
 key tab
