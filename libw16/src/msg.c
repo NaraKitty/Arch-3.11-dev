@@ -624,20 +624,40 @@ static int script_step(void)
             }
             return 1;
         }
-        if (!strcmp(cmd, "move") || !strcmp(cmd, "click") || !strcmp(cmd, "dblclick") || !strcmp(cmd, "down") || !strcmp(cmd, "up")) {
-            int x, y;
-            if (sscanf(arg, "%d %d", &x, &y) == 2) { w16_mouse.x = x; w16_mouse.y = y; clamp_mouse(); }
+        /* mouse: move | click | dblclick | down | up X Y [shift] [ctrl]; an r or m in front (rclick,
+         * rdown, mup ...) uses the right or middle button; shift / ctrl are held during the events */
+        const char *mc = cmd;
+        int bvk = VK_LBUTTON;
+        UINT bdown = WM_LBUTTONDOWN;
+        if ((cmd[0] == 'r' || cmd[0] == 'm') && (!strcmp(cmd + 1, "click") || !strcmp(cmd + 1, "dblclick") ||
+                                                  !strcmp(cmd + 1, "down") || !strcmp(cmd + 1, "up"))) {
+            bvk = cmd[0] == 'r' ? VK_RBUTTON : VK_MBUTTON;
+            bdown = cmd[0] == 'r' ? WM_RBUTTONDOWN : WM_MBUTTONDOWN;
+            mc = cmd + 1;
+        }
+        if (!strcmp(mc, "move") || !strcmp(mc, "click") || !strcmp(mc, "dblclick") || !strcmp(mc, "down") || !strcmp(mc, "up")) {
+            int x, y, mods[2] = {0, 0};
+            char m1[16] = "", m2[16] = "";
+            int na = sscanf(arg, "%d %d %15s %15s", &x, &y, m1, m2);
+            if (na >= 2) { w16_mouse.x = x; w16_mouse.y = y; clamp_mouse(); }
+            for (int i = 0; i < 2; i++) {
+                const char *m = i ? m2 : m1;
+                mods[i] = !strcasecmp(m, "shift") ? VK_SHIFT : !strcasecmp(m, "ctrl") ? VK_CONTROL : 0;
+                if (mods[i]) w16_keystate[mods[i]] |= 0x80;
+            }
             mouse_event(WM_MOUSEMOVE);
-            if (!strcmp(cmd, "click") || !strcmp(cmd, "down") || !strcmp(cmd, "dblclick")) {
-                w16_keystate[VK_LBUTTON] |= 0x80; mouse_event(WM_LBUTTONDOWN);
+            if (!strcmp(mc, "click") || !strcmp(mc, "down") || !strcmp(mc, "dblclick")) {
+                w16_keystate[bvk] |= 0x80; mouse_event(bdown);
             }
-            if (!strcmp(cmd, "click") || !strcmp(cmd, "up") || !strcmp(cmd, "dblclick")) {
-                w16_keystate[VK_LBUTTON] &= ~0x80; mouse_event(WM_LBUTTONUP);
+            if (!strcmp(mc, "click") || !strcmp(mc, "up") || !strcmp(mc, "dblclick")) {
+                w16_keystate[bvk] &= ~0x80; mouse_event(bdown + 1);
             }
-            if (!strcmp(cmd, "dblclick")) {
-                w16_keystate[VK_LBUTTON] |= 0x80; mouse_event(WM_LBUTTONDOWN);
-                w16_keystate[VK_LBUTTON] &= ~0x80; mouse_event(WM_LBUTTONUP);
+            if (!strcmp(mc, "dblclick")) {
+                w16_keystate[bvk] |= 0x80; mouse_event(bdown);
+                w16_keystate[bvk] &= ~0x80; mouse_event(bdown + 1);
             }
+            for (int i = 0; i < 2; i++)
+                if (mods[i]) w16_keystate[mods[i]] &= ~0x80;
             script_wait_until = GetTickCount() + 30;
             return 1;
         }
@@ -915,7 +935,7 @@ LRESULT DispatchMessage(const MSG *m)
     }
     if (m->message == WM_PAINT) {
         HWND h = m->hwnd;
-        LRESULT r = SendMessage(h, WM_PAINT, 0, 0);
+        LRESULT r = SendMessage(h, w16_paint_msg(h), 0, 0);
         /* an app that does not call BeginPaint must not loop forever */
         if (w16_valid(h) && (!rgn_empty(&h->upd) || h->need_ncpaint)) {
             if (h->need_ncpaint) { h->need_ncpaint = 0; SendMessage(h, WM_NCPAINT, 1, 0); }
@@ -1016,6 +1036,7 @@ LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         return strlen((char *)lp);
     }
     case WM_GETTEXTLENGTH: return strlen(h->text);
+    case WM_PAINTICON:
     case WM_PAINT: {
         PAINTSTRUCT ps;
         BeginPaint(h, &ps);
@@ -1087,12 +1108,19 @@ LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
         return (LRESULT)w16_sys_brush(COLOR_WINDOW);
     }
+    case WM_WINDOWPOSCHANGING: {
+        /* USER seg1:609A: a new size within the window's MINMAXINFO limits */
+        WINDOWPOS *wpos = (WINDOWPOS *)lp;
+        if (!(wpos->flags & SWP_NOSIZE)) w16_clamp_window_size(h, &wpos->cx, &wpos->cy);
+        return 0;
+    }
     case WM_WINDOWPOSCHANGED: {
+        /* WM_MOVE / WM_SIZE when the client area moved / changed size (SetWindowPos's flags) */
         WINDOWPOS *wpos = (WINDOWPOS *)lp;
         RECT pr = {0, 0, 0, 0};
         if (h->parent && h->parent != w16_desktop) pr = h->parent->rc;
-        if (!(wpos->flags & SWP_NOMOVE)) SendMessage(h, WM_MOVE, 0, MAKELPARAM(h->rc.left - pr.left, h->rc.top - pr.top));
-        if (!(wpos->flags & SWP_NOSIZE))
+        if (!(wpos->flags & W16_SWP_NOCLIENTMOVE)) SendMessage(h, WM_MOVE, 0, MAKELPARAM(h->rc.left - pr.left, h->rc.top - pr.top));
+        if (!(wpos->flags & W16_SWP_NOCLIENTSIZE))
             SendMessage(h, WM_SIZE, IsZoomed(h) ? SIZE_MAXIMIZED : IsIconic(h) ? SIZE_MINIMIZED : SIZE_RESTORED,
                         MAKELPARAM(h->rc.right - h->rc.left, h->rc.bottom - h->rc.top));
         return 0;

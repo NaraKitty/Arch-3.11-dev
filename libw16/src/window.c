@@ -272,11 +272,16 @@ HWND w16_next_to_paint(HWND root)
 
 int w16_any_paint_pending(void) { return w16_next_to_paint(NULL) != NULL; }
 
+/* A minimized window whose class has an icon gets WM_PAINTICON instead of WM_PAINT: USER draws the
+ * class icon itself (DefWindowProc), so a program that paints its client area in WM_PAINT (WINMINE)
+ * still shows its icon. Without a class icon the program paints the icon in WM_PAINT. */
+UINT w16_paint_msg(HWND h) { return IsIconic(h) && h->cls && h->cls->wc.hIcon ? WM_PAINTICON : WM_PAINT; }
+
 void w16_send_paint_cascade(HWND h)
 {
     if (!w16_valid(h)) return;
     if (needs_paint(h)) {
-        if (!rgn_empty(&h->upd) || h->internal_paint) SendMessage(h, WM_PAINT, 0, 0);
+        if (!rgn_empty(&h->upd) || h->internal_paint) SendMessage(h, w16_paint_msg(h), 0, 0);
         else if (h->need_ncpaint) {
             h->need_ncpaint = 0;
             SendMessage(h, WM_NCPAINT, 1, 0);
@@ -330,7 +335,10 @@ HDC BeginPaint(HWND h, LPPAINTSTRUCT ps)
     ps->hdc = dc;
     if (h->need_erase) {
         h->need_erase = 0;
-        if (IsIconic(h) && !h->cls->wc.hIcon) ps->fErase = !SendMessage(h, WM_ICONERASEBKGND, (WPARAM)dc, 0);
+        /* 3.1 SDK: a minimized window gets WM_ICONERASEBKGND only if its class has an icon (the icon
+         * USER draws for it, WM_PAINTICON); otherwise WM_ERASEBKGND. UNTESTED against real 3.11 with a
+         * desktop colour other than the class brush. */
+        if (IsIconic(h) && h->cls->wc.hIcon) ps->fErase = !SendMessage(h, WM_ICONERASEBKGND, (WPARAM)dc, 0);
         else ps->fErase = !SendMessage(h, WM_ERASEBKGND, (WPARAM)dc, 0);
     }
     return dc;
@@ -437,11 +445,68 @@ void move(HWND p, int dx, int dy)
     for (HWND c = p->child; c; c = c->next) move(c, dx, dy);
 }
 
+/* USER seg6:1A4F: the MINMAXINFO of a window - USER's defaults (seg6:18E0), the window's
+ * WM_GETMINMAXINFO, then USER's corrections (seg6:19A8). The icon window is 4 borders around the icon
+ * (seg3:242F); a window without a sizing frame maximizes 2 borders over each screen edge; tracking
+ * goes up to the screen plus a sizing frame each side. UNTESTED against real 3.11: the corrections
+ * (they only matter when WM_GETMINMAXINFO lowers the minimum tracking size; USER's caption button
+ * width there, half of OBM_CLOSE, is SM_CXSIZE here), and USER takes ptMaxPosition from the
+ * window's checkpoint once it has one, which libw16 does not keep. */
+void w16_get_minmax_info(HWND h, MINMAXINFO *mm)
+{
+    int cxb = GetSystemMetrics(SM_CXBORDER), cyb = GetSystemMetrics(SM_CYBORDER);
+    int cxf = GetSystemMetrics(SM_CXFRAME), cyf = GetSystemMetrics(SM_CYFRAME);
+    int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
+    POINT icon = {GetSystemMetrics(SM_CXICON) + 4 * cxb, GetSystemMetrics(SM_CYICON) + 4 * cyb};
+    DWORD st = h->style;
+    mm->ptReserved = icon;
+    if (st & WS_THICKFRAME) {
+        mm->ptMaxSize = (POINT){sw + 2 * cxf, sh + 2 * cyf};
+        mm->ptMaxPosition = (POINT){-cxf, -cyf};
+    } else {
+        mm->ptMaxSize = (POINT){sw + 4 * cxb, sh + 4 * cyb};
+        mm->ptMaxPosition = (POINT){-cxb, -cyb};
+    }
+    if (st & (WS_BORDER | WS_DLGFRAME))
+        mm->ptMinTrackSize = (POINT){GetSystemMetrics(SM_CXMINTRACK), GetSystemMetrics(SM_CYMINTRACK)};
+    else
+        mm->ptMinTrackSize = (POINT){cxb, cyb};
+    mm->ptMaxTrackSize = (POINT){sw + 2 * cxf, sh + 2 * cyf};
+    SendMessage(h, WM_GETMINMAXINFO, 0, (LPARAM)mm);
+    if (st & WS_MINIMIZEBOX) mm->ptReserved = icon;
+    if ((st & WS_CAPTION) == WS_CAPTION) {
+        /* room for the caption's boxes and the sizing frame */
+        int n = !!(st & WS_SYSMENU) + !!(st & WS_MAXIMIZEBOX) + !!(st & WS_MINIMIZEBOX);
+        mm->ptMinTrackSize.x = max(mm->ptMinTrackSize.x, n * GetSystemMetrics(SM_CXSIZE) + 2 * cxf);
+        mm->ptMinTrackSize.y = max(mm->ptMinTrackSize.y, GetSystemMetrics(SM_CYMINTRACK));
+    } else {
+        int dx = (st & WS_THICKFRAME) ? cxf : cxb, dy = (st & WS_THICKFRAME) ? cyf : cyb;
+        mm->ptMinTrackSize.x = max(mm->ptMinTrackSize.x, 2 * dx);
+        mm->ptMinTrackSize.y = max(mm->ptMinTrackSize.y, 2 * dy);
+    }
+}
+
+/* USER seg1:0000: a new window size kept within the window's MINMAXINFO - for an overlapped window or
+ * one with a sizing frame; an icon between ptReserved and ptMaxSize, any other window between the
+ * tracking sizes. CreateWindow (seg8:06D9, before WM_NCCREATE and with WS_MINIMIZE still in the style)
+ * and DefWindowProc's WM_WINDOWPOSCHANGING (seg1:609A) use it. Measured on real 3.11: WINMINE's
+ * 30 x 24 board asks for a window 491 high and, created minimized, gets 484 (480 + 4 borders). */
+void w16_clamp_window_size(HWND h, int *cx, int *cy)
+{
+    if ((h->style & (WS_POPUP | WS_CHILD)) && !(h->style & WS_THICKFRAME)) return;
+    MINMAXINFO mm;
+    w16_get_minmax_info(h, &mm);
+    POINT lo = mm.ptMinTrackSize, hi = mm.ptMaxTrackSize;
+    if (h->style & WS_MINIMIZE) lo = mm.ptReserved, hi = mm.ptMaxSize;
+    *cx = max(min(*cx, hi.x), lo.x);
+    *cy = max(min(*cy, hi.y), lo.y);
+}
+
 BOOL SetWindowPos(HWND h, HWND after, int x, int y, int cx, int cy, UINT fl)
 {
     if (!w16_valid(h)) return FALSE;
     WINDOWPOS wp = {h, after, x, y, cx, cy, fl};
-    RECT pr = {0, 0, 0, 0};
+    RECT oldrc = h->rc, pr = {0, 0, 0, 0};
     if (h->parent && h->parent != w16_desktop) pr = h->parent->rc;
     if (fl & SWP_NOMOVE) { wp.x = h->rw.left - pr.left; wp.y = h->rw.top - pr.top; }
     if (fl & SWP_NOSIZE) { wp.cx = h->rw.right - h->rw.left; wp.cy = h->rw.bottom - h->rw.top; }
@@ -472,8 +537,15 @@ BOOL SetWindowPos(HWND h, HWND after, int x, int y, int cx, int cy, UINT fl)
         }
     }
     if (fl & SWP_FRAMECHANGED) w16_invalidate_window(h, NULL, 1, 1);
-    wp.flags = fl | (moved ? 0 : SWP_NOMOVE) | (sized ? 0 : SWP_NOSIZE);
-    if (moved || sized) SendMessage(h, WM_WINDOWPOSCHANGED, 0, (LPARAM)&wp);
+    /* USER's internal SWP_NOCLIENTMOVE / SWP_NOCLIENTSIZE tell DefWindowProc whether the client area
+     * moved or changed size, also when only the frame changed: SetMenu moves the client of a window
+     * that stays put, and WINMINE's F6 (WM_MOVE updates its position) shows that on real 3.11 */
+    int cmoved = h->rc.left != oldrc.left || h->rc.top != oldrc.top;
+    int csized = (h->rc.right - h->rc.left) != (oldrc.right - oldrc.left) ||
+                 (h->rc.bottom - h->rc.top) != (oldrc.bottom - oldrc.top);
+    wp.flags = fl | (moved ? 0 : SWP_NOMOVE) | (sized ? 0 : SWP_NOSIZE) | (cmoved ? 0 : W16_SWP_NOCLIENTMOVE) |
+               (csized ? 0 : W16_SWP_NOCLIENTSIZE);
+    if (moved || sized || cmoved || csized) SendMessage(h, WM_WINDOWPOSCHANGED, 0, (LPARAM)&wp);
     if (!(fl & SWP_NOACTIVATE) && h->parent == w16_desktop && (h->style & WS_VISIBLE) && !(fl & SWP_HIDEWINDOW))
         w16_activate(h, WA_ACTIVE);
     return TRUE;
@@ -655,19 +727,11 @@ HWND CreateWindowEx(DWORD ex, LPCSTR cls, LPCSTR title, DWORD style, int x, int 
     }
     RECT pr = {0, 0, 0, 0};
     if (h->parent != w16_desktop) pr = h->parent->rc;
-    /* WM_GETMINMAXINFO for top-level sizable windows */
-    if (h->parent == w16_desktop && (style & (WS_THICKFRAME | WS_CAPTION))) {
-        MINMAXINFO mm = {{0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}};
-        int f = GetSystemMetrics(SM_CXFRAME);
-        mm.ptMaxSize.x = w16_screen.w + 2 * f;
-        mm.ptMaxSize.y = w16_screen.h + 2 * f;
-        mm.ptMaxPosition.x = mm.ptMaxPosition.y = -f;
-        mm.ptMinTrackSize.x = GetSystemMetrics(SM_CXMINTRACK);
-        mm.ptMinTrackSize.y = GetSystemMetrics(SM_CYMINTRACK);
-        mm.ptMaxTrackSize.x = mm.ptMaxSize.x;
-        mm.ptMaxTrackSize.y = mm.ptMaxSize.y;
-    }
-    h->rw = (RECT){pr.left + x, pr.top + y, pr.left + x + cx, pr.top + y + cy};
+    /* the size within the window's limits: WM_GETMINMAXINFO comes before WM_NCCREATE (seg8:06D9, into
+     * locals; the CREATESTRUCT USER passes is its own parameter frame) */
+    int wcx = cx, wcy = cy;
+    w16_clamp_window_size(h, &wcx, &wcy);
+    h->rw = (RECT){pr.left + x, pr.top + y, pr.left + x + wcx, pr.top + y + wcy};
     if (h->parent == w16_desktop) OffsetRect(&h->rw, byte_align_dx(h), 0);
     h->restore = h->rw;
     h->style &= ~(WS_VISIBLE | WS_MINIMIZE | WS_MAXIMIZE);
@@ -690,9 +754,13 @@ HWND CreateWindowEx(DWORD ex, LPCSTR cls, LPCSTR title, DWORD style, int x, int 
         h->send_sizemove = 1; /* see ShowWindow */
     if ((style & WS_CHILD) && !(ex & WS_EX_NOPARENTNOTIFY))
         SendMessage(h->parent, WM_PARENTNOTIFY, WM_CREATE, (LPARAM)h);
-    if (style & WS_MINIMIZE) ShowWindow(h, SW_SHOWMINIMIZED);
-    else if (style & WS_MAXIMIZE) ShowWindow(h, SW_SHOWMAXIMIZED);
-    else if (style & WS_VISIBLE) ShowWindow(h, SW_SHOW);
+    /* USER CreateWindow (seg8:0843): WS_MINIMIZE / WS_MAXIMIZE go through MinMaximize
+     * (SW_SHOWMINNOACTIVE / SW_SHOWMAXIMIZED) with the window kept hidden; only WS_VISIBLE shows it.
+     * WINMINE creates its window minimized and invisible and restores it with ShowWindow later. */
+    if (style & WS_MINIMIZE) w16_minimize(h);
+    else if (style & WS_MAXIMIZE) w16_maximize(h);
+    if (style & WS_VISIBLE)
+        ShowWindow(h, (style & WS_MINIMIZE) ? SW_SHOWMINNOACTIVE : (style & WS_MAXIMIZE) ? SW_SHOWMAXIMIZED : SW_SHOW);
     return h;
 }
 
@@ -975,6 +1043,15 @@ HWND FindWindow(LPCSTR cls, LPCSTR title)
     for (HWND c = w16_desktop->child; c; c = c->next)
         if ((!cls || !strcasecmp(c->cls->name, cls)) && (!title || !strcmp(c->text, title))) return c;
     return NULL;
+}
+/* USER GetLastActivePopup: the popup owned by h that was active last, else h. libw16 keeps no
+ * activation history, so the topmost visible window owned by h stands for it. */
+HWND GetLastActivePopup(HWND h)
+{
+    if (!w16_valid(h)) return NULL;
+    for (HWND c = w16_desktop->child; c; c = c->next)
+        if (c != h && c->owner == h && (c->style & WS_VISIBLE)) return c;
+    return h;
 }
 BOOL EnumChildWindows(HWND parent, WNDENUMPROC fn, LPARAM lp)
 {

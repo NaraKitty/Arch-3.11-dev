@@ -458,51 +458,76 @@ HBITMAP CreateCompatibleBitmap(HDC dc, int w, int h)
 }
 HBITMAP CreateDiscardableBitmap(HDC dc, int w, int h) { return CreateCompatibleBitmap(dc, w, h); }
 
+/* A DIB header (BITMAPINFOHEADER, or the OS/2 BITMAPCOREHEADER) and its colour table, read byte by
+ * byte so that it may sit anywhere in resource data. Scan lines are bottom-up as in 3.1. */
+typedef struct {
+    int w, h, bpp, ncol, stride, flip;
+    size_t hdrsize;          /* header + colour table: where packed bits start */
+    uint32_t cols[256];      /* 0xRRGGBB */
+} DibInfo;
+
+static void dib_info(const uint8_t *d, DibInfo *di)
+{
+    memset(di, 0, sizeof *di);
+    uint32_t hs = d[0] | d[1] << 8 | d[2] << 16 | (uint32_t)d[3] << 24;
+    int quad;
+    if (hs == 12) {
+        di->w = d[4] | d[5] << 8; di->h = d[6] | d[7] << 8; di->bpp = d[10] | d[11] << 8; quad = 0;
+        di->ncol = di->bpp <= 8 ? 1 << di->bpp : 0;
+    } else {
+        di->w = (int32_t)(d[4] | d[5] << 8 | d[6] << 16 | (uint32_t)d[7] << 24);
+        di->h = (int32_t)(d[8] | d[9] << 8 | d[10] << 16 | (uint32_t)d[11] << 24);
+        di->bpp = d[14] | d[15] << 8;
+        int clr = d[32] | d[33] << 8;
+        di->ncol = clr ? clr : (di->bpp <= 8 ? 1 << di->bpp : 0);
+        quad = 1;
+    }
+    di->flip = di->h > 0;
+    if (di->h < 0) di->h = -di->h;
+    di->stride = ((di->w * di->bpp + 31) / 32) * 4;
+    const uint8_t *pal = d + hs;
+    for (int i = 0; i < di->ncol && i < 256; i++) {
+        const uint8_t *e = pal + i * (quad ? 4 : 3);
+        di->cols[i] = (e[2] << 16) | (e[1] << 8) | e[0];
+    }
+    di->hdrsize = hs + (size_t)di->ncol * (quad ? 4 : 3);
+}
+
+static uint32_t dib_px(const DibInfo *di, const uint8_t *row, int x)
+{
+    switch (di->bpp) {
+    case 1: return di->cols[(row[x / 8] >> (7 - (x & 7))) & 1];
+    case 4: return di->cols[(row[x / 2] >> ((x & 1) ? 0 : 4)) & 15];
+    case 8: return di->cols[row[x]];
+    case 24: return (row[x * 3 + 2] << 16) | (row[x * 3 + 1] << 8) | row[x * 3];
+    default: return 0;
+    }
+}
+
+static HBITMAP dib_to_bitmap(const DibInfo *di, const uint8_t *bits, int force_color)
+{
+    HBITMAP o = CreateBitmap(di->w, di->h, 1, 4, NULL);
+    W16Bitmap *b = &o->u.bmp;
+    for (int y = 0; y < di->h; y++) {
+        const uint8_t *row = bits + (size_t)(di->flip ? di->h - 1 - y : y) * di->stride;
+        for (int x = 0; x < di->w; x++) {
+            uint32_t p = dib_px(di, row, x);
+            b->px[y * di->w + x] = ncolors > 16 ? p : w16_rgb(rgb_to_cref(p));
+        }
+    }
+    if (di->bpp == 1 && !force_color && di->ncol == 2 &&
+        ((di->cols[0] == 0 && di->cols[1] == 0xFFFFFF) || (di->cols[0] == 0xFFFFFF && di->cols[1] == 0)))
+        b->mono = 1;
+    return o;
+}
+
 /* DIB (as stored in resources) -> bitmap */
 HBITMAP w16_bitmap_from_dib(const uint8_t *d, int len, int force_color)
 {
     (void)len;
-    uint32_t hs = d[0] | d[1] << 8 | d[2] << 16 | d[3] << 24;
-    int w, h, bpp, ncol, pal4;
-    if (hs == 12) {
-        w = d[4] | d[5] << 8; h = d[6] | d[7] << 8; bpp = d[10] | d[11] << 8; pal4 = 0;
-        ncol = bpp <= 8 ? 1 << bpp : 0;
-    } else {
-        w = (int32_t)(d[4] | d[5] << 8 | d[6] << 16 | d[7] << 24);
-        h = (int32_t)(d[8] | d[9] << 8 | d[10] << 16 | d[11] << 24);
-        bpp = d[14] | d[15] << 8;
-        int clr = d[32] | d[33] << 8;
-        ncol = clr ? clr : (bpp <= 8 ? 1 << bpp : 0);
-        pal4 = 1;
-    }
-    int flip = h > 0;
-    if (h < 0) h = -h;
-    const uint8_t *pal = d + hs;
-    const uint8_t *bits = pal + ncol * (pal4 ? 4 : 3);
-    int stride = ((w * bpp + 31) / 32) * 4;
-    HBITMAP o = CreateBitmap(w, h, 1, 4, NULL);
-    W16Bitmap *b = &o->u.bmp;
-    uint32_t cols[256];
-    for (int i = 0; i < ncol && i < 256; i++) {
-        const uint8_t *e = pal + i * (pal4 ? 4 : 3);
-        cols[i] = (e[2] << 16) | (e[1] << 8) | e[0];
-    }
-    for (int y = 0; y < h; y++) {
-        const uint8_t *row = bits + (size_t)(flip ? h - 1 - y : y) * stride;
-        for (int x = 0; x < w; x++) {
-            uint32_t p;
-            if (bpp == 1) p = cols[(row[x / 8] >> (7 - (x & 7))) & 1];
-            else if (bpp == 4) p = cols[(row[x / 2] >> ((x & 1) ? 0 : 4)) & 15];
-            else if (bpp == 8) p = cols[row[x]];
-            else if (bpp == 24) p = (row[x * 3 + 2] << 16) | (row[x * 3 + 1] << 8) | row[x * 3];
-            else p = 0;
-            b->px[y * w + x] = ncolors > 16 ? p : w16_rgb(rgb_to_cref(p));
-        }
-    }
-    if (bpp == 1 && !force_color && ncol == 2 &&
-        ((cols[0] == 0 && cols[1] == 0xFFFFFF) || (cols[0] == 0xFFFFFF && cols[1] == 0)))
-        b->mono = 1;
-    return o;
+    DibInfo di;
+    dib_info(d, &di);
+    return dib_to_bitmap(&di, d + di.hdrsize, force_color);
 }
 
 HBITMAP LoadBitmap(HINSTANCE h, LPCSTR name)
@@ -1576,6 +1601,60 @@ BOOL PatBlt(HDC dc, int x, int y, int w, int h, DWORD rop)
     if (h < 0) { y += h; h = -h; }
     blit(dc, x, y, w, h, NULL, NULL, 0, 0, w, h, rop);
     return TRUE;
+}
+
+/* ------------------------------------------------------------------ DIBs */
+/* GDI CreateDIBitmap: a bitmap in the format of the device behind dc - colour for the screen, and
+ * monochrome only for a memory DC holding a monochrome bitmap when the DIB is black and white. With
+ * CBM_INIT the DIB's pixels are converted (DIB_RGB_COLORS; DIB_PAL_COLORS is not supported). */
+HBITMAP CreateDIBitmap(HDC dc, const BITMAPINFOHEADER *bih, DWORD init, const void *bits, const BITMAPINFO *bmi, UINT usage)
+{
+    if (!bih) return NULL;
+    DibInfo di;
+    int mono = dc && dc->is_mem && (!dc->target || dc->target->mono);
+    if (!(init & CBM_INIT) || !bits || !bmi || usage != DIB_RGB_COLORS) {
+        dib_info((const uint8_t *)bih, &di);
+        return CreateBitmap(di.w, di.h, 1, mono ? 1 : 4, NULL);
+    }
+    dib_info((const uint8_t *)bmi, &di);
+    return dib_to_bitmap(&di, bits, !mono);
+}
+
+/* GDI SetDIBitsToDevice: bits holds scan lines start .. start + lines - 1 of a bottom-up DIB (line 0
+ * is the bottom one); the source rectangle has its lower-left corner at (xsrc, ysrc) and is copied to
+ * the cx x cy rectangle at (x, y), so DIB line j lands on row y + ysrc + cy - 1 - j. A program can
+ * draw one band of a tall bitmap by pointing bits into it (WINMINE's digits and faces do). */
+int SetDIBitsToDevice(HDC dc, int x, int y, int cx, int cy, int xsrc, int ysrc, UINT start, UINT lines,
+                      const void *bits, const BITMAPINFO *bmi, UINT usage)
+{
+    if (!dc || !bits || !bmi || usage != DIB_RGB_COLORS || cx <= 0 || cy <= 0) return 0;
+    DibInfo di;
+    dib_info((const uint8_t *)bmi, &di);
+    w16_lp_to_dp(dc, &x, &y);
+    Region e;
+    w16_dc_clip_iter_begin(dc, &e);
+    rgn_and(&e, &(RECT){x, y, x + cx, y + cy});
+    W16Bitmap *t = tgt(dc);
+    for (int i = 0; i < e.n; i++) {
+        RECT a = e.r[i];
+        a.left = max(a.left, 0); a.top = max(a.top, 0);
+        a.right = min(a.right, t->w); a.bottom = min(a.bottom, t->h);
+        for (int yy = a.top; yy < a.bottom; yy++) {
+            int j = ysrc + cy - 1 - (yy - y);
+            if (j < (int)start || j >= (int)(start + lines) || j >= di.h) continue;
+            const uint8_t *row = (const uint8_t *)bits + (size_t)(j - start) * di.stride;
+            for (int xx = a.left; xx < a.right; xx++) {
+                int sx = xsrc + (xx - x);
+                if (sx < 0 || sx >= di.w) continue;
+                uint32_t p = dib_px(&di, row, sx);
+                if (ncolors <= 16) p = w16_rgb(rgb_to_cref(p));
+                t->px[yy * t->w + xx] = to_target(dc, p);
+            }
+        }
+    }
+    rgn_free(&e);
+    mark_dirty(dc);
+    return (int)lines;
 }
 
 /* ------------------------------------------------------------------ PNG screenshot (tests) */

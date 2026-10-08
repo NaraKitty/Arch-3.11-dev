@@ -1,0 +1,38 @@
+# Minesweeper: Custom Field (OK has the focus), Tab to Height, 20, Width 24, Mines 60, Enter: a 24 x 20
+# board; Exit. Same keys as c.scn, run on real 3.11 as arch311-ref/scn/winmine-c.scn (the rig did
+# not record the frame with the typed numbers: too few pixels change).
+# regress: sh apps/winmine/tests/run.sh "$TEST" "$OUT"
+# compare: winmine-c/02.png 01.png ignore 320 240 332 260
+# compare: winmine-c/03.png 03.png ignore 320 240 332 260
+# ini: WINMINE.INI Minesweeper Difficulty=3
+# ini: WINMINE.INI Minesweeper Height=20
+# ini: WINMINE.INI Minesweeper Width=24
+# ini: WINMINE.INI Minesweeper Mines=60
+# ini: WINMINE.INI Minesweeper Mark=1
+# ini: WINMINE.INI Minesweeper Color=1
+# ini: WINMINE.INI Minesweeper Xpos=80
+# ini: WINMINE.INI Minesweeper Ypos=80
+sleep 400
+key alt
+key g
+key c
+sleep 400
+shot shots/01.png
+key tab
+key 2
+key 0
+key tab
+key 2
+key 4
+key tab
+key 6
+key 0
+sleep 400
+shot shots/02.png
+key enter
+sleep 400
+shot shots/03.png
+key alt
+key g
+key x
+quit
