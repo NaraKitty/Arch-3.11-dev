@@ -348,6 +348,7 @@ char w16_mnemonic(const char *s);
 void w16_draw_gray_text(HDC dc, int x, int y, const char *s, int n, int noprefix);
 void w16_draw_stippled_text(HDC dc, int x, int y, const char *s, int n, int noprefix, COLORREF fg);
 void w16_notify_parent(HWND h, int code);
+void w16_cancel_dblclk(void); /* msg.c: the next click is not the second of a double click */
 
 /* system parameters */
 extern COLORREF w16_syscolor[W16_NUM_SYSCOLORS];

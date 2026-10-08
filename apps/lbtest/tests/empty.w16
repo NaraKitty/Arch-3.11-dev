@@ -1,0 +1,36 @@
+# lbtest's second set-up (command line "2"): B has 3 items and LBS_DISABLENOSCROLL (its vertical
+# bar stays, both arrows disabled; no extent, so the horizontal bar goes), C is an empty owner-draw
+# list. USER's behaviour checked (values from the seg35 decode, screenshots checked by eye):
+# - clicking the empty C gives it the focus: its owner gets WM_DRAWITEM itemID -1, ODA_FOCUS, state
+#   ODS_FOCUS | ODS_SELECTED (seg35:085C asks IsSelected for a missing item: -1, "selected"); no
+#   WM_LBTRACKPOINT (no item);
+# - a double click on A's item 2: LBN_SELCHANGE for the first click, only LBN_DBLCLK for the second,
+#   WM_LBTRACKPOINT for the first click only;
+# - Ctrl+\ keeps only the caret item; Shift+F8 add mode: Down, Down, Space adds item 4 without
+#   dropping 2 (each key notifies LBN_SELCHANGE).
+# regress: sh apps/lbtest/tests/lbtest.sh "$TEST" "$OUT" 2
+# ini: LBTEST.INI B vbar=1
+# ini: LBTEST.INI B hbar=0
+# ini: LBTEST.INI C count=0
+# ini: LBTEST.INI A sel=2,4
+# ini: LBTEST.INI A caret=4
+# ini: LBTEST.INI A anchor=4
+# ini: LBTEST.INI events selchangeA=5
+# ini: LBTEST.INI events dblclkA=1
+# ini: LBTEST.INI events setfocusC=1
+# ini: LBTEST.INI events track=1,101,2,10,40
+# ini: LBTEST.INI events drawlog=-1:4:11;-1:4:1;
+sleep 300
+click 60 240
+sleep 200
+shot shots/01-empty-focus.png
+dblclick 34 83
+key ctrl+backslash
+key shift+f8
+key down
+key down
+key space
+key shift+f8
+sleep 200
+shot shots/02-addmode.png
+quit

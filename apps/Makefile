@@ -5,7 +5,7 @@ CFLAGS += -std=gnu11 -D_GNU_SOURCE -Wall -Wextra -Wno-unused-parameter -Wno-sign
           -Wno-missing-field-initializers -I../libw16/include $(shell sdl2-config --cflags)
 LIBW16 := ../libw16/build/libw16.a
 LIBS = $(LIBW16) $(shell sdl2-config --libs) -lz -lm
-APPS := notepad control winmine clock mbox
+APPS := notepad control winmine clock mbox lbtest
 CONTROL_SRC := $(wildcard control/*.c)
 
 all: $(APPS:%=build/%)
@@ -41,6 +41,11 @@ check: build/cups_test
 build/mbox: mbox/mbox.c $(LIBW16)
 	@mkdir -p build
 	$(CC) $(CFLAGS) mbox/mbox.c $(LIBS) -o $@
+
+# libw16's list box test program (apps/lbtest/tests)
+build/lbtest: lbtest/lbtest.c $(LIBW16)
+	@mkdir -p build
+	$(CC) $(CFLAGS) lbtest/lbtest.c $(LIBS) -o $@
 
 clean:
 	rm -rf build
