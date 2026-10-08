@@ -1,7 +1,6 @@
-# Mouse applet (MAIN.CPL dialog 6): first in the window. Same keys as arch311-ref/scn/mouse.scn
+# Mouse applet (MAIN.CPL dialog 6): tools/run-cp-test.sh apps/control/tests/mouse.w16 OUT Mouse
+# Same keys as arch311-ref/scn/mouse.scn
 sleep 600
-key enter
-sleep 500
 shotcaret shots/01-mouse.png
 key right
 key right
