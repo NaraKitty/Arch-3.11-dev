@@ -1,0 +1,17 @@
+# Minesweeper: Custom Field dialog, 20 high, 24 wide, 60 mines, then Exit
+key alt
+key g
+key c
+shot
+key tab
+type 20
+key tab
+type 24
+key tab
+type 60
+shot
+key enter
+shot
+key alt
+key g
+key x

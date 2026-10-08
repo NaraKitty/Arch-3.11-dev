@@ -441,7 +441,7 @@ BOOL SetWindowPos(HWND h, HWND after, int x, int y, int cx, int cy, UINT fl)
 {
     if (!w16_valid(h)) return FALSE;
     WINDOWPOS wp = {h, after, x, y, cx, cy, fl};
-    RECT pr = {0, 0, 0, 0};
+    RECT oldrc = h->rc, pr = {0, 0, 0, 0};
     if (h->parent && h->parent != w16_desktop) pr = h->parent->rc;
     if (fl & SWP_NOMOVE) { wp.x = h->rw.left - pr.left; wp.y = h->rw.top - pr.top; }
     if (fl & SWP_NOSIZE) { wp.cx = h->rw.right - h->rw.left; wp.cy = h->rw.bottom - h->rw.top; }
@@ -470,8 +470,15 @@ BOOL SetWindowPos(HWND h, HWND after, int x, int y, int cx, int cy, UINT fl)
         }
     }
     if (fl & SWP_FRAMECHANGED) w16_invalidate_window(h, NULL, 1, 1);
-    wp.flags = fl | (moved ? 0 : SWP_NOMOVE) | (sized ? 0 : SWP_NOSIZE);
-    if (moved || sized) SendMessage(h, WM_WINDOWPOSCHANGED, 0, (LPARAM)&wp);
+    /* USER's internal SWP_NOCLIENTMOVE / SWP_NOCLIENTSIZE tell DefWindowProc whether the client area
+     * moved or changed size, also when only the frame changed: SetMenu moves the client of a window
+     * that stays put, and WINMINE's F6 (WM_MOVE updates its position) shows that on real 3.11 */
+    int cmoved = h->rc.left != oldrc.left || h->rc.top != oldrc.top;
+    int csized = (h->rc.right - h->rc.left) != (oldrc.right - oldrc.left) ||
+                 (h->rc.bottom - h->rc.top) != (oldrc.bottom - oldrc.top);
+    wp.flags = fl | (moved ? 0 : SWP_NOMOVE) | (sized ? 0 : SWP_NOSIZE) | (cmoved ? 0 : W16_SWP_NOCLIENTMOVE) |
+               (csized ? 0 : W16_SWP_NOCLIENTSIZE);
+    if (moved || sized || cmoved || csized) SendMessage(h, WM_WINDOWPOSCHANGED, 0, (LPARAM)&wp);
     if (!(fl & SWP_NOACTIVATE) && h->parent == w16_desktop && (h->style & WS_VISIBLE) && !(fl & SWP_HIDEWINDOW))
         w16_activate(h, WA_ACTIVE);
     return TRUE;
@@ -688,9 +695,13 @@ HWND CreateWindowEx(DWORD ex, LPCSTR cls, LPCSTR title, DWORD style, int x, int 
         h->send_sizemove = 1; /* see ShowWindow */
     if ((style & WS_CHILD) && !(ex & WS_EX_NOPARENTNOTIFY))
         SendMessage(h->parent, WM_PARENTNOTIFY, WM_CREATE, (LPARAM)h);
-    if (style & WS_MINIMIZE) ShowWindow(h, SW_SHOWMINIMIZED);
-    else if (style & WS_MAXIMIZE) ShowWindow(h, SW_SHOWMAXIMIZED);
-    else if (style & WS_VISIBLE) ShowWindow(h, SW_SHOW);
+    /* USER CreateWindow (seg8:0843): WS_MINIMIZE / WS_MAXIMIZE go through MinMaximize
+     * (SW_SHOWMINNOACTIVE / SW_SHOWMAXIMIZED) with the window kept hidden; only WS_VISIBLE shows it.
+     * WINMINE creates its window minimized and invisible and restores it with ShowWindow later. */
+    if (style & WS_MINIMIZE) w16_minimize(h);
+    else if (style & WS_MAXIMIZE) w16_maximize(h);
+    if (style & WS_VISIBLE)
+        ShowWindow(h, (style & WS_MINIMIZE) ? SW_SHOWMINNOACTIVE : (style & WS_MAXIMIZE) ? SW_SHOWMAXIMIZED : SW_SHOW);
     return h;
 }
 
@@ -951,6 +962,15 @@ HWND FindWindow(LPCSTR cls, LPCSTR title)
     for (HWND c = w16_desktop->child; c; c = c->next)
         if ((!cls || !strcasecmp(c->cls->name, cls)) && (!title || !strcmp(c->text, title))) return c;
     return NULL;
+}
+/* USER GetLastActivePopup: the popup owned by h that was active last, else h. libw16 keeps no
+ * activation history, so the topmost visible window owned by h stands for it. */
+HWND GetLastActivePopup(HWND h)
+{
+    if (!w16_valid(h)) return NULL;
+    for (HWND c = w16_desktop->child; c; c = c->next)
+        if (c != h && c->owner == h && (c->style & WS_VISIBLE)) return c;
+    return h;
 }
 BOOL EnumChildWindows(HWND parent, WNDENUMPROC fn, LPARAM lp)
 {

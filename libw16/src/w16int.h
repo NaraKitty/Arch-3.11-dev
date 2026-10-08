@@ -239,6 +239,9 @@ void w16_track_sb(HWND h, HWND notify, int bar, int x, int y, int ctl);
 void w16_draw_sb_ctl(HDC dc, const RECT *r, int vert, W16Scroll *s, int pressed, int enabled_win, HWND bg);
 int w16_sb_hit(const RECT *r, int vert, W16Scroll *s, int x, int y, RECT *part);
 void w16_iconic_paint(HWND h);
+/* USER's internal WINDOWPOS flags (WM_WINDOWPOSCHANGED): the client area kept its size / place */
+#define W16_SWP_NOCLIENTSIZE 0x0800
+#define W16_SWP_NOCLIENTMOVE 0x1000
 void w16_minimize(HWND h);
 void w16_maximize(HWND h);
 void w16_restore(HWND h);

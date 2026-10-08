@@ -1,0 +1,10 @@
+sleep 400
+sleep 400
+shot shots/01.png
+key f6
+sleep 400
+shot shots/02.png
+key f5
+sleep 400
+shot shots/03.png
+quit

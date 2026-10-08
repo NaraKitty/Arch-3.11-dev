@@ -292,9 +292,12 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
     }
     if (!done && key && val) {
         if (!sawsec) {
+            /* a new section follows an empty line; in a new (empty) file it is the first line
+             * (measured: the WINMINE.INI real 3.11 creates starts with "[Minesweeper]") */
             size_t L = strlen(out);
             if (L && out[L - 1] != '\n') strcat(out, "\r\n");
-            strcat(out, "\r\n["); strcat(out, app); strcat(out, "]\r\n");
+            if (L) strcat(out, "\r\n");
+            strcat(out, "["); strcat(out, app); strcat(out, "]\r\n");
         } else if (in) {
             size_t L = strlen(out);
             if (L && out[L - 1] != '\n') strcat(out, "\r\n");

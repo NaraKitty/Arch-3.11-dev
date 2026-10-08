@@ -1,0 +1,24 @@
+sleep 400
+key alt
+key g
+key c
+sleep 400
+shot shots/01.png
+key tab
+key 2
+key 0
+key tab
+key 2
+key 4
+key tab
+key 6
+key 0
+sleep 400
+shot shots/02.png
+key enter
+sleep 400
+shot shots/03.png
+key alt
+key g
+key x
+quit
