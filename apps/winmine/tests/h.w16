@@ -1,0 +1,52 @@
+# Minesweeper started with the largest board, 30 x 24, from WINMINE.INI (g3.ini): the window (491
+# high) does not fit, AdjustWindow moves it up to -11 and USER's CreateWindow, the window being created
+# minimized, cuts it to 484 (480 + 4 borders, ptMaxSize); the Game menu; Beginner; the same board
+# through Custom Field with the window shown: now cut to 488 (480 + 2 frames, ptMaxTrackSize); Exit.
+# Same keys as h.scn, run on real 3.11 as winmine-h (WINMINE.INI seeded the same way).
+# regress: WINMINE_INI=apps/winmine/tests/g3.ini sh apps/winmine/tests/run.sh "$TEST" "$OUT"
+# compare: winmine-h/01.png 01.png ignore 320 240 332 260
+# compare: winmine-h/02.png 02.png ignore 320 240 332 260
+# compare: winmine-h/03.png 03.png ignore 320 240 332 260
+# compare: winmine-h/04.png 04.png ignore 320 240 332 260
+# compare: winmine-h/05.png 05.png ignore 320 240 332 260
+# ini: WINMINE.INI Minesweeper Difficulty=3
+# ini: WINMINE.INI Minesweeper Height=24
+# ini: WINMINE.INI Minesweeper Width=30
+# ini: WINMINE.INI Minesweeper Mines=10
+# ini: WINMINE.INI Minesweeper Xpos=80
+# ini: WINMINE.INI Minesweeper Ypos=29
+sleep 400
+sleep 400
+shot shots/01.png
+key alt
+key g
+sleep 400
+shot shots/02.png
+key esc
+key esc
+sleep 400
+shot shots/03.png
+key alt
+key g
+key b
+sleep 400
+shot shots/04.png
+key alt
+key g
+key c
+key tab
+key 2
+key 4
+key tab
+key 3
+key 0
+key tab
+key 1
+key 0
+key enter
+sleep 400
+shot shots/05.png
+key alt
+key g
+key x
+quit

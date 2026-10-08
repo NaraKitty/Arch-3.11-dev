@@ -109,11 +109,42 @@ int GetSystemMetrics(int i)
 }
 COLORREF GetSysColor(int i) { return (i >= 0 && i < W16_NUM_SYSCOLORS) ? w16_syscolor[i] : 0; }
 
+/* USER, both at start-up (seg3:0748, jump table 07D1) and in SetSysColors (seg41:0C06, table 0C50):
+ * the text-like colours are made solid with the display's GetNearestColor; a scroll bar colour of
+ * exactly E0E0E0 gets the 0x10 flag in its high byte (VGA.DRV then realizes the brush as its 50% gray
+ * pattern) */
+static COLORREF snap_syscolor(int k, COLORREF c)
+{
+    switch (k) {
+    case COLOR_SCROLLBAR:
+        if (c == 0x00E0E0E0) c |= 0x10000000;
+        break;
+    case COLOR_MENU: case COLOR_WINDOW: case COLOR_WINDOWFRAME: case COLOR_MENUTEXT:
+    case COLOR_WINDOWTEXT: case COLOR_CAPTIONTEXT: case COLOR_HIGHLIGHT: case COLOR_HIGHLIGHTTEXT:
+    case COLOR_BTNTEXT: case COLOR_INACTIVECAPTIONTEXT:
+        c = GetNearestColor(NULL, c);
+        break;
+    }
+    return c;
+}
+
+/* the start-up half, once the display (W16_COLORS) is set up: libw16 reads WIN.INI before that */
+void w16_syscolors_realize(void)
+{
+    for (int k = 0; k < W16_NUM_SYSCOLORS; k++) w16_syscolor[k] = snap_syscolor(k, w16_syscolor[k]);
+}
+
+/* SetSysColors (seg41:0C06): every top-level window then gets WM_SYSCOLORCHANGE and the whole screen
+ * is redrawn, frames and children included (RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN
+ * on the desktop) */
 void SetSysColors(int n, const int *idx, const COLORREF *v)
 {
-    for (int i = 0; i < n; i++)
-        if (idx[i] >= 0 && idx[i] < W16_NUM_SYSCOLORS)
-            w16_syscolor[idx[i]] = v[i];
+    for (int i = 0; i < n; i++) {
+        int k = idx[i];
+        if (k < 0 || k >= W16_NUM_SYSCOLORS) continue;
+        w16_syscolor[k] = snap_syscolor(k, v[i]);
+    }
+    SendMessage(HWND_BROADCAST, WM_SYSCOLORCHANGE, 0, 0);
     w16_invalidate_screen_rect(&(RECT){0, 0, w16_metric[SM_CXSCREEN], w16_metric[SM_CYSCREEN]});
 }
 
@@ -368,7 +399,9 @@ int GetPrivateProfileString(LPCSTR app, LPCSTR key, LPCSTR def, LPSTR out, int c
         return 0;
     if (app && ini_get(path, app, key, out, cb, &len))
         return len;
-    snprintf(out, cb, "%s", def ? def : "");
+    /* the default may be the output buffer itself (DRIVERS.CPL passes the same buffer) */
+    if (def != out) snprintf(out, cb, "%s", def ? def : "");
+    else if ((int)strlen(out) >= cb) out[cb - 1] = 0;
     return strlen(out);
 }
 int GetPrivateProfileInt(LPCSTR app, LPCSTR key, int def, LPCSTR file)
@@ -383,6 +416,8 @@ int GetPrivateProfileInt(LPCSTR app, LPCSTR key, int def, LPCSTR file)
 BOOL WritePrivateProfileString(LPCSTR app, LPCSTR key, LPCSTR val, LPCSTR file)
 {
     char path[1200];
+    /* NULL section: KERNEL writes its cached profile out; libw16 keeps no cache */
+    if (!app) return TRUE;
     ini_path(file, path, sizeof path);
     return ini_set(path, app, key, val);
 }
@@ -392,6 +427,10 @@ BOOL WriteProfileString(LPCSTR a, LPCSTR k, LPCSTR v) { return WritePrivateProfi
 
 UINT GetWindowsDirectory(LPSTR buf, UINT cb) { snprintf(buf, cb, "C:\\WINDOWS"); return strlen(buf); }
 UINT GetSystemDirectory(LPSTR buf, UINT cb) { snprintf(buf, cb, "C:\\WINDOWS\\SYSTEM"); return strlen(buf); }
+/* KERNEL's flags for 3.11 in 386 enhanced mode on the reference machine (DOSBox-X, a Pentium: KERNEL
+ * reports a 486 or later as WF_CPU486) with a coprocessor and paging. UNTESTED: the value itself was
+ * not read on the rig; programs test the CPU and mode bits */
+DWORD GetWinFlags(void) { return WF_PMODE | WF_CPU486 | WF_ENHANCED | WF_80x87 | WF_PAGING; }
 
 void w16_sys_init(void)
 {
@@ -426,11 +465,18 @@ void w16_sys_init(void)
     w16_mouse_params[2] = GetProfileInt("windows", "MouseSpeed", 1);
     if (w16_mouse_params[2] == 2) w16_mouse_params[1] = GetProfileInt("windows", "MouseThreshold2", 10);
     w16_trails_init();
+    /* USER's start-up (seg3:0748 with its reader seg3:06D7): three numbers, each the next run of
+     * digits (anything else between them is skipped), kept as a byte. 3.1 reads on past the end of a
+     * value with fewer than three numbers; libw16 stops there and takes 0 for the rest. */
     for (int i = 0; i < W16_NUM_SYSCOLORS; i++) {
-        if (GetProfileString("colors", color_keys[i], "", b, sizeof b)) {
-            int r, g, bl;
-            if (sscanf(b, "%d %d %d", &r, &g, &bl) == 3)
-                w16_syscolor[i] = RGB(r, g, bl);
+        if (GetProfileString("colors", color_keys[i], "", b, sizeof b) && b[0]) {
+            BYTE v[3] = {0, 0, 0};
+            const char *p = b;
+            for (int k = 0; k < 3; k++) {
+                while (*p && (*p < '0' || *p > '9')) p++;
+                while (*p >= '0' && *p <= '9') v[k] = (BYTE)(v[k] * 10 + (*p++ - '0'));
+            }
+            w16_syscolor[i] = RGB(v[0], v[1], v[2]);
         }
     }
     int sw = 640, sh = 480;
@@ -570,36 +616,38 @@ static unsigned char lo1252(unsigned char c)
 int lstrlen(LPCSTR s) { return s ? (int)strlen(s) : 0; }
 LPSTR lstrcpy(LPSTR d, LPCSTR s) { return strcpy(d, s ? s : ""); }
 LPSTR lstrcat(LPSTR d, LPCSTR s) { return strcat(d, s ? s : ""); }
-/* USER's lstrcmp / lstrcmpi without a language driver (seg11:0088 with the class table at
- * seg11:0010): characters that differ are compared by a sort weight - digits weigh 0x100 + digit,
- * letters 0x111.. in either case, accented capitals as their small letters (0xE0..0xFE), every other
- * byte its own value - so punctuation sorts before digits and digits before letters (a 3.11 file list
- * starts "_default.pif", "256color.bmp", "accessor.grp"). lstrcmp breaks a tie that only case made
- * by the first such difference, the small letter after the capital. */
-static int collate(unsigned char c, int *lower)
+/* USER seg11:005E: a character's sort weight without a language driver (the ranges at seg11:0010:
+ * first, last, added, lower case). Digits and letters weigh more than every other character, upper
+ * and lower case (accented letters too) weigh the same */
+static unsigned sort_weight(unsigned char c, int *lower)
 {
-    static const unsigned char cls[7][4] = {
+    static const unsigned char ranges[7][4] = {
         {'0', '9', 0xD0, 0}, {'A', 'Z', 0xD0, 0}, {'a', 'z', 0xB0, 1}, {0xC0, 0xD6, 0x20, 0},
         {0xD8, 0xDE, 0x20, 0}, {0xE0, 0xF6, 0x00, 1}, {0xF8, 0xFE, 0x00, 1}};
-    *lower = -1;
-    for (int i = 0; i < 7 && c >= cls[i][0]; i++)
-        if (c <= cls[i][1]) { *lower = cls[i][3]; return c + cls[i][2]; }
+    *lower = 0;
+    for (int i = 0; i < 7 && c >= ranges[i][0]; i++)
+        if (c <= ranges[i][1]) {
+            *lower = ranges[i][3];
+            return c + ranges[i][2];
+        }
     return c;
 }
-static int user_strcmp(LPCSTR a, LPCSTR b, int fcase)
+
+/* USER seg11:0088, behind lstrcmp (fCase) and lstrcmpi: the first characters that differ decide by
+ * weight; lstrcmp then orders strings that differ only in case by their first such difference (the
+ * lower-case one after). Returns 1, 0 or -1 */
+static int user_strcmp(LPCSTR a, LPCSTR b, int fCase)
 {
-    const unsigned char *s = (const unsigned char *)a, *t = (const unsigned char *)b;
-    int ca = 0, cb = 0, tie = 0;
-    for (;; s++, t++) {
-        if (!*s || !*t) break;
-        if (*s == *t) continue;
-        int la, lb, x = collate(*s, &la), y = collate(*t, &lb);
-        if (x != y) return x > y ? 1 : -1;
-        if (fcase && la != lb && !tie) { ca = la; cb = lb; tie = 1; }
+    int ca = 0, cb = 0;
+    for (;;) {
+        unsigned char x = *a++, y = *b++;
+        if (!x || !y) return x ? 1 : y ? -1 : ca > cb ? 1 : ca < cb ? -1 : 0;
+        if (x == y) continue;
+        int lx, ly;
+        unsigned wx = sort_weight(x, &lx), wy = sort_weight(y, &ly);
+        if (wx != wy) return wx > wy ? 1 : -1;
+        if (fCase && lx != ly && !(ca | cb)) { ca = lx; cb = ly; }
     }
-    if (*s) return 1;
-    if (*t) return -1;
-    return ca > cb ? 1 : ca < cb ? -1 : 0;
 }
 int lstrcmp(LPCSTR a, LPCSTR b) { return user_strcmp(a, b, 1); }
 int lstrcmpi(LPCSTR a, LPCSTR b) { return user_strcmp(a, b, 0); }
@@ -864,11 +912,31 @@ static void dos_resolve(LPCSTR in, char *out, size_t cb)
     for (int i = 0; i < n && o < cb; i++) o += snprintf(out + o, cb - o, "\\%s", parts[i]);
 }
 
+/* 3.1 keeps the profiles in the Windows directory: <windir>\NAME.INI is the file Get/Write(Private)-
+ * ProfileString use (in the config directory here), so programs that read or rewrite WIN.INI and
+ * SYSTEM.INI as files (DRIVERS.CPL adds [386Enh] device= lines that way) see the same data. Only
+ * profiles that exist (WIN, SYSTEM and CONTROL.INI are seeded on first use) */
+static int profile_host(const char *full, char *host, size_t cb)
+{
+    char win[260], path[1200];
+    GetWindowsDirectory(win, sizeof win);
+    size_t n = strlen(win), l;
+    const char *name = full + n + 1;
+    if (strncasecmp(full, win, n) || full[n] != '\\' || strchr(name, '\\') || (l = strlen(name)) < 5 ||
+        strcasecmp(name + l - 4, ".INI"))
+        return 0;
+    ini_path(name, path, sizeof path);
+    if (access(path, F_OK)) return 0;
+    snprintf(host, cb, "%s", path);
+    return 1;
+}
+
 int w16_dos_to_host(LPCSTR dos, char *host, size_t cb)
 {
     load_drives();
     char full[520];
     dos_resolve(dos, full, sizeof full);
+    if (profile_host(full, host, cb)) return 0;
     char drv = full[0];
     const char *root = NULL, *rest = full + 2;
     for (int i = 0; i < ndrives; i++)

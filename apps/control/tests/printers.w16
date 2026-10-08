@@ -1,0 +1,32 @@
+# Printers (MAIN.CPL dialog 1): ARCH311_REF=/mnt/c/Users/pikac/arch311-ref sh tools/run-cp-test.sh apps/control/tests/printers.w16 OUT Printers
+# Same keys as arch311-ref/scn/printers-open.scn after opening. The simulated CUPS has the reference
+# run's two printers (HP_LaserJet_4 on LPT1: as default, Text_Only on FILE:): opened, Remove asks
+# (No), Add >> lists the printers, Esc closes.
+# The Remove box (02-remove) lines up with real 3.11 once libw16's DrawText measures a wrapped line
+# with the blank before the word that went to the next line, as USER does (3.11: 241 px, not 237).
+# regress: sh tools/run-cp-test.sh "$TEST" "$OUT" Printers
+# compare: printers-open/02.png 01-open.png active ignore 320 240 332 260
+# compare: printers-open/03.png 02-remove.png active ignore 320 240 332 260
+# compare: printers-open/04.png 03-kept.png active ignore 320 240 332 260
+# compare: printers-open/05.png 04-add.png active ignore 320 240 332 260
+sleep 900
+shot shots/01-open.png
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key space
+sleep 400
+shot shots/02-remove.png
+key n
+sleep 400
+shot shots/03-kept.png
+key tab
+key space
+sleep 600
+shot shots/04-add.png
+key esc
+sleep 400
+quit

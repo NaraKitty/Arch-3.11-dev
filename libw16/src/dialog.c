@@ -68,6 +68,8 @@ static int name_or_ord(const uint8_t **p, const char **name)
 }
 
 static int tabbable(HWND c);
+static void check_def_push(HWND dlg, HWND old, HWND nw);
+static void dlg_set_focus(HWND c);
 static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC proc, LPARAM lp, int modal)
 {
     DWORD style = u32(t);
@@ -181,13 +183,17 @@ static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC 
         if (!strcasecmp(ccls, "BUTTON") && (is & 0xF) == BS_DEFPUSHBUTTON) dd->defid = id;
     }
     if (!first) first = GetNextDlgTabItem(h, NULL, FALSE);
-    dd->focus = first;
+    HWND param = first;
+    dd->focus = first; /* given at the first activation (RestoreDlgFocus) */
     if (SendMessage(h, WM_INITDIALOG, (WPARAM)first, lp) && w16_valid(h)) {
         /* WM_INITDIALOG may have disabled or hidden the control picked before it ran */
         if (first && !tabbable(first)) first = GetNextDlgTabItem(h, first, FALSE);
         if (first) {
-            dd->focus = first;
-            if (visible || modal) { /* focus is set when shown/activated */ }
+            /* USER seg24:0914: DlgSetFocus, then CheckDefPushButton - at once if WM_INITDIALOG
+             * already showed and activated the dialog, else when it is */
+            if (w16_active == h && IsWindowVisible(h)) dlg_set_focus(first);
+            else dd->focus = first;
+            check_def_push(h, param, first);
         }
     } else if (w16_valid(h)) {
         /* FALSE: the proc placed the focus itself. If it did not, activation gives the focus to the
@@ -196,13 +202,12 @@ static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC 
         else if (dd->focus && !tabbable(dd->focus)) dd->focus = GetNextDlgTabItem(h, NULL, FALSE);
     }
     if (!w16_valid(h)) return NULL;
-    if (visible || modal || IsWindowVisible(h)) {
-        /* (a modeless dialog may show itself in WM_INITDIALOG, as COMMDLG's Find and Replace do; it
-         * gets its focus and the edit's selection all the same) */
-        if (!IsWindowVisible(h)) ShowWindow(h, SW_SHOWNORMAL);
-        if (dd->focus && w16_valid(dd->focus)) SetFocus(dd->focus);
-        if (dd->focus && w16_valid(dd->focus) && (SendMessage(dd->focus, WM_GETDLGCODE, 0, 0) & DLGC_HASSETSEL))
-            SendMessage(dd->focus, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
+    if (visible || modal) {
+        HWND f0 = dd->focus; /* (activation hands it over and forgets it) */
+        ShowWindow(h, SW_SHOWNORMAL);
+        if (f0 && w16_valid(f0) && w16_focus != f0) SetFocus(f0);
+        if (f0 && w16_valid(f0) && (SendMessage(f0, WM_GETDLGCODE, 0, 0) & DLGC_HASSETSEL))
+            SendMessage(f0, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
     }
     return h;
 }
@@ -275,21 +280,67 @@ void EndDialog(HWND h, int result)
 }
 
 /* ------------------------------------------------------------------ dialog window procedure */
-static void set_default_button(HWND dlg, HWND focus)
+static LRESULT dlg_code(HWND h) { return w16_valid(h) ? SendMessage(h, WM_GETDLGCODE, 0, 0) : 0; }
+
+/* USER seg25:0AB2: every default push button of the dialog becomes a plain one */
+static void clear_defaults(HWND dlg)
 {
-    W16Dialog *d = w16_dlg(dlg);
-    if (!d) return;
-    /* the focused push button becomes the default; otherwise the template default - only while it is
-     * enabled (USER's CheckDefPushButton, seg25:0B5B, skips a disabled one; measured on 3.11: COMMDLG's
-     * Find dialog opens with Find Next disabled and drawn without the default border, which it gets
-     * when typing enables it) */
-    int want = d->defid;
-    if (focus && (SendMessage(focus, WM_GETDLGCODE, 0, 0) & (DLGC_DEFPUSHBUTTON | DLGC_UNDEFPUSHBUTTON))) want = GetDlgCtrlID(focus);
-    for (HWND c = dlg->child; c; c = c->next) {
-        LRESULT code = SendMessage(c, WM_GETDLGCODE, 0, 0);
-        int is = GetDlgCtrlID(c) == want && !(c->style & WS_DISABLED);
-        if (code & DLGC_DEFPUSHBUTTON && !is) SendMessage(c, BM_SETSTYLE, BS_PUSHBUTTON, TRUE);
-        else if (code & DLGC_UNDEFPUSHBUTTON && is) SendMessage(c, BM_SETSTYLE, BS_DEFPUSHBUTTON, TRUE);
+    for (HWND c = dlg->child; c; c = c->next)
+        if (dlg_code(c) & DLGC_DEFPUSHBUTTON) SendMessage(c, BM_SETSTYLE, BS_PUSHBUTTON, TRUE);
+}
+
+/* USER CheckDefPushButton (seg25:0B5B), run when the dialog manager moves the focus from old to
+ * new (Tab, arrows, mnemonics, a click on a control, activation, WM_NEXTDLGCTL, DM_SETDEFID): a push
+ * button getting the focus becomes the default, otherwise the dialog's default button is made the
+ * default again - unless it is disabled. Focus moved by the application's own SetFocus leaves the
+ * buttons as they are (measured: MAIN.CPL Color after "Color Palette >>"). */
+static void check_def_push(HWND dlg, HWND old, HWND nw)
+{
+    if (!w16_valid(dlg)) return;
+    LRESULT cn = nw ? dlg_code(nw) : 0;
+    if (old == nw) {
+        if (cn & DLGC_UNDEFPUSHBUTTON) SendMessage(nw, BM_SETSTYLE, BS_DEFPUSHBUTTON, TRUE);
+        return;
+    }
+    if ((old && (dlg_code(old) & (DLGC_DEFPUSHBUTTON | DLGC_UNDEFPUSHBUTTON))) ||
+        (nw && (cn & (DLGC_DEFPUSHBUTTON | DLGC_UNDEFPUSHBUTTON))))
+        clear_defaults(dlg);
+    if (cn & DLGC_UNDEFPUSHBUTTON) {
+        SendMessage(nw, BM_SETSTYLE, BS_DEFPUSHBUTTON, TRUE);
+        return;
+    }
+    LRESULT r = SendMessage(dlg, DM_GETDEFID, 0, 0);
+    HWND def = GetDlgItem(dlg, HIWORD(r) == DC_HASDEFID ? LOWORD(r) : IDOK);
+    if (!def) return;
+    LRESULT cd = dlg_code(def);
+    if ((cd & DLGC_DEFPUSHBUTTON) || !(cd & DLGC_UNDEFPUSHBUTTON) || (def->style & WS_DISABLED)) return;
+    SendMessage(def, BM_SETSTYLE, BS_DEFPUSHBUTTON, TRUE);
+}
+
+/* USER DlgSetFocus (seg25:0000): the focus, an edit's text selected */
+static void dlg_set_focus(HWND c)
+{
+    SetFocus(c);
+    if (w16_valid(c) && (dlg_code(c) & DLGC_HASSETSEL)) SendMessage(c, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
+}
+
+/* USER RestoreDlgFocus (seg25:03E3): the control that had the focus when the dialog was
+ * deactivated gets it back (once); SaveDlgFocus (seg25:03A8) keeps it, when nothing is kept yet,
+ * and makes the default buttons plain */
+static int restore_dlg_focus(HWND dlg, W16Dialog *d)
+{
+    HWND f = d->focus;
+    d->focus = NULL;
+    if (!f || IsIconic(dlg) || !w16_valid(f) || !IsChild(dlg, f)) return 0;
+    check_def_push(dlg, w16_focus, f);
+    SetFocus(f);
+    return 1;
+}
+static void save_dlg_focus(HWND dlg, W16Dialog *d)
+{
+    if (w16_focus && IsChild(dlg, w16_focus) && !d->focus) {
+        d->focus = w16_focus;
+        clear_defaults(dlg);
     }
 }
 
@@ -312,36 +363,44 @@ LRESULT DefDlgProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         return 0;
     }
     case WM_ACTIVATE:
+        /* USER seg25:050B: restore or save the focus; a dialog activated with nothing to restore
+         * gets the focus itself, which DefDlgProc's WM_SETFOCUS hands to the first tab stop */
         if (d && LOWORD(wp) != WA_INACTIVE) {
-            if (d->focus && w16_valid(d->focus) && IsChild(h, d->focus)) SetFocus(d->focus);
-            else { HWND f = GetNextDlgTabItem(h, NULL, FALSE); if (f) SetFocus(f); }
-            if (w16_focus && IsChild(h, w16_focus)) set_default_button(h, w16_focus);
-        } else if (d) {
-            if (w16_focus && IsChild(h, w16_focus)) d->focus = w16_focus;
+            if (!restore_dlg_focus(h, d) && !(w16_focus && IsChild(h, w16_focus))) {
+                HWND f = GetNextDlgTabItem(h, NULL, FALSE);
+                if (f) dlg_set_focus(f);
+            }
+        } else if (d)
             /* while another window is active no button of the dialog is the default (measured on
              * 3.11: behind the Edit Pattern dialog the focused "Edit Pattern..." and the Desktop's
              * OK both have the thin border, and so has OK behind a message box with the focus in
-             * an edit); the default comes back with the activation */
-            for (HWND c = h->child; c; c = c->next)
-                if (SendMessage(c, WM_GETDLGCODE, 0, 0) & DLGC_DEFPUSHBUTTON) SendMessage(c, BM_SETSTYLE, BS_PUSHBUTTON, TRUE);
-        }
+             * an edit); the default comes back with the activation (CheckDefPushButton) */
+            save_dlg_focus(h, d);
         return 0;
     case WM_SETFOCUS:
-        if (d && d->focus && w16_valid(d->focus)) SetFocus(d->focus);
+        /* seg25:0553 */
+        if (d && !d->ended && !restore_dlg_focus(h, d)) {
+            HWND f = GetNextDlgTabItem(h, NULL, FALSE);
+            if (f) dlg_set_focus(f);
+        }
         return 0;
     case WM_NEXTDLGCTL: {
         HWND n;
         if (LOWORD(lp)) n = (HWND)wp; /* only usable from libw16 code (pointer handle) */
         else n = GetNextDlgTabItem(h, w16_focus, wp != 0);
         if (n) {
-            SetFocus(n);
-            if (SendMessage(n, WM_GETDLGCODE, 0, 0) & DLGC_HASSETSEL) SendMessage(n, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
+            check_def_push(h, w16_focus, n);
+            dlg_set_focus(n);
         }
         return 0;
     }
     case DM_GETDEFID: return d ? MAKELONG(d->defid, DC_HASDEFID) : 0;
     case DM_SETDEFID:
-        if (d) { d->defid = (int)wp; set_default_button(h, w16_focus); }
+        if (d) {
+            HWND old = GetDlgItem(h, d->defid), nw = GetDlgItem(h, (int)wp);
+            check_def_push(h, old, nw);
+            d->defid = (int)wp;
+        }
         return TRUE;
     case WM_GETFONT: return d ? (LRESULT)d->font : 0;
     case WM_SETFONT: if (d) d->font = (HFONT)wp; return 0;
@@ -367,6 +426,9 @@ LRESULT w16_dialog_wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp)
                 return r;
             return d->msgresult ? d->msgresult : r;
         }
+        /* a dialog procedure answering FALSE has placed the focus itself: create_dialog must see the
+         * FALSE (it was turned into TRUE, and the box's MB_DEFBUTTON2 focus on No went back to Yes) */
+        if (m == WM_INITDIALOG) return FALSE;
     }
     if (m == WM_INITDIALOG) return TRUE;
     return DefDlgProc(h, m, wp, lp);
@@ -562,8 +624,8 @@ BOOL IsDialogMessage(HWND dlg, LPMSG m)
                     }
                 }
                 if (n) {
-                    SetFocus(n);
-                    if (SendMessage(n, WM_GETDLGCODE, 0, 0) & DLGC_HASSETSEL) SendMessage(n, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
+                    dlg_set_focus(n);
+                    check_def_push(dlg, f, n);
                 }
             }
             return TRUE;
@@ -572,7 +634,8 @@ BOOL IsDialogMessage(HWND dlg, LPMSG m)
             if (f) {
                 HWND n = GetNextDlgGroupItem(dlg, f, m->wParam == VK_LEFT || m->wParam == VK_UP);
                 if (n && n != f) {
-                    SetFocus(n);
+                    dlg_set_focus(n);
+                    check_def_push(dlg, f, n);
                     if (SendMessage(n, WM_GETDLGCODE, 0, 0) & DLGC_RADIOBUTTON) {
                         /* auto radio buttons check themselves as focus arrives */
                         if ((n->style & 0xF) == BS_AUTORADIOBUTTON) SendMessage(n, WM_KEYDOWN, VK_SPACE, 0), SendMessage(n, WM_KEYUP, VK_SPACE, 0);
@@ -608,159 +671,181 @@ BOOL IsDialogMessage(HWND dlg, LPMSG m)
         if (m->wParam == '\t' || m->wParam == '\r' || m->wParam == 27) return TRUE;
         {
             HWND c = find_mnemonic(dlg, (int)m->wParam, f);
-            if (c) { activate_ctl(dlg, c); return TRUE; }
+            if (c) {
+                activate_ctl(dlg, c);
+                if (w16_focus && IsChild(dlg, w16_focus)) check_def_push(dlg, f, w16_focus);
+                return TRUE;
+            }
         }
         break;
     case WM_SYSCHAR:
         {
             HWND c = find_mnemonic(dlg, (int)m->wParam, f);
-            if (c) { activate_ctl(dlg, c); return TRUE; }
+            if (c) {
+                activate_ctl(dlg, c);
+                if (w16_focus && IsChild(dlg, w16_focus)) check_def_push(dlg, f, w16_focus);
+                return TRUE;
+            }
         }
         break;
+    case WM_LBUTTONDOWN:
+        /* seg25:0E98: a click on a control is a focus change for the default button */
+        if (m->hwnd != dlg && w16_focus) check_def_push(dlg, w16_focus, m->hwnd);
+        break;
     }
+    /* (USER changes no default button after other messages, whatever focus moves they cause) */
     TranslateMessage(m);
     DispatchMessage(m);
-    if (w16_valid(dlg) && w16_focus && IsChild(dlg, w16_focus)) {
-        if (d) d->focus = w16_focus;
-        set_default_button(dlg, w16_focus);
-    }
+    (void)d;
     return TRUE;
 }
 
 /* ------------------------------------------------------------------ MessageBox */
-typedef struct { const char *text; UINT type; HICON icon; int ids[3]; int nb; int def; } MbData;
+/* USER seg42:04F5 lays a message box out in pixels of the system font and builds a dialog template
+ * from it (seg42:0299 header, 038E items, 01E2 buttons); seg42:0101 is its dialog procedure.
+ * (MB_SYSTEMMODAL without an icon or with MB_ICONHAND is 3.1's system error box, seg1:9A86, not
+ * ported: such boxes are laid out like the others.) */
+typedef struct { UINT type; int nb; int def; int defid; } MbData;
+static int mb_nest;   /* [0x1a2] message boxes open: each further one moves by a caption button */
 
 static BOOL mb_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
 {
     if (m == WM_INITDIALOG) {
         MbData *mb = (MbData *)lp;
-        HWND def = GetDlgItem(h, mb->ids[mb->def]);
-        if (def) { SetFocus(def); SendMessage(def, BM_SETSTYLE, BS_DEFPUSHBUTTON, TRUE); w16_dlg(h)->defid = mb->ids[mb->def]; }
+        /* the default button gets the focus (picked by its id). SetFocus activates the still hidden
+         * box, whose RestoreDlgFocus would give the focus to the first tab stop: it is to restore this
+         * button - COMMDLG's overwrite prompt, MB_DEFBUTTON2, opened on Yes where 3.11 opens on No,
+         * measured with arch311-ref scn/cdlg-save frame 07 */
+        HWND c = GetDlgItem(h, mb->defid);
+        if (c && w16_dlg(h)) w16_dlg(h)->focus = c;
+        if (c) SetFocus(c);
+        /* without a Cancel button the system menu has no Close */
+        if (!GetDlgItem(h, IDCANCEL)) {
+            HMENU m = GetSystemMenu(h, FALSE);
+            if (m) DeleteMenu(m, SC_CLOSE, MF_BYCOMMAND);
+        }
+        /* a lone OK answers Esc and Close as Cancel (its id becomes IDCANCEL; MessageBox still
+         * returns IDOK) */
+        if ((mb->type & MB_TYPEMASK) == MB_OK && GetDlgItem(h, IDOK)) GetDlgItem(h, IDOK)->id = IDCANCEL;
         return FALSE;
     }
     if (m == WM_COMMAND) {
         int id = (int)wp;
-        if (id == IDCANCEL && !GetDlgItem(h, IDCANCEL)) {
-            /* Esc only works when there is a Cancel (or a lone OK) button */
-            if (GetDlgItem(h, IDOK) && !GetDlgItem(h, IDYES)) { EndDialog(h, IDOK); return TRUE; }
-            return TRUE;
-        }
-        if (id >= IDOK && id <= IDNO) EndDialog(h, id);
+        if (id < IDOK || id > IDNO) return FALSE;
+        if (id <= IDCANCEL && !GetDlgItem(h, id)) return TRUE; /* Esc without a Cancel button */
+        EndDialog(h, id);
         return TRUE;
     }
     return FALSE;
 }
 
-static LRESULT mb_icon_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
+/* one item of the template (seg42:038E): pixel geometry to dialog units of the system font; a text
+ * static (SS_LEFT) gets a unit more each way */
+static void mb_item(W16DlgTemplate *t, int cls, const char *text, int textlen, int id, DWORD style,
+                    int x, int y, int cx, int cy, int bux, int buy)
 {
-    if (m == WM_PAINT) {
-        PAINTSTRUCT ps;
-        HDC dc = BeginPaint(h, &ps);
-        HICON ic = (HICON)GetProp(h, "W16ICON");
-        if (ic) DrawIcon(dc, 0, 0, ic);
-        EndPaint(h, &ps);
-        return 0;
-    }
-    return DefWindowProc(h, m, wp, lp);
+    int ux = MulDiv(x, 4, bux), uy = MulDiv(y, 8, buy), ucx = MulDiv(cx, 4, bux), ucy = MulDiv(cy, 8, buy);
+    if (cls == 0x82 && !(style & 0xF)) { ucx++; ucy++; }
+    w16_dlgt_item(t, cls, text, textlen, id, style, ux, uy, ucx, ucy);
 }
 
 int MessageBox(HWND owner, LPCSTR text, LPCSTR caption, UINT type)
 {
     HINSTANCE user = w16_system_module("USER.EXE");
-    char sOK[16] = "OK", sCancel[16] = "Cancel", sAbort[16] = "&Abort", sRetry[16] = "&Retry",
-         sIgnore[16] = "&Ignore", sYes[16] = "&Yes", sNo[16] = "&No", sErr[16] = "Error";
-    if (user) {
-        LoadString(user, 84, sOK, 16); LoadString(user, 85, sCancel, 16); LoadString(user, 86, sAbort, 16);
-        LoadString(user, 87, sRetry, 16); LoadString(user, 88, sIgnore, 16); LoadString(user, 89, sYes, 16);
-        LoadString(user, 90, sNo, 16); LoadString(user, 78, sErr, 16);
-    }
-    if (!caption) caption = sErr;
-    MbData mb = {text, type, NULL, {0}, 0, 0};
-    const char *labels[3];
-    switch (type & MB_TYPEMASK) {
-    case MB_OKCANCEL: mb.ids[0] = IDOK; mb.ids[1] = IDCANCEL; labels[0] = sOK; labels[1] = sCancel; mb.nb = 2; break;
-    case MB_ABORTRETRYIGNORE: mb.ids[0] = IDABORT; mb.ids[1] = IDRETRY; mb.ids[2] = IDIGNORE; labels[0] = sAbort; labels[1] = sRetry; labels[2] = sIgnore; mb.nb = 3; break;
-    case MB_YESNOCANCEL: mb.ids[0] = IDYES; mb.ids[1] = IDNO; mb.ids[2] = IDCANCEL; labels[0] = sYes; labels[1] = sNo; labels[2] = sCancel; mb.nb = 3; break;
-    case MB_YESNO: mb.ids[0] = IDYES; mb.ids[1] = IDNO; labels[0] = sYes; labels[1] = sNo; mb.nb = 2; break;
-    case MB_RETRYCANCEL: mb.ids[0] = IDRETRY; mb.ids[1] = IDCANCEL; labels[0] = sRetry; labels[1] = sCancel; mb.nb = 2; break;
-    default: mb.ids[0] = IDOK; labels[0] = sOK; mb.nb = 1; break;
-    }
-    mb.def = ((type & MB_DEFMASK) >> 8);
+    /* USER's button texts ([0x226]) and per type: count [0x1fe], first text [0x204], ids [0x21e] */
+    static const char *defaults[8] = {"OK", "Cancel", "&Abort", "&Retry", "&Ignore", "&Yes", "&No", "Error"};
+    char s[8][16];
+    for (int i = 0; i < 8; i++)
+        if (!user || !LoadString(user, i < 7 ? 84 + i : 78, s[i], 16)) snprintf(s[i], 16, "%s", defaults[i]);
+    static const BYTE count[6] = {1, 2, 3, 3, 2, 2};
+    static const BYTE label[6][3] = {{0}, {0, 1}, {2, 3, 4}, {5, 6, 1}, {5, 6}, {3, 1}};
+    static const BYTE ids[6][3] = {{IDOK}, {IDOK, IDCANCEL}, {IDABORT, IDRETRY, IDIGNORE}, {IDYES, IDNO, IDCANCEL},
+                                   {IDYES, IDNO}, {IDRETRY, IDCANCEL}};
+    if (!caption) caption = s[7];
+    if (!text) text = "";
+    int kind = type & MB_TYPEMASK;
+    if (kind > MB_RETRYCANCEL) kind = MB_OK;
+    MbData mb = {type, count[kind], (type & MB_DEFMASK) >> 8};
     if (mb.def >= mb.nb) mb.def = 0;
-    switch (type & MB_ICONMASK) {
-    case MB_ICONHAND: mb.icon = LoadIcon(NULL, IDI_HAND); break;
-    case MB_ICONQUESTION: mb.icon = LoadIcon(NULL, IDI_QUESTION); break;
-    case MB_ICONEXCLAMATION: mb.icon = LoadIcon(NULL, IDI_EXCLAMATION); break;
-    case MB_ICONASTERISK: mb.icon = LoadIcon(NULL, IDI_ASTERISK); break;
+    mb.defid = ids[kind][mb.def];
+    int icon = 0;
+    switch (type & MB_ICONMASK) { /* seg42:00C9 */
+    case MB_ICONHAND: icon = 32513; break;
+    case MB_ICONQUESTION: icon = 32514; break;
+    case MB_ICONEXCLAMATION: icon = 32515; break;
+    case MB_ICONASTERISK: icon = 32516; break;
     }
-    /* layout in pixels with the system font (3.1 message boxes use it) */
-    W16Font *f = w16_font_system();
-    int cxc = f->avgw, cyc = f->height;
+
+    /* the metrics: dialog base units of the system font ([0x522], [0x52a]), half the system-menu
+     * bitmap ([0x602], [0x604]), border, caption, icon, screen */
+    int bux = LOWORD(GetDialogBaseUnits()), buy = HIWORD(GetDialogBaseUnits());
+    int cxs = GetSystemMetrics(SM_CXSIZE), cys = GetSystemMetrics(SM_CYSIZE);
+    int cxb = GetSystemMetrics(SM_CXBORDER), cyb = GetSystemMetrics(SM_CYBORDER), cyc = GetSystemMetrics(SM_CYCAPTION);
+    int scrw = GetSystemMetrics(SM_CXSCREEN), scrh = GetSystemMetrics(SM_CYSCREEN);
+    int iconw = 0, iconh = 0;
+    if (icon) { iconw = GetSystemMetrics(SM_CXICON) + cxs; iconh = GetSystemMetrics(SM_CYICON); }
     HDC dc = GetDC(NULL);
     SelectObject(dc, GetStockObject(SYSTEM_FONT));
-    RECT tr = {0, 0, w16_screen.w * 5 / 8, 0};
-    DrawText(dc, text, -1, &tr, DT_CALCRECT | DT_WORDBREAK | DT_EXPANDTABS | DT_NOPREFIX);
+    /* the button width, seg3:23BE: the longest text (by length) without its '&', and two "0"s */
+    int longest = 0;
+    for (int i = 1; i < 7; i++)
+        if (strlen(s[i]) > strlen(s[longest])) longest = i;
+    char plain[16];
+    int k = 0;
+    for (const char *p = s[longest]; *p && k < 15; p++)
+        if (*p != '&') plain[k++] = *p;
+    plain[k] = 0;
+    int btnw = LOWORD(GetTextExtent(dc, plain, k)) + 2 * LOWORD(GetTextExtent(dc, "0", 1));
+    int btnh = buy * 14 >> 3;
     int capw = LOWORD(GetTextExtent(dc, caption, strlen(caption)));
+    int btnsw = btnw * mb.nb + (mb.nb - 1) * cxs;
+    int minw = max(btnsw, capw + 2 * cxs);
+    /* the text wraps at 5/8 of the screen less the margins (or what the buttons and caption need) */
+    int wrap = minw - 2 * (cyb + cxs) - iconw;
+    wrap = max(wrap, (scrw >> 3) * 5 - 2 * (cyb + cxs) - iconw);
+    RECT tr = {0, 0, wrap, wrap};
+    int texth = DrawText(dc, text, -1, &tr, DT_CALCRECT | DT_WORDBREAK | DT_EXPANDTABS | DT_NOPREFIX);
     ReleaseDC(NULL, dc);
-    int bw = cxc * 9 + 2, bh = cyc * 7 / 4, gap = cxc * 2;
-    int iconw = mb.icon ? 32 + cxc * 2 : 0;
-    int textw = tr.right - tr.left, texth = tr.bottom - tr.top;
-    int contentw = max(iconw + textw, mb.nb * bw + (mb.nb - 1) * gap);
-    contentw = max(contentw, capw + 40);
-    int cw = contentw + cxc * 4;
-    int toph = max(texth, mb.icon ? 32 : 0);
-    int ch = cyc + toph + cyc + bh + cyc * 3 / 4;
-    /* build an in-memory dialog */
+    int textw = tr.right - tr.left;
+
+    /* the window: centred, cascaded, kept on the screen */
+    int w = max(textw, minw) + 2 * cxs + iconw;
+    int hgt = max(iconh, texth) + 6 * buy;
+    int x = ((scrw - w) >> 1) + cxs * mb_nest, y = ((scrh - hgt) >> 1) + cys * mb_nest;
+    if (x + w > scrw) x = scrw - 2 * cxb - w;
+    if (y + hgt > scrh) y = scrh - 2 * cyb - hgt;
+    int bx = ((w - btnsw) >> 1) - cxb;
+    int by = hgt - 2 * cyb - (buy >> 1) - cyc;
+    int ty = ((max(iconh, texth) - texth) >> 1) + buy;
+    W16_LOG("MessageBox: base %dx%d btn %dx%d text %dx%d wrap %d cap %d box %d,%d %dx%d\n", bux, buy, btnw, btnh, textw,
+            texth, wrap, capw, x, y, w, hgt);
+
+    /* the template: the client area (inside the border and caption) in dialog units, absolute;
+     * buttons, then the icon, then the text */
+    RECT r = {x + cxb, y + cyc, x + w - cxb, y + hgt - cyb};
+    DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_ABSALIGN | DS_NOIDLEMSG |
+                  ((type & (MB_SYSTEMMODAL | MB_TASKMODAL)) == MB_SYSTEMMODAL ? DS_SYSMODAL : DS_MODALFRAME);
+    W16DlgTemplate *t = w16_dlgt_new(style, MulDiv(r.left, 4, bux), MulDiv(r.top, 8, buy), MulDiv(r.right - r.left, 4, bux),
+                                     MulDiv(r.bottom - r.top, 8, buy), caption, 0, NULL);
+    for (int i = 0; i < mb.nb; i++, bx += btnw + cxs)
+        mb_item(t, 0x80, s[label[kind][i]], -1, ids[kind][i],
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | (i ? 0 : WS_GROUP) | (i == mb.def ? BS_DEFPUSHBUTTON : 0), bx,
+                by - btnh, btnw, btnh, bux, buy);
+    if (icon) {
+        char ord[3] = {(char)0xFF, (char)(icon & 0xFF), (char)(icon >> 8)};
+        mb_item(t, 0x82, ord, 3, 0xFFFF, WS_CHILD | WS_VISIBLE | WS_GROUP | SS_ICON, cxs, ((texth - iconh) >> 1) + ty, 0, 0,
+                bux, buy);
+    }
+    mb_item(t, 0x82, text, -1, 0xFFFF, WS_CHILD | WS_VISIBLE | WS_GROUP | SS_NOPREFIX, cxs + iconw, ty, textw, texth, bux, buy);
+
     HWND parent = owner && w16_valid(owner) ? w16_top_level(owner) : NULL;
-    static int cls_done;
-    if (!cls_done) {
-        WNDCLASS wc = {0};
-        wc.lpfnWndProc = mb_icon_proc;
-        wc.lpszClassName = "W16MBICON";
-        wc.style = CS_GLOBALCLASS;
-        RegisterClass(&wc);
-        cls_done = 1;
-    }
-    W16Dialog *dd = calloc(1, sizeof *dd);
-    dd->proc = mb_proc;
-    dd->cxchar = cxc;
-    dd->cychar = cyc;
-    dd->defid = mb.ids[mb.def];
-    struct W16Window fake;
-    memset(&fake, 0, sizeof fake);
-    fake.style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_DLGFRAME;
-    fake.exstyle = WS_EX_DLGMODALFRAME;
-    fake.parent = w16_desktop;
-    RECT big = {0, 0, 1000, 1000}, inner;
-    w16_nc_calc(&fake, &big, &inner);
-    int ww = cw + inner.left + (1000 - inner.right), wh = ch + inner.top + (1000 - inner.bottom);
-    int wx = (w16_screen.w - ww) / 2, wy = (w16_screen.h - wh) / 2;
-    HWND h = CreateWindowEx(WS_EX_DLGMODALFRAME, "#32770", caption, WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_DLGFRAME,
-                            wx, wy, ww, wh, parent, NULL, NULL, NULL);
-    h->is_dialog = 1;
-    h->ctl = dd;
-    int tx = cxc * 2 + iconw;
-    if (mb.icon) {
-        HWND ic = CreateWindow("W16MBICON", "", WS_CHILD | WS_VISIBLE, cxc * 2, cyc, 32, 32, h, (HMENU)(uintptr_t)0xFFFF, NULL, NULL);
-        SetProp(ic, "W16ICON", mb.icon);
-    }
-    CreateWindow("STATIC", text, WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX, tx, cyc + (toph - texth) / 2, textw + 2, texth, h,
-                 (HMENU)(uintptr_t)0xFFFF, NULL, NULL);
-    int total = mb.nb * bw + (mb.nb - 1) * gap;
-    int bx = (cw - total) / 2, by = cyc + toph + cyc;
-    for (int i = 0; i < mb.nb; i++) {
-        HWND b = CreateWindow("BUTTON", labels[i], WS_CHILD | WS_VISIBLE | WS_TABSTOP | (i == mb.def ? BS_DEFPUSHBUTTON : BS_PUSHBUTTON),
-                              bx + i * (bw + gap), by, bw, bh, h, (HMENU)(uintptr_t)mb.ids[i], NULL, NULL);
-        (void)b;
-    }
-    /* the default button has the focus (MB_DEFBUTTON2: COMMDLG's overwrite prompt opens on No, as on
-     * 3.11); set before WM_INITDIALOG, whose SetFocus activates the box, which restores this focus */
-    dd->focus = GetDlgItem(h, mb.ids[mb.def]);
-    SendMessage(h, WM_INITDIALOG, 0, (LPARAM)&mb);
-    dd->focus = GetDlgItem(h, mb.ids[mb.def]);
-    ShowWindow(h, SW_SHOWNORMAL);
-    MessageBeep(type & MB_ICONMASK);
-    return run_modal(h, parent);
+    mb_nest++;
+    /* (3.1's MessageBox plays no sound: programs call MessageBeep themselves) */
+    int res = DialogBoxIndirectParam(NULL, w16_dlgt_data(t), parent, mb_proc, (LPARAM)&mb);
+    if (mb_nest) mb_nest--;
+    w16_dlgt_free(t);
+    if (kind == MB_OK && res) res = IDOK;
+    return res;
 }
 
 /* ------------------------------------------------------------------ DlgDirList / LB_DIR */

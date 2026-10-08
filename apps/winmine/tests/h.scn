@@ -1,0 +1,28 @@
+# Minesweeper started with the largest board, 30 x 24 (WINMINE.INI from g3.ini: Difficulty=3, Height=24,
+# Width=30, Mines=10, no Xpos/Ypos): the window does not fit 480 lines; the Game menu; Beginner; the
+# same 30 x 24 board again through Custom Field, now with the window shown; then Exit
+shot
+key alt
+key g
+shot
+key esc
+key esc
+shot
+key alt
+key g
+key b
+shot
+key alt
+key g
+key c
+key tab
+type 24
+key tab
+type 30
+key tab
+type 10
+key enter
+shot
+key alt
+key g
+key x

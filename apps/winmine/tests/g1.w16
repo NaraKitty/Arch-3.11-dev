@@ -1,0 +1,38 @@
+# Minesweeper gameplay on the beginner board of WINMINE_SEED=1 (run.sh's default): the first click
+# lands on a mine (3,1), which moves to (1,1); flag, "?", blank and flag again on (2,2); both buttons
+# on the 1 at (3,1) open around it; a wrong flag on (5,5); (8,8); then the mine at (7,2) loses.
+# Box (x,y) is at screen (83 + 16x, 126 + 16y) with the window at its default place.
+# No real-3.11 frames: the reference rig cannot click. The boards were checked against a model of the
+# decoded game logic (pixel for pixel, every shot but the button-down one, 05).
+# regress: sh apps/winmine/tests/run.sh "$TEST" "$OUT"
+sleep 500
+click 131 142
+sleep 300
+shot shots/01.png
+rclick 115 158
+sleep 300
+shot shots/02.png
+rclick 115 158
+sleep 300
+shot shots/03.png
+rclick 115 158
+sleep 300
+rclick 115 158
+sleep 300
+shot shots/04.png
+down 131 142
+rdown 131 142
+sleep 300
+shot shots/05.png
+up 131 142
+rup 131 142
+sleep 300
+shot shots/06.png
+rclick 163 206
+click 211 254
+sleep 300
+shot shots/07.png
+click 195 158
+sleep 300
+shot shots/08.png
+quit

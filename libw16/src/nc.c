@@ -131,12 +131,17 @@ static void obm_stretch(HDC dc, int id, int x, int y, int w, int h)
     }
 }
 
+/* USER paints frames, captions and scroll-bar parts with its system-colour brushes (PatBlt), so a
+ * colour the display cannot show solid is dithered by the driver as for any solid brush - measured:
+ * real 3.11 after MAIN.CPL Color applies Arizona (ActiveTitle 64 128 128, ActiveBorder 255 128 64) */
 static void fill(HDC dc, int l, int t, int r, int b, COLORREF c)
 {
     int a = l, bb = t, cc = r, d = b;
     w16_lp_to_dp(dc, &a, &bb);
     w16_lp_to_dp(dc, &cc, &d);
-    w16_fill_solid_dev(dc, &(RECT){a, bb, cc, d}, w16_rgb(c));
+    HBRUSH br = CreateSolidBrush(c);
+    w16_fill_rect_dev(dc, &(RECT){a, bb, cc, d}, br);
+    DeleteObject(br);
 }
 
 static void draw_frame(HWND h, HDC dc, int active)
@@ -624,11 +629,13 @@ void w16_maximize(HWND h)
     SendMessage(h, WM_MOVE, 0, MAKELPARAM(h->rc.left, h->rc.top));
 }
 
+/* Restoring does not make the icon's place stick: USER's MinMaximize (seg6:1BC2) forgets the icon
+ * position and takes a free slot (seg4:0000) on the next minimize unless the checkpoint says the icon
+ * was moved (flag set at seg6:123B when a move ends on an icon: track_rect below). */
 void w16_restore(HWND h)
 {
     RECT old = h->rw, title;
     int was_min = (h->style & WS_MINIMIZE) != 0;
-    if (was_min) h->iconpos = (POINT){h->rw.left, h->rw.top}, h->has_iconpos = 1;
     w16_icon_title_rect(h, &title);
     h->style &= ~(WS_MINIMIZE | WS_MAXIMIZE);
     w16_invalidate_screen_rect(&old);
@@ -717,6 +724,8 @@ static void track_rect(HWND h, int hit, POINT start)
         if (h->parent && h->parent != w16_desktop) pr = h->parent->rc;
         SetWindowPos(h, NULL, r.left - pr.left, r.top - pr.top, r.right - r.left, r.bottom - r.top,
                      SWP_NOZORDER | SWP_NOACTIVATE);
+        /* an icon moved by the user keeps its place (USER seg6:123B sets the checkpoint flag) */
+        if (IsIconic(h)) h->iconpos = (POINT){r.left, r.top}, h->has_iconpos = 1;
     }
 }
 

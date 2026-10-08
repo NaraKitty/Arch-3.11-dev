@@ -1,0 +1,27 @@
+# Printers > Setup... (arch311 behaviour): ARCH311_REF=<rig> sh tools/run-cp-test.sh apps/control/tests/printers-setup.w16 OUT Printers
+# 3.11 runs the printer driver's own dialog here (the reference rig's TTY.DRV showed none and wrote its
+# defaults to WIN.INI [HP_LaserJet_4]); arch311 shows Print Setup for the queue: Landscape, OK
+# (lpoptions -p HP_LaserJet_4 -o media=Letter -o orientation-requested=4, simulated), then Setup...
+# again shows Landscape read back from lpoptions; Cancel, Esc closes.
+# regress: sh tools/run-cp-test.sh "$TEST" "$OUT" Printers
+sleep 900
+key tab
+key tab
+key tab
+key tab
+key tab
+key space
+sleep 600
+shot shots/01-printsetup.png
+key alt+l
+key enter
+sleep 400
+shot shots/02-back.png
+key space
+sleep 600
+shot shots/03-landscape.png
+key esc
+sleep 300
+key esc
+sleep 400
+quit

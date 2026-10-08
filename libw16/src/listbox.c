@@ -19,6 +19,8 @@ typedef struct {
     int redraw_off;
     int want_h;       /* height asked for inside the border; whole items of it are shown */
     int fitting;      /* fit_height is resizing the window */
+    int fit_h;        /* the client height fit_height gave it last */
+    int vbar;         /* created with WS_VSCROLL: the bar comes back when the items do not fit */
     int caret_on;     /* a combo's dropped list shows its caret once a key has moved it (3.11) */
 } Lb;
 
@@ -49,10 +51,8 @@ static void lb_notify(HWND h, int code)
 static void update_sb(HWND h)
 {
     Lb *l = lbd(h);
-    if (!(h->style & WS_VSCROLL)) {
-        if (!(h->style & LBS_DISABLENOSCROLL) && l->n > visible_items(h) && (h->style & 0x00200000)) {}
-        return;
-    }
+    /* the style bit goes while SetScrollRange hides the bar; USER's list remembers it had one */
+    if (!l->vbar) return;
     int vis = visible_items(h);
     int mx = max(0, l->n - vis);
     if (mx == 0 && !(h->style & LBS_DISABLENOSCROLL)) {
@@ -77,9 +77,14 @@ static void draw_item(HWND h, HDC dc, int i, HBRUSH bg)
     int sel = i < l->n && (multisel(h) ? l->it[i].sel : i == l->cursel);
     int caret = (l->focus || l->caret_on) && i == l->caret;
     if (ownerdraw(h) && i < l->n) {
-        DRAWITEMSTRUCT di = {ODT_LISTBOX, h->id, i, ODA_DRAWENTIRE, (sel ? ODS_SELECTED : 0) | (caret ? ODS_FOCUS : 0),
-                             h, dc, ir, l->it[i].data};
-        SendMessage(lb_owner(h), WM_DRAWITEM, h->id, (LPARAM)&di);
+        /* USER seg35:23E1; a combo box passes its list's items on as its own (seg33:073F:
+         * ODT_COMBOBOX, the combo's id and handle) */
+        HWND ctl = l->combo ? l->combo : h;
+        DRAWITEMSTRUCT di = {l->combo ? ODT_COMBOBOX : ODT_LISTBOX, ctl->id, i, ODA_DRAWENTIRE,
+                             (sel ? ODS_SELECTED : 0) | (caret ? ODS_FOCUS : 0) |
+                                 ((h->style & WS_DISABLED) ? ODS_DISABLED : 0),
+                             ctl, dc, ir, l->it[i].data};
+        SendMessage(ctl->parent, WM_DRAWITEM, ctl->id, (LPARAM)&di);
         return;
     }
     FillRect(dc, &ir, sel ? w16_sys_brush(COLOR_HIGHLIGHT) : bg);
@@ -88,7 +93,9 @@ static void draw_item(HWND h, HDC dc, int i, HBRUSH bg)
     /* a disabled list grays every item, the selected one too (on the highlight) */
     COLORREF old = SetTextColor(dc, (h->style & WS_DISABLED) ? GetSysColor(COLOR_GRAYTEXT) : sel ? GetSysColor(COLOR_HIGHLIGHTTEXT) : GetTextColor(dc));
     const char *s = l->it[i].s ? l->it[i].s : "";
-    if (h->style & LBS_USETABSTOPS) TabbedTextOut(dc, 2, y, s, strlen(s), l->ntabs, l->ntabs ? l->tabs : NULL, 2);
+    /* USER seg35:24A6 measures the tab stops from the client edge (tab origin 0), not from the text
+     * (measured: MAIN.CPL Connect's port list puts "Local Port" 56 px in) */
+    if (h->style & LBS_USETABSTOPS) TabbedTextOut(dc, 2, y, s, strlen(s), l->ntabs, l->ntabs ? l->tabs : NULL, 0);
     else TextOut(dc, 2, y, s, strlen(s));
     SetTextColor(dc, old);
     if (caret) DrawFocusRect(dc, &ir);
@@ -157,12 +164,24 @@ static int insert(HWND h, int pos, const char *s, ULONG_PTR data)
     return pos;
 }
 
+/* USER seg43:0614, the order of a sorted list: a string that starts with '[' (a directory or drive
+ * entry) goes after every string that does not; otherwise lstrcmpi decides (measured: Drivers lists
+ * "MIDI Mapper", "Timer", "[MCI] MIDI Sequencer", "[MCI] Sound") */
+static int sort_compare(const char *a, const char *b)
+{
+    if (*a == '[') {
+        if (*b != '[') return 1;
+    } else if (*b == '[')
+        return -1;
+    return lstrcmpi(a, b);
+}
+
 static int sorted_pos(HWND h, const char *s, ULONG_PTR data)
 {
     Lb *l = lbd(h);
     for (int i = 0; i < l->n; i++) {
         int c;
-        if (has_strings(h)) c = lstrcmpi(s, l->it[i].s ? l->it[i].s : "");
+        if (has_strings(h)) c = sort_compare(s, l->it[i].s ? l->it[i].s : "");
         else {
             COMPAREITEMSTRUCT ci = {ODT_LISTBOX, h->id, h, (UINT)-1, data, i, l->it[i].data};
             c = (int)SendMessage(lb_owner(h), WM_COMPAREITEM, h->id, (LPARAM)&ci);
@@ -206,20 +225,25 @@ static int item_at(HWND h, int y)
     return i;
 }
 
-/* unless LBS_NOINTEGRALHEIGHT, a list box shows whole items only: the height it was given is cut
- * down to whole items of the current font, again whenever the font or item height changes (on
- * 3.11, SND.CPL's lists come out 8 items of 13 px high from a 114 px template height) */
+/* unless LBS_NOINTEGRALHEIGHT, a list box shows whole items only, again whenever the font or item
+ * height changes */
 static void fit_height(HWND h)
 {
     Lb *l = lbd(h);
     if ((h->style & (LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWVARIABLE)) || l->ih <= 0) return;
-    /* USER seg38:0457 (the list box's WM_SIZE): unless the height less two borders is whole items, the
-     * window becomes as many whole items as its full height holds, plus two borders - so it can grow
-     * by a pixel or two (COMMDLG's 16-pixel directory list: 113 -> 114, as measured on 3.11) */
+    /* USER seg38:0457 (the list box's WM_SIZE, again after a font change): unless the height less two
+     * borders is whole items, the window becomes as many whole items as its full height holds, plus
+     * two borders - so it can grow by a pixel or two. Measured on 3.11: COMMDLG's 16-pixel directory
+     * list 113 -> 114 and its dropped drive list; from the system font's fit, MAIN.CPL Printers' lists
+     * of 72 and 111 px end up 5 and 8 items of 13 px, SND.CPL's of 114 px 8 */
+    RECT r;
+    GetClientRect(h, &r);
     int H = h->rw.bottom - h->rw.top, cyb2 = 2 * GetSystemMetrics(SM_CYBORDER);
+    l->fit_h = r.bottom;
     if ((H - cyb2) % l->ih == 0) return;
     int nh = H / l->ih * l->ih + cyb2;
     if (nh <= cyb2) return;
+    l->fit_h = r.bottom + nh - H;
     RECT pr = h->parent && h->parent != w16_desktop ? h->parent->rc : (RECT){0, 0, 0, 0};
     l->fitting = 1;
     SetWindowPos(h, NULL, h->rw.left - pr.left, h->rw.top - pr.top, h->rw.right - h->rw.left, nh,
@@ -235,6 +259,7 @@ LRESULT w16_listbox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         l = calloc(1, sizeof *l);
         h->ctl = l;
         l->cursel = -1;
+        l->vbar = (h->style & WS_VSCROLL) != 0;
         HDC dc = GetDC(NULL);
         SelectObject(dc, GetStockObject(SYSTEM_FONT));
         TEXTMETRIC tm;
@@ -247,8 +272,9 @@ LRESULT w16_listbox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     }
     case WM_CREATE:
         if (ownerdraw(h)) {
-            MEASUREITEMSTRUCT mi = {ODT_LISTBOX, h->id, 0, 0, l->ih, 0};
-            SendMessage(lb_owner(h), WM_MEASUREITEM, h->id, (LPARAM)&mi);
+            HWND ctl = l->combo ? l->combo : h;
+            MEASUREITEMSTRUCT mi = {l->combo ? ODT_COMBOBOX : ODT_LISTBOX, ctl->id, 0, 0, l->ih, 0};
+            SendMessage(ctl->parent, WM_MEASUREITEM, ctl->id, (LPARAM)&mi);
             if (mi.itemHeight) l->ih = mi.itemHeight;
         }
         if ((h->style & WS_BORDER) && !l->combo) {
@@ -304,11 +330,16 @@ LRESULT w16_listbox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     case WM_GETFONT: return (LRESULT)h->font;
     case WM_SIZE:
         if (!l->fitting) {
-            /* resized from outside: that height is the one to fit */
+            /* resized from outside: that height is the one to fit. CreateWindow's own WM_SIZE (and
+             * the one a hidden window gets when shown) only reports the last fit, which was made
+             * for the system font: the height asked for stays (3.11: MAIN.CPL Printers' lists of
+             * 72 and 111 px show 5 and 8 items of 13 px, not 4 and 7) */
             RECT r;
             GetClientRect(h, &r);
-            l->want_h = r.bottom;
-            fit_height(h);
+            if (r.bottom != l->fit_h) {
+                l->want_h = r.bottom;
+                fit_height(h);
+            }
         }
         update_sb(h);
         return 0;
@@ -553,10 +584,7 @@ typedef struct {
     int drop_h;
     int focus;
     int extui;        /* CB_SETEXTENDEDUI */
-    int od_h;         /* an owner-drawn field's height, once measured */
 } Cb;
-
-static int cb_ownerdraw(HWND h) { return (h->style & (CBS_OWNERDRAWFIXED | CBS_OWNERDRAWVARIABLE)) != 0; }
 
 static Cb *cbd(HWND h) { return (Cb *)h->ctl; }
 static int cbtype(HWND h) { return h->style & 3; }
@@ -597,15 +625,15 @@ static void cb_layout(HWND h)
     int w = h->rc.right - h->rc.left;
     int eh = tm.tmHeight + min(tm.tmHeight, sys.tmHeight) / 4 + 4 * cyb, fw = w;
     c->ih = tm.tmHeight;
-    if (cb_ownerdraw(h)) {
-        /* seg34:032D: an owner-drawn field is as high as the parent measures item -1, plus 6; it is
-         * measured once and keeps that height when the font changes */
-        if (!c->od_h) {
-            MEASUREITEMSTRUCT mi = {ODT_COMBOBOX, h->id, (UINT)-1, 0, eh - 6, 0};
+    if (h->style & (CBS_OWNERDRAWFIXED | CBS_OWNERDRAWVARIABLE)) {
+        /* owner-drawn: the field keeps the height its parent gave at the first layout, through
+         * WM_MEASUREITEM for item -1 (itemHeight = field - 6); MAIN.CPL Color's scheme combo is 19 px */
+        if (c->field.bottom > c->field.top) eh = c->field.bottom - c->field.top;
+        else {
+            MEASUREITEMSTRUCT mi = {ODT_COMBOBOX, h->id, (UINT)-1, 0, (UINT)(eh - 6), 0};
             SendMessage(h->parent, WM_MEASUREITEM, h->id, (LPARAM)&mi);
-            c->od_h = (int)mi.itemHeight + 6;
+            eh = (int)mi.itemHeight + 6;
         }
-        eh = c->od_h;
     }
     if (cbtype(h) == CBS_SIMPLE)
         SetRectEmpty(&c->btn);
@@ -715,10 +743,8 @@ static void cb_paint(HWND h, HDC dc)
         } else if (h->style & WS_DISABLED)
             SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
         SetBkMode(dc, OPAQUE);
-        if (cb_ownerdraw(h)) {
-            /* seg33:0F0B: the owner draws the selected item into the field less 3 pixels on every
-             * side, selected and focused while the closed combo has the focus; no focus rectangle of
-             * the combo's own */
+        if (h->style & (CBS_OWNERDRAWFIXED | CBS_OWNERDRAWVARIABLE)) {
+            /* seg33:0F14: the parent draws the current item 3 px inside the field */
             int cur = (int)SendMessage(c->list, LB_GETCURSEL, 0, 0);
             DRAWITEMSTRUCT di = {ODT_COMBOBOX, h->id, (UINT)cur, ODA_DRAWENTIRE,
                                  (sel ? ODS_SELECTED | ODS_FOCUS : 0) | ((h->style & WS_DISABLED) ? ODS_DISABLED : 0),
