@@ -2539,17 +2539,7 @@ LRESULT w16_edit_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         e->xoff = e->scr = 0;
         e->modified = 0;
         if (e->undo) { LocalFree(e->undo); e->undo = NULL; }
-        if (e->multi) {
-            /* a multi-line edit rebuilds its lines without EN_UPDATE / EN_CHANGE (measured: real
-             * SYSEDIT, which sets its changed flag on EN_CHANGE, loads its files with EM_SETHANDLE
-             * and closes them without asking to save) */
-            build_lines(h);
-            ensure_visible(h);
-            redraw(h);
-            place_caret(h);
-            update_sb(h);
-        } else
-            refresh(h, 1);
+        refresh(h, 1);
         InvalidateRect(h, NULL, TRUE);
         return 0;
     }
