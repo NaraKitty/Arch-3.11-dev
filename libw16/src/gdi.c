@@ -16,6 +16,41 @@ static const uint32_t vga16[16] = {
     0x000000, 0x800000, 0x008000, 0x808000, 0x000080, 0x800080, 0x008080, 0xC0C0C0,
     0x808080, 0xFF0000, 0x00FF00, 0xFFFF00, 0x0000FF, 0xFF00FF, 0x00FFFF, 0xFFFFFF};
 
+/* What a VGA monitor shows for those 16 colours. VGA.DRV (seg4:00F0) loads the attribute table
+ * 00 0C 0A 0E 01 15 23 07 0F 24 12 36 09 2D 1B 3F and reprograms DAC 7 = (33,34,35) and
+ * DAC 15 = (48,49,50); the other entries keep the BIOS EGA colours. 6-bit DAC values appear as
+ * v << 2 | v >> 4. Verified swatch by swatch against Paintbrush on real 3.11 (DOSBox-X).
+ * The framebuffer keeps the logical colours (GetPixel, palette-index inversion); only what
+ * reaches the screen or a screenshot is converted. W16_DAC=ideal shows the logical colours. */
+static const uint32_t vgadac16[16] = {
+    0x000000, 0xAA0055, 0x00AA55, 0xAAAA55, 0x0000AA, 0xAA55AA, 0x55AAAA, 0xC3C7CB,
+    0x868A8E, 0xFF0000, 0x00FF00, 0xFFFF00, 0x0000FF, 0xFF00FF, 0x00FFFF, 0xFFFFFF};
+static int dac_ideal;
+uint32_t w16_display_px(uint32_t p)
+{
+    p &= 0xFFFFFF;
+    if (dac_ideal) return p;
+    for (int i = 0; i < 16; i++)
+        if (vga16[i] == p) return vgadac16[i];
+    return p;
+}
+/* the whole screen converted for presentation */
+const uint32_t *w16_display_frame(void)
+{
+    static uint32_t *buf;
+    static size_t cap;
+    size_t n = (size_t)w16_screen.w * w16_screen.h;
+    if (dac_ideal) return w16_screen.px;
+    if (n > cap) { free(buf); buf = malloc(n * 4); cap = n; }
+    uint32_t last_in = 0xFFFFFFFF, last_out = 0;
+    for (size_t i = 0; i < n; i++) {
+        uint32_t p = w16_screen.px[i];
+        if (p != last_in) { last_in = p; last_out = w16_display_px(p) | (p & 0xFF000000); }
+        buf[i] = last_out;
+    }
+    return buf;
+}
+
 void w16_screen_init(int w, int h)
 {
     w16_screen.w = w;
@@ -24,6 +59,8 @@ void w16_screen_init(int w, int h)
     w16_screen.px = calloc((size_t)w * h, 4);
     const char *c = getenv("W16_COLORS");
     if (c) ncolors = atoi(c) == 16 ? 16 : atoi(c) == 256 ? 256 : 1 << 24;
+    c = getenv("W16_DAC");
+    dac_ideal = c && !strcmp(c, "ideal");
 }
 
 static uint32_t cref_to_rgb(COLORREF c) { return ((c & 0xFF) << 16) | (c & 0xFF00) | ((c >> 16) & 0xFF); }
@@ -1278,7 +1315,7 @@ int w16_screenshot(const char *path)
     for (int y = 0; y < h; y++) {
         raw[y * rl] = 0;
         for (int x = 0; x < w; x++) {
-            uint32_t p = w16_screen.px[y * w + x];
+            uint32_t p = w16_display_px(w16_screen.px[y * w + x]);
             raw[y * rl + 1 + x * 3] = p >> 16;
             raw[y * rl + 2 + x * 3] = p >> 8;
             raw[y * rl + 3 + x * 3] = p;

@@ -1,0 +1,65 @@
+# Notepad: typing, every menu, every dialog. Run on real 3.11 (tools/ref311/ref-run.ps1) and on
+# the port (tools/ref311/port-run.sh); frames are compared pairwise with tools/ref311/compare.py.
+type Hello from Windows 3.11 Notepad, running natively on Linux.
+key enter
+type Second line\twith a tab.
+shot
+key alt
+key f
+shot
+key esc
+key right
+shot
+key right
+shot
+key right
+shot
+key esc
+key esc
+key up
+key home
+key alt
+key s
+key f
+shot
+type Linux
+shot
+key enter
+shot
+key esc
+shot
+key alt
+key f
+key a
+shot
+type hello.txt
+shot
+key enter
+shot
+key alt
+key f
+key o
+shot
+key esc
+key alt
+key f
+key r
+shot
+key esc
+key alt
+key f
+key t
+shot
+key esc
+key alt
+key h
+key a
+shot
+key enter
+type x
+key alt
+key f
+key n
+shot
+key n
+shot

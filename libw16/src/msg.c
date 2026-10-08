@@ -217,7 +217,7 @@ void w16_present(void)
 {
     if (headless || !w16_screen_dirty) return;
     w16_screen_dirty = 0;
-    SDL_UpdateTexture(tex, NULL, w16_screen.px, w16_screen.w * 4);
+    SDL_UpdateTexture(tex, NULL, w16_display_frame(), w16_screen.w * 4);
     SDL_RenderClear(ren);
     SDL_RenderCopy(ren, tex, NULL, NULL);
     SDL_RenderPresent(ren);
@@ -242,7 +242,7 @@ HCURSOR SetCursor(HCURSOR c)
                 int i = (y / s) * w + x / s;
                 uint32_t v;
                 if (am[i]) v = xp[i] ? 0xFF000000 : 0; /* inverted pixels approximated as black */
-                else v = 0xFF000000 | xp[i];
+                else v = 0xFF000000 | w16_display_px(xp[i]);
                 px[y * (sf->pitch / 4) + x] = v;
             }
         *nat = SDL_CreateColorCursor(sf, hx * s, hy * s);
@@ -458,6 +458,20 @@ static void synth_key(const char *spec)
         else if (!strcasecmp(tok, "right")) v = VK_RIGHT; else if (!strcasecmp(tok, "del")) v = VK_DELETE;
         else if (!strcasecmp(tok, "bs")) v = VK_BACK; else if (!strcasecmp(tok, "home")) v = VK_HOME;
         else if (!strcasecmp(tok, "end")) v = VK_END;
+        else if (!strcasecmp(tok, "pageup")) v = VK_PRIOR;
+        else if (!strcasecmp(tok, "pagedown")) v = VK_NEXT;
+        else if (!strcasecmp(tok, "insert")) v = VK_INSERT;
+        else if (!strcasecmp(tok, "semicolon")) v = 0xBA;
+        else if (!strcasecmp(tok, "equals")) v = 0xBB;
+        else if (!strcasecmp(tok, "comma")) v = 0xBC;
+        else if (!strcasecmp(tok, "minus")) v = 0xBD;
+        else if (!strcasecmp(tok, "period")) v = 0xBE;
+        else if (!strcasecmp(tok, "slash")) v = 0xBF;
+        else if (!strcasecmp(tok, "grave")) v = 0xC0;
+        else if (!strcasecmp(tok, "lbracket")) v = 0xDB;
+        else if (!strcasecmp(tok, "backslash")) v = 0xDC;
+        else if (!strcasecmp(tok, "rbracket")) v = 0xDD;
+        else if (!strcasecmp(tok, "quote")) v = 0xDE;
         else if ((tok[0] == 'f' || tok[0] == 'F') && isdigit((unsigned char)tok[1])) v = VK_F1 + atoi(tok + 1) - 1;
         else if (strlen(tok) == 1) v = toupper((unsigned char)tok[0]);
         if (next && nm < 3) mods[nm++] = v; else vk = v;

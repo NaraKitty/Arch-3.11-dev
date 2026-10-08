@@ -542,23 +542,55 @@ HWND SetCapture(HWND h) { HWND o = w16_capture; w16_capture = h; return o; }
 void ReleaseCapture(void) { w16_capture = NULL; }
 
 /* ------------------------------------------------------------------ creation */
+/* Height kept free for a row of icons at the bottom of the screen (USER [0xc2], IconTitleWrap=1):
+ * cyIcon/4 + (cyIcon + 4) + 2 * (icon title font height + cyBorder). The icon title font is
+ * MS Sans Serif 8 (13 px); 72 on VGA, as measured on real 3.11. */
+static int icon_area_height(void)
+{
+    int cyi = GetSystemMetrics(SM_CYICON);
+    return cyi / 4 + cyi + 4 + 2 * (13 + GetSystemMetrics(SM_CYBORDER));
+}
+
+/* USER seg6:01B4 (GetDefaultPosition): the next cascade slot. Steps are SM_CXSIZE + cxFrame across
+ * and cyCaption - cyBorder + cyBorder * BorderWidth down; the counter wraps once a slot would start
+ * past a third of the screen. CS_BYTEALIGNCLIENT rounds x so the client area starts on a byte. */
+static void default_rect(HWND h, RECT *r)
+{
+    int sw = w16_screen.w, sh = w16_screen.h, bw = w16_border_width;
+    int cxb = GetSystemMetrics(SM_CXBORDER), cyb = GetSystemMetrics(SM_CYBORDER);
+    int cxframe = cxb * (bw + 1);
+    int x = (GetSystemMetrics(SM_CXSIZE) + cxframe) * default_pos_count;
+    int y = (GetSystemMetrics(SM_CYCAPTION) - cyb + cyb * bw) * default_pos_count;
+    if (sw / 3 < x || sh / 3 < y) {
+        default_pos_count = 0;
+        x = y = 0;
+    }
+    if (h->cls->wc.style & CS_BYTEALIGNCLIENT) x = ((cxframe + x + 7) & ~7) - cxframe;
+    int slack = ((cxframe + 7) & ~7) - cxframe; /* [0x51c] */
+    SetRect(r, x, y, sw - slack, sh - icon_area_height());
+    default_pos_count++;
+}
+
+/* The overlapped-window part of CreateWindow (USER, after "test [si+2Bh],0C0h"): runs for every
+ * top-level overlapped window; one with an explicit position hands its cascade slot back. */
 static void default_position(HWND h, int *x, int *y, int *cx, int *cy, int usedef_pos, int usedef_size)
 {
-    int sw = w16_screen.w, sh = w16_screen.h;
-    int step = GetSystemMetrics(SM_CYCAPTION) + GetSystemMetrics(SM_CYFRAME) - 1;
+    RECT d;
+    default_rect(h, &d);
     if (usedef_pos) {
-        /* USER cascades CW_USEDEFAULT windows by caption+frame height */
-        int n = default_pos_count++;
-        int steps = max(1, (sh / 4) / step);
-        *x = (n % steps) * step;
-        *y = (n % steps) * step;
-        (void)h;
-    }
+        *x = d.left;
+        *y = d.top;
+    } else if (default_pos_count)
+        default_pos_count--;
     if (usedef_size) {
-        *cx = sw - *x - 0;
-        *cy = (sh * 17) / 20 - *y;
-        if (*cx < 100) *cx = sw * 3 / 4;
-        if (*cy < 50) *cy = sh * 3 / 4;
+        *cx = d.right - *x;
+        *cy = d.bottom - *y;
+    } else if (usedef_pos) {
+        /* default position, explicit size: slide back onto the screen */
+        int over = *cx - w16_screen.w + *x;
+        if (over > 0 && (*x -= over) < 0) *x = 0;
+        over = *cy - w16_screen.h + *y;
+        if (over > 0 && (*y -= over) < 0) *y = 0;
     }
 }
 
@@ -594,10 +626,9 @@ HWND CreateWindowEx(DWORD ex, LPCSTR cls, LPCSTR title, DWORD style, int x, int 
         if (!menu && c->wc.lpszMenuName) h->menu = LoadMenu(h->inst, c->wc.lpszMenuName);
     }
     int udp = x == CW_USEDEFAULT, uds = cx == CW_USEDEFAULT;
-    if (!(style & (WS_CHILD | WS_POPUP)) && (udp || uds)) {
-        if (!udp) { /* keep x,y */ }
+    if (!(style & (WS_CHILD | WS_POPUP)))
         default_position(h, &x, &y, &cx, &cy, udp, uds);
-    } else {
+    else {
         if (udp) x = y = 0;
         if (uds) cx = cy = 0;
     }
@@ -630,8 +661,11 @@ HWND CreateWindowEx(DWORD ex, LPCSTR cls, LPCSTR title, DWORD style, int x, int 
     w16_nc_calc(h, &h->rw, &h->rc);
     if (SendMessage(h, WM_CREATE, 0, (LPARAM)&cs) == -1) { DestroyWindow(h); return NULL; }
     if (!w16_valid(h)) return NULL;
-    SendMessage(h, WM_SIZE, SIZE_RESTORED, MAKELPARAM(h->rc.right - h->rc.left, h->rc.bottom - h->rc.top));
-    SendMessage(h, WM_MOVE, 0, MAKELPARAM(h->rc.left - pr.left, h->rc.top - pr.top));
+    if (style & WS_VISIBLE) {
+        SendMessage(h, WM_SIZE, SIZE_RESTORED, MAKELPARAM(h->rc.right - h->rc.left, h->rc.bottom - h->rc.top));
+        SendMessage(h, WM_MOVE, 0, MAKELPARAM(h->rc.left - pr.left, h->rc.top - pr.top));
+    } else
+        h->send_sizemove = 1; /* see ShowWindow */
     if ((style & WS_CHILD) && !(ex & WS_EX_NOPARENTNOTIFY))
         SendMessage(h->parent, WM_PARENTNOTIFY, WM_CREATE, (LPARAM)h);
     if (style & WS_MINIMIZE) ShowWindow(h, SW_SHOWMINIMIZED);
@@ -722,7 +756,7 @@ BOOL DestroyWindow(HWND h)
 }
 
 /* ------------------------------------------------------------------ show / state */
-BOOL ShowWindow(HWND h, int cmd)
+static BOOL show_window(HWND h, int cmd)
 {
     if (!w16_valid(h)) return FALSE;
     int was = (h->style & WS_VISIBLE) != 0;
@@ -776,6 +810,22 @@ BOOL ShowWindow(HWND h, int cmd)
             w16_activate(h, WA_ACTIVE);
         return was;
     }
+}
+
+BOOL ShowWindow(HWND h, int cmd)
+{
+    BOOL was = show_window(h, cmd);
+    /* USER's WFSENDSIZEMOVE: a window created without WS_VISIBLE gets its first WM_SIZE and WM_MOVE
+     * only now. Apps rely on it, e.g. Notepad creates its edit control after the main window and
+     * positions it from WM_SIZE. */
+    if (cmd != SW_HIDE && w16_valid(h) && h->send_sizemove) {
+        h->send_sizemove = 0;
+        RECT pr = h->parent && h->parent != w16_desktop ? h->parent->rc : (RECT){0, 0, 0, 0};
+        SendMessage(h, WM_SIZE, IsZoomed(h) ? SIZE_MAXIMIZED : IsIconic(h) ? SIZE_MINIMIZED : SIZE_RESTORED,
+                    MAKELPARAM(h->rc.right - h->rc.left, h->rc.bottom - h->rc.top));
+        SendMessage(h, WM_MOVE, 0, MAKELPARAM(h->rc.left - pr.left, h->rc.top - pr.top));
+    }
+    return was;
 }
 
 BOOL IsWindowVisible(HWND h) { return w16_valid(h) && w16_window_visible(h); }

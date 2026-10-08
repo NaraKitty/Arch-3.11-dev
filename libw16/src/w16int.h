@@ -108,6 +108,8 @@ void w16_screen_init(int w, int h);
 void w16_present(void);
 
 /* drawing helpers used throughout USER (device coordinates, clipped to dc->vis/clip) */
+uint32_t w16_display_px(uint32_t p);         /* logical pixel -> what the VGA monitor shows */
+const uint32_t *w16_display_frame(void);     /* the screen converted with w16_display_px */
 uint32_t w16_rgb(COLORREF c);              /* COLORREF -> 0xRRGGBB (nearest VGA colour) */
 uint32_t w16_dither(COLORREF c, int x, int y);
 uint32_t w16_invert_px(uint32_t p);
@@ -200,6 +202,7 @@ struct W16Window {
     int visible_cache;
     int show_state;     /* SW_ state last applied */
     int redraw_off;
+    int send_sizemove;   /* created hidden: WM_SIZE + WM_MOVE are sent on the first ShowWindow */
     HICON icon_cache;
 };
 

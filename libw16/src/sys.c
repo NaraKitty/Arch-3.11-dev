@@ -378,6 +378,10 @@ void w16_sys_init(void)
     if (s)
         sscanf(s, "%dx%d", &sw, &sh);
     init_metrics(sw, sh);
+    /* like a program started from a DOS prompt: the current directory is where it was launched,
+     * if that folder is on a mapped drive */
+    char host[1024], dos[300];
+    if (getcwd(host, sizeof host) && w16_host_to_dos(host, dos, sizeof dos) == 0) w16_chdir(dos);
 }
 
 /* ------------------------------------------------------------------ time */

@@ -295,6 +295,10 @@ static void layout_bar(HWND h, HMENU m, int width)
         struct W16MenuItem *it = &m->it[i];
         int tw = pfx_width(f, it->text, strlen(it->text));
         int w = BAR_PAD + tw + BAR_PAD;
+        /* windows of a CS_BYTEALIGNCLIENT class get item widths rounded to whole bytes, as USER
+         * does for their popup items ((w + 4) & ~7): measured on Notepad (byte-aligned) vs
+         * Paintbrush (not) on real 3.11 */
+        if (h && h->cls && (h->cls->wc.style & CS_BYTEALIGNCLIENT)) w = (w + 4) & ~7;
         if (x > 0 && (x + w > width || (it->flags & (MF_MENUBREAK | MF_MENUBARBREAK)))) { x = 0; y += ih; }
         SetRect(&it->rc, x, y, x + w, y + ih);
         x += w;
@@ -316,6 +320,14 @@ int w16_menubar_height(HWND h, int width)
     if (!h->menu) return 0;
     layout_bar(h, h->menu, width);
     return h->menu->height;
+}
+
+/* The bar spans the window between the side frames, including the column above a vertical
+ * scroll bar (which is not part of the client area). */
+static int bar_width(HWND h, const RECT *rc)
+{
+    int frame = rc->left - h->rw.left;
+    return (h->rw.right - h->rw.left) - 2 * frame;
 }
 
 static int bar_left(HWND h) { return h->rc.left - h->rw.left - ((h->style & WS_VSCROLL) ? 0 : 0); }
@@ -352,10 +364,10 @@ void w16_draw_menubar(HWND h, HDC wdc)
     if (!m) return;
     RECT rc;
     w16_nc_calc(h, &h->rw, &rc);
-    layout_bar(h, m, rc.right - rc.left);
+    layout_bar(h, m, bar_width(h, &rc));
     int ox, oy;
     bar_origin(h, &ox, &oy);
-    int w = rc.right - rc.left;
+    int w = bar_width(h, &rc);
     RECT bg = {ox, oy, ox + w, oy + m->height - 1};
     FillRect(wdc, &bg, w16_sys_brush(COLOR_MENU));
     for (int i = 0; i < m->n; i++) draw_bar_item(h, wdc, i, (m->it[i].flags & MF_HILITE) != 0);

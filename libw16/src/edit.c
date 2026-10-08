@@ -502,9 +502,13 @@ static void calc_fmt(HWND h)
     RECT r;
     GetClientRect(h, &r);
     if (e->multi) {
-        r.left += e->avgw / 2;
-        r.top += 2;
-        r.right -= e->avgw / 2;
+        /* a borderless multiline edit (Notepad's) formats right at its client edge: measured on
+         * real 3.11, Notepad's text starts exactly at the edit window's origin */
+        if (h->style & WS_BORDER) {
+            r.left += e->avgw / 2;
+            r.top += 2;
+            r.right -= e->avgw / 2;
+        }
     } else {
         int pad = (h->style & WS_BORDER) ? e->avgw / 2 : 0;
         int vpad = (h->style & WS_BORDER) ? max(0, (r.bottom - r.top - e->lh) / 2) : 0;

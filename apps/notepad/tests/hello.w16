@@ -1,0 +1,6 @@
+sleep 300
+shot shots/01-start.png
+type Hello
+sleep 200
+shot shots/02-hello.png
+quit
