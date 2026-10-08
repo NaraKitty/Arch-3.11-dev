@@ -57,6 +57,7 @@ NOTHING BOOTS YET.
 | T-MEDIA-01 | MP3 and MP4 players (owner supplies the 3.11 programs): UI decompiled 1:1, playback through libVLC | ADR-007; needs libvlc installed |
 | T-PM-LINUX | Program Manager: Krita item in Accessories (3.11-style icon), Media group with the players | ADR-008; after the Program Manager port |
 | T-ASSOC | Preferred applications: WIN.INI [Extensions] + Associate dialog kept, players default for their formats, synced with xdg-mime | ADR-008 |
+| T-LFN-01 | 8.3 aliases for long Linux names in libw16's DOS path layer (VFAT-style NAME~1.EXT) | ADR-009; COMMDLG's open question |
 | T-TERM-01 | Port TERMINAL.EXE with a pseudo-terminal back end: the Linux terminal in 3.11's Terminal look | ADR-006 |
 
 ## Known quirks and findings
