@@ -65,3 +65,37 @@ NOTHING BOOTS YET.
 - Created repo scaffold, docs, tools. Ran extraction + inventory on the owner's media (results above).
 - Not done: everything in the backlog. Suggested next step: T-RT-01 (pure code, testable here) or
   T-BUILD-01 (needs a real Arch machine).
+
+### Session 2 (Claude, Oct 7 2026) - direction changed by the owner
+Owner decisions: **native ports, not emulation** (decompile each 16-bit app and port it to 64-bit C);
+C + SDL2; Chromium via **CEF prebuilt** for the IE/Netscape shells (1:1 UI, no original engine code);
+true colour by default with the 16-colour VGA look as the default scheme; Linux apps and Wine apps get
+3.11 frames from a 3.11-style window manager sharing libw16's frame code; Display Settings applet
+(resolution + scaling separately); multi-monitor; PipeWire sound with the 3.11 sound events;
+File Manager must refuse to delete system-critical paths. Supersedes ADR-001/003 (emulator, QtWebEngine).
+Done (verified here):
+- tools/rip: pure-Python FAT12 + KWAJ(LZH)/SZDD expander + NE resource decoder. All 463 files of the
+  owner's 6 disks expand (NOTEPAD.EXE = 32,736 bytes, correct); 246 NE modules ripped, 0 errors.
+- tools/rip/arch311rip/disasm.py: capstone-based NE disassembler resolving relocations to API names.
+- Reference rig (not in repo, see below): DOSBox-X + unattended 3.11 Setup (SETUP /H with a .SHH);
+  xdotool drives real 3.11 and screenshots are compared with the ports.
+- libw16 (C/SDL2): USER/GDI/KERNEL subset - windows, NC frames/captions/buttons, menus (bar, popup,
+  system menu, keyboard), dialogs (template loader, bold dialog font, base units), MessageBox,
+  BUTTON/STATIC/EDIT/LISTBOX/COMBOBOX/SCROLLBAR, raster fonts from the ripped .FON files, regions,
+  carets, timers, clipboard bridged to Linux (cp1252<->UTF-8), INI files in ~/.config/arch311.
+  `make -C libw16` compiles (warnings only). NOT yet run end-to-end.
+- apps/notepad/notepad.c: complete port of Notepad's logic from the disassembly (init, WndProc, all
+  menu commands, load/save, find, word wrap recreate, page setup, time/date with intl, .LOG).
+Measured 3.11 facts (keep): thick frame 4 px (black/2 gray/black) with notches at 22 px; caption 20
+incl. borders; caption buttons are 19x18 OBM bitmaps; menu bar item = 8+text+8, 18 px high + 1 line;
+popup item 18 px, text at x=16, accel column = 16+maxtext+8, right margin 13, separator 7 px, 1-px
+light-gray shadow; dialog frame black+4 caption-colour; dialogs white; GRAYTEXT=C0C0C0; inversion is by
+VGA palette index; Notepad uses Fixedsys (15 px lines), edit at client (8,2), no edit margins,
+2-px caret, tab stops 64 px; main window owns the scroll bars (0-100 thumb via EM_GETTHUMB).
+NEXT (in order): commdlg.c (GetOpen/SaveFileName from COMMDLG.DLL templates 1536/1537 with owner-drawn
+folder/drive lists, FindText 1540, PrintDlg 1538/1539 via CUPS, ShellAbout from SHELL.DLL 100),
+printing (NpPrintFile: port seg1:1146/1E12 header/footer codes &f &p &d &t &c &l &r), apps/Makefile,
+run Notepad under W16_HEADLESS + W16_SCRIPT and pixel-diff against the DOSBox-X references
+(tools/compare, palette-index compare), then Calculator, Clock, Write, Paintbrush, ...
+Push: this session could not write to GitHub (repos not in its authorized set); the owner pushes a
+git bundle with "Arch-3.11-dev push/push-to-github.bat" in the disks folder.
