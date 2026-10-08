@@ -1302,6 +1302,15 @@ UINT _lread(HFILE f, void *buf, UINT n);
 UINT _lwrite(HFILE f, const void *buf, UINT n);
 LONG _llseek(HFILE f, LONG off, int origin);
 HFILE _lclose(HFILE f);
+/* LZEXPAND (uncompressed files only, see lzexpand.c) */
+#define LZERROR_BADINHANDLE (-1)
+#define LZERROR_BADOUTHANDLE (-2)
+#define LZERROR_READ (-3)
+#define LZERROR_WRITE (-4)
+HFILE LZOpenFile(LPCSTR name, OFSTRUCT *of, UINT style);
+LONG LZSeek(HFILE f, LONG off, int origin);
+int LZRead(HFILE f, void *buf, int cb);
+void LZClose(HFILE f);
 /* "C:\\FOO\\BAR.TXT" <-> "/home/user/FOO/BAR.TXT" (drive map in ~/.config/arch311/drives) */
 int w16_dos_to_host(LPCSTR dos, char *host, size_t cb);
 int w16_host_to_dos(const char *host, LPSTR dos, size_t cb);
