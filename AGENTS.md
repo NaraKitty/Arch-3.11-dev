@@ -367,3 +367,9 @@ run-cp-test.sh; sound.sh passes Sound) instead of counting icons, which broke wh
 ports2.w16 shoots the caret where the reference caught it. The Date & Time references (shots/datetime*)
 show the rig's own clock (e.g. 10/8/26 9:30:26), not 11/8/93, so only their layout compares with the
 port's ARCH311_CLOCK run; the layout is unchanged.
+Combo-box edits as 3.1 creates them (seg34): ES_NOHIDESEL plus USER's internal 0x200 (W16_ES_COMBOBOX),
+ES_AUTOHSCROLL / ES_OEMCONVERT only from CBS_AUTOHSCROLL / CBS_OEMCONVERT; the combo clears the edit's
+selection when the focus leaves (seg33 kill-focus helper). SLKeyDown (seg28:0A93): a combo's edit sends
+F4, Page Up/Down and Up/Down to the combo; other single-line edits move Up/Down as Left/Right and ignore
+Page Up/Down. SLInsertText (seg28:0719): without ES_AUTOHSCROLL a single-line edit accepts only what fits
+beside the rest of the text (EN_MAXTEXT for the rest). Ports frames unchanged (pixel-identical dialogs).

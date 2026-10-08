@@ -25,6 +25,7 @@ typedef struct {
     int border;               /* created with WS_BORDER: draws its own frame */
     int nofmt;                /* multi-line: too small to format (caret hidden) */
     int pww;                  /* password character width */
+    HWND combo;               /* the combo box this is the edit of (ES_COMBOBOX) */
     RECT fmt;
     int modified;
     HLOCAL undo;              /* snapshot for one-level undo */
@@ -612,10 +613,22 @@ static void do_undo(HWND h)
 static int replace_sel(HWND h, const char *s, int n, int undoable)
 {
     Edit *e = ed(h);
-    int a = smin(e), b = smax(e);
+    int a = smin(e), b = smax(e), want = n;
     if (e->len - (b - a) + n > e->limit) {
         n = e->limit - (e->len - (b - a));
         if (n < 0) n = 0;
+    }
+    if (!e->multi && !(h->style & ES_AUTOHSCROLL) && n) {
+        /* SLInsertText (seg28:0719): without ES_AUTOHSCROLL, only what fits in the formatting rect
+         * beside the rest of the text goes in */
+        char *t = txt(e);
+        int rest = e->len - (b - a), w = 0;
+        if (e->pw) w = rest * e->pww;
+        else if (rest) w = w16_text_width(e->f, t, a) + w16_text_width(e->f, t + b, e->len - b) + e->overhang;
+        untxt(e);
+        n = cch_in_width(e, s, n, e->fmt.right - e->fmt.left - w, 1);
+    }
+    if (n < want) {
         notify(h, EN_MAXTEXT);
         if (n == 0 && a == b) { MessageBeep(0); return 0; }
     }
@@ -802,6 +815,7 @@ LRESULT w16_edit_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         /* seg27:0056: a WS_BORDER edit takes the style off and draws its own frame inside its
          * client area, so its insets count from the window's edge */
         if (h->style & WS_BORDER) { e->border = 1; h->style &= ~WS_BORDER; }
+        if (!e->multi && (h->style & W16_ES_COMBOBOX)) e->combo = h->parent;
         set_font(h, NULL);
         DefWindowProc(h, m, wp, lp);
         return TRUE;
@@ -938,6 +952,15 @@ LRESULT w16_edit_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         return 0;
     case WM_KEYDOWN: {
         int shift = (w16_keystate[VK_SHIFT] & 0x80) != 0, ctrl = (w16_keystate[VK_CONTROL] & 0x80) != 0;
+        if (!e->multi) {
+            /* SLKeyDown (seg28:0A93): a combo box's edit hands F4, Page Up/Down and Up/Down to the
+             * combo's list; elsewhere Up and Down move as Left and Right, Page Up/Down do nothing */
+            if (e->combo && (wp == VK_F4 || wp == VK_PRIOR || wp == VK_NEXT || wp == VK_UP || wp == VK_DOWN))
+                return SendMessage(e->combo, WM_KEYDOWN, wp, 0);
+            if (wp == VK_UP) wp = VK_LEFT;
+            else if (wp == VK_DOWN) wp = VK_RIGHT;
+            else if (wp == VK_PRIOR || wp == VK_NEXT) return 0;
+        }
         char *t = txt(e);
         int l = line_of(e, e->caret);
         int np = -1;

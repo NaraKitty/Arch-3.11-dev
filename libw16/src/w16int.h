@@ -152,6 +152,7 @@ W16Font *w16_dc_font(HDC dc);
 
 /* ------------------------------------------------------------------ USER: windows */
 #define W16_WND_MAGIC 0x57314E44u
+#define W16_ES_COMBOBOX 0x0200L  /* USER's internal edit style: the edit of a combo box */
 typedef struct W16Class {
     WNDCLASS wc;
     char name[64];
