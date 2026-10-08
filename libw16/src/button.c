@@ -1,0 +1,407 @@
+/* BUTTON and STATIC controls, drawn the way 3.1 USER draws them (measured against 3.11 VGA) */
+#include "w16int.h"
+
+typedef struct { int check; int state; int pressed; int tracking; } Btn;
+#define BST_FOCUS 0x0008
+#define BST_PUSHED 0x0004
+
+static Btn *btn(HWND h) { if (!h->ctl) h->ctl = calloc(1, sizeof(Btn)); return h->ctl; }
+static int btype(HWND h) { return h->style & 0x0F; }
+static int is_push(HWND h) { int t = btype(h); return t == BS_PUSHBUTTON || t == BS_DEFPUSHBUTTON; }
+
+HBRUSH w16_ctl_color(HWND ctl, HDC dc, int type)
+{
+    HWND parent = ctl->parent && ctl->parent != w16_desktop ? ctl->parent : ctl;
+    HBRUSH b = (HBRUSH)SendMessage(parent, WM_CTLCOLOR, (WPARAM)dc, MAKELPARAM(0, type));
+    if (!b) b = (HBRUSH)DefWindowProc(parent, WM_CTLCOLOR, (WPARAM)dc, MAKELPARAM(0, type));
+    return b;
+}
+
+static void px_fill(HDC dc, int l, int t, int r, int b, int color)
+{
+    RECT rr = {l, t, r, b};
+    FillRect(dc, &rr, w16_sys_brush(color));
+}
+
+/* the 2-pixel 3D bevel inside a push button; (L,T,R,B) = area inside the black border */
+static void bevel(HDC dc, int L, int T, int R, int B, int pressed)
+{
+    if (pressed) {
+        /* pushed: one-pixel shadow along the top and left edges, flat face */
+        px_fill(dc, L, T, R, T + 1, COLOR_BTNSHADOW);
+        px_fill(dc, L, T, L + 1, B, COLOR_BTNSHADOW);
+        return;
+    }
+    px_fill(dc, L, T, R - 1, T + 1, COLOR_BTNHIGHLIGHT);
+    px_fill(dc, R - 1, T, R, T + 1, COLOR_BTNSHADOW);
+    px_fill(dc, L, T + 1, R - 2, T + 2, COLOR_BTNHIGHLIGHT);
+    px_fill(dc, R - 2, T + 1, R, T + 2, COLOR_BTNSHADOW);
+    px_fill(dc, L, T + 2, L + 2, B - 2, COLOR_BTNHIGHLIGHT);
+    px_fill(dc, R - 2, T + 2, R, B - 2, COLOR_BTNSHADOW);
+    px_fill(dc, L, B - 2, L + 1, B - 1, COLOR_BTNHIGHLIGHT);
+    px_fill(dc, L + 1, B - 2, R, B - 1, COLOR_BTNSHADOW);
+    px_fill(dc, L, B - 1, R, B, COLOR_BTNSHADOW);
+}
+
+static HFONT ctl_font(HWND h) { return h->font ? h->font : GetStockObject(SYSTEM_FONT); }
+
+static void paint_push(HWND h, HDC dc)
+{
+    Btn *b = btn(h);
+    RECT r;
+    GetClientRect(h, &r);
+    HBRUSH bg = w16_ctl_color(h, dc, CTLCOLOR_BTN);
+    int l = r.left, t = r.top, rt = r.right, bt = r.bottom;
+    int def = btype(h) == BS_DEFPUSHBUTTON;
+    int pressed = (b->state & BST_PUSHED) != 0;
+    /* corners show the parent's background */
+    RECT c;
+    SetRect(&c, l, t, l + 1, t + 1); FillRect(dc, &c, bg);
+    SetRect(&c, rt - 1, t, rt, t + 1); FillRect(dc, &c, bg);
+    SetRect(&c, l, bt - 1, l + 1, bt); FillRect(dc, &c, bg);
+    SetRect(&c, rt - 1, bt - 1, rt, bt); FillRect(dc, &c, bg);
+    px_fill(dc, l + 1, t, rt - 1, t + 1, COLOR_WINDOWFRAME);
+    px_fill(dc, l + 1, bt - 1, rt - 1, bt, COLOR_WINDOWFRAME);
+    px_fill(dc, l, t + 1, l + 1, bt - 1, COLOR_WINDOWFRAME);
+    px_fill(dc, rt - 1, t + 1, rt, bt - 1, COLOR_WINDOWFRAME);
+    int in = 1;
+    if (def) {
+        RECT f = {l + 1, t + 1, rt - 1, bt - 1};
+        FrameRect(dc, &f, w16_sys_brush(COLOR_WINDOWFRAME));
+        in = 2;
+    }
+    int L = l + in, T = t + in, R = rt - in, B = bt - in;
+    px_fill(dc, L, T, R, B, COLOR_BTNFACE);
+    bevel(dc, L, T, R, B, pressed);
+    /* text */
+    HGDIOBJ of = SelectObject(dc, ctl_font(h));
+    SetBkMode(dc, TRANSPARENT);
+    int n = strlen(h->text);
+    int tw = w16_prefix_text_width(dc, h->text, n);
+    TEXTMETRIC tm;
+    GetTextMetrics(dc, &tm);
+    int x = (rt - l - tw) / 2 + l, y = (bt - t - tm.tmHeight) / 2 + t;
+    if (pressed) { x += 2; y += 2; }
+    if (h->style & WS_DISABLED) w16_draw_gray_text(dc, x, y, h->text, n, 0);
+    else {
+        SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
+        w16_draw_prefix_text(dc, x, y, h->text, n, 0);
+    }
+    if (b->state & BST_FOCUS) {
+        RECT fr = {x - 1, y, x + tw + 1, y + tm.tmHeight};
+        IntersectRect(&fr, &fr, &(RECT){L + 2, T + 2, R - 2, B - 2});
+        DrawFocusRect(dc, &fr);
+    }
+    SelectObject(dc, of);
+}
+
+static void paint_check(HWND h, HDC dc)
+{
+    Btn *b = btn(h);
+    RECT r;
+    GetClientRect(h, &r);
+    HBRUSH bg = w16_ctl_color(h, dc, CTLCOLOR_BTN);
+    FillRect(dc, &r, bg);
+    int t = btype(h);
+    int radio = t == BS_RADIOBUTTON || t == BS_AUTORADIOBUTTON;
+    int three = t == BS_3STATE || t == BS_AUTO3STATE;
+    W16Bitmap *bm = w16_obm(OBM_CHECKBOXES);
+    HGDIOBJ of = SelectObject(dc, ctl_font(h));
+    TEXTMETRIC tm;
+    GetTextMetrics(dc, &tm);
+    int box = 13;
+    int left = (h->style & BS_LEFTTEXT) != 0;
+    int by = (r.bottom - r.top - box) / 2;
+    int bx = left ? r.right - box : 0;
+    if (bm) {
+        int col = (b->check ? 1 : 0) + ((b->state & BST_PUSHED) ? 2 : 0);
+        int row = radio ? 1 : 0;
+        if (three && b->check == 2) { row = 2; col = (b->state & BST_PUSHED) ? 3 : 1; }
+        int dx = bx, dy = by;
+        w16_lp_to_dp(dc, &dx, &dy);
+        /* mono bitmap: black pixels in text colour, white pixels in the background colour */
+        COLORREF bk = GetBkColor(dc);
+        (void)bk;
+        Region e;
+        w16_dc_clip_iter_begin(dc, &e);
+        for (int yy = 0; yy < 13; yy++)
+            for (int xx = 0; xx < 13; xx++) {
+                uint32_t p = bm->px[(row * 13 + yy) * bm->w + col * 14 + xx];
+                int X = dx + xx, Y = dy + yy;
+                if (!rgn_contains(&e, X, Y)) continue;
+                if (!p) w16_screen.px[Y * w16_screen.w + X] = w16_rgb(GetSysColor(COLOR_WINDOWFRAME));
+                else if (!radio) w16_screen.px[Y * w16_screen.w + X] = w16_rgb(GetSysColor(COLOR_WINDOW));
+                else {
+                    /* radio interior is the window colour, outside the circle stays background */
+                    int cx = xx - 6, cy = yy - 6;
+                    if (cx * cx + cy * cy <= 30) w16_screen.px[Y * w16_screen.w + X] = w16_rgb(GetSysColor(COLOR_WINDOW));
+                }
+            }
+        rgn_free(&e);
+        w16_screen_dirty = 1;
+    }
+    int tx = left ? 0 : box + tm.tmAveCharWidth - 1;
+    int ty = (r.bottom - r.top - tm.tmHeight) / 2;
+    int n = strlen(h->text);
+    SetBkMode(dc, TRANSPARENT);
+    if (h->style & WS_DISABLED) w16_draw_gray_text(dc, tx, ty, h->text, n, 0);
+    else {
+        SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+        w16_draw_prefix_text(dc, tx, ty, h->text, n, 0);
+    }
+    if (b->state & BST_FOCUS) {
+        int tw = w16_prefix_text_width(dc, h->text, n);
+        RECT fr = {tx - 1, ty, tx + tw + 1, ty + tm.tmHeight};
+        DrawFocusRect(dc, &fr);
+    }
+    SelectObject(dc, of);
+}
+
+static void paint_group(HWND h, HDC dc)
+{
+    RECT r;
+    GetClientRect(h, &r);
+    HGDIOBJ of = SelectObject(dc, ctl_font(h));
+    TEXTMETRIC tm;
+    GetTextMetrics(dc, &tm);
+    int y = tm.tmHeight / 2;
+    w16_ctl_color(h, dc, CTLCOLOR_BTN);
+    RECT f = {r.left, r.top + y, r.right, r.bottom};
+    FrameRect(dc, &f, w16_sys_brush(COLOR_WINDOWFRAME));
+    int n = strlen(h->text);
+    if (n) {
+        int tw = w16_prefix_text_width(dc, h->text, n);
+        SetBkMode(dc, OPAQUE);
+        SetBkColor(dc, GetSysColor(COLOR_WINDOW));
+        RECT tb = {8, 0, 8 + tw + 2, tm.tmHeight};
+        FillRect(dc, &tb, w16_ctl_color(h, dc, CTLCOLOR_BTN));
+        SetBkMode(dc, TRANSPARENT);
+        if (h->style & WS_DISABLED) w16_draw_gray_text(dc, 9, 0, h->text, n, 0);
+        else { SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT)); w16_draw_prefix_text(dc, 9, 0, h->text, n, 0); }
+    }
+    SelectObject(dc, of);
+}
+
+static void paint(HWND h, HDC dc)
+{
+    switch (btype(h)) {
+    case BS_PUSHBUTTON: case BS_DEFPUSHBUTTON: paint_push(h, dc); break;
+    case BS_GROUPBOX: paint_group(h, dc); break;
+    case BS_OWNERDRAW: {
+        /* DRAWITEMSTRUCT (Win16 layout with native handles) */
+        struct { UINT type, id, action, state; HWND hwnd; HDC dc; RECT rc; DWORD data; } di;
+        di.type = 4; di.id = h->id; di.action = 1; di.state = (btn(h)->state & BST_PUSHED ? 1 : 0) | (btn(h)->state & BST_FOCUS ? 0x10 : 0);
+        di.hwnd = h; di.dc = dc; GetClientRect(h, &di.rc); di.data = 0;
+        SendMessage(h->parent, WM_DRAWITEM, h->id, (LPARAM)&di);
+        break;
+    }
+    case BS_USERBUTTON: SendMessage(h->parent, WM_COMMAND, h->id, MAKELPARAM(0, BN_PAINT)); break;
+    default: paint_check(h, dc); break;
+    }
+}
+
+static void redraw(HWND h)
+{
+    if (!w16_window_visible(h)) return;
+    HDC dc = GetDC(h);
+    paint(h, dc);
+    ReleaseDC(h, dc);
+}
+
+static void click(HWND h)
+{
+    Btn *b = btn(h);
+    switch (btype(h)) {
+    case BS_AUTOCHECKBOX: b->check = !b->check; break;
+    case BS_AUTO3STATE: b->check = (b->check + 1) % 3; break;
+    case BS_AUTORADIOBUTTON:
+        /* uncheck the others in the group */
+        if (h->parent) {
+            HWND start = h;
+            for (HWND p = h->parent->child; p; p = p->next) {
+                if (p->style & WS_GROUP) start = p;
+                if (p == h) break;
+            }
+            for (HWND p = start; p; p = p->next) {
+                if (p != start && (p->style & WS_GROUP)) break;
+                if (p != h && !strcasecmp(p->cls->name, "BUTTON") && btype(p) == BS_AUTORADIOBUTTON && btn(p)->check) {
+                    btn(p)->check = 0;
+                    redraw(p);
+                }
+            }
+        }
+        b->check = 1;
+        break;
+    }
+    redraw(h);
+    w16_notify_parent(h, BN_CLICKED);
+}
+
+LRESULT w16_button_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    Btn *b = btn(h);
+    switch (m) {
+    case WM_CREATE: return 0;
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(h, &ps);
+        paint(h, dc);
+        EndPaint(h, &ps);
+        return 0;
+    }
+    case WM_ERASEBKGND: return 1;
+    case WM_SETFONT: h->font = (HFONT)wp; if (lp) InvalidateRect(h, NULL, TRUE); return 0;
+    case WM_GETFONT: return (LRESULT)h->font;
+    case WM_SETTEXT: DefWindowProc(h, m, wp, lp); InvalidateRect(h, NULL, TRUE); return TRUE;
+    case WM_ENABLE: InvalidateRect(h, NULL, TRUE); return 0;
+    case WM_GETDLGCODE: {
+        int t = btype(h);
+        if (t == BS_DEFPUSHBUTTON) return DLGC_BUTTON | DLGC_DEFPUSHBUTTON;
+        if (t == BS_PUSHBUTTON) return DLGC_BUTTON | DLGC_UNDEFPUSHBUTTON;
+        if (t == BS_RADIOBUTTON || t == BS_AUTORADIOBUTTON) return DLGC_BUTTON | DLGC_RADIOBUTTON;
+        if (t == BS_GROUPBOX) return DLGC_STATIC;
+        return DLGC_BUTTON;
+    }
+    case BM_GETCHECK: return b->check;
+    case BM_SETCHECK: if (b->check != (int)wp) { b->check = (int)wp; redraw(h); } return 0;
+    case BM_GETSTATE: return b->state | b->check;
+    case BM_SETSTATE:
+        if (wp) b->state |= BST_PUSHED; else b->state &= ~BST_PUSHED;
+        redraw(h);
+        return 0;
+    case BM_SETSTYLE:
+        h->style = (h->style & ~0x0F) | (wp & 0x0F);
+        if (lp) redraw(h);
+        return 0;
+    case WM_SETFOCUS:
+        b->state |= BST_FOCUS;
+        redraw(h);
+        return 0;
+    case WM_KILLFOCUS:
+        b->state &= ~BST_FOCUS;
+        if (b->tracking) { b->tracking = 0; b->state &= ~BST_PUSHED; ReleaseCapture(); }
+        redraw(h);
+        return 0;
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONDBLCLK:
+        if (btype(h) == BS_GROUPBOX) return 0;
+        if (m == WM_LBUTTONDBLCLK && (btype(h) == BS_RADIOBUTTON || btype(h) == BS_AUTORADIOBUTTON || btype(h) == BS_USERBUTTON || btype(h) == BS_OWNERDRAW)) {
+            w16_notify_parent(h, BN_DOUBLECLICKED);
+            return 0;
+        }
+        SetFocus(h);
+        SetCapture(h);
+        b->tracking = 1;
+        b->state |= BST_PUSHED;
+        redraw(h);
+        return 0;
+    case WM_MOUSEMOVE:
+        if (b->tracking) {
+            RECT r;
+            GetClientRect(h, &r);
+            POINT p = {(SHORT)LOWORD(lp), (SHORT)HIWORD(lp)};
+            int in = PtInRect(&r, p);
+            if (in != ((b->state & BST_PUSHED) != 0)) {
+                if (in) b->state |= BST_PUSHED; else b->state &= ~BST_PUSHED;
+                redraw(h);
+            }
+        }
+        return 0;
+    case WM_LBUTTONUP:
+        if (b->tracking) {
+            b->tracking = 0;
+            ReleaseCapture();
+            int in = (b->state & BST_PUSHED) != 0;
+            b->state &= ~BST_PUSHED;
+            redraw(h);
+            if (in) click(h);
+        }
+        return 0;
+    case WM_KEYDOWN:
+        if (wp == VK_SPACE && !b->tracking) {
+            b->state |= BST_PUSHED;
+            redraw(h);
+        }
+        return 0;
+    case WM_KEYUP:
+        if (wp == VK_SPACE && (b->state & BST_PUSHED)) {
+            b->state &= ~BST_PUSHED;
+            redraw(h);
+            click(h);
+        }
+        return 0;
+    case WM_CHAR:
+        if (wp == '+' || wp == '=') { if (btype(h) == BS_AUTOCHECKBOX && !b->check) click(h); else if (btype(h) == BS_CHECKBOX) w16_notify_parent(h, BN_CLICKED); }
+        else if (wp == '-') { if (btype(h) == BS_AUTOCHECKBOX && b->check) click(h); }
+        return 0;
+    }
+    (void)is_push;
+    return DefWindowProc(h, m, wp, lp);
+}
+
+/* ------------------------------------------------------------------ STATIC */
+LRESULT w16_static_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    int t = h->style & 0x0F;
+    switch (m) {
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(h, &ps);
+        RECT r;
+        GetClientRect(h, &r);
+        HGDIOBJ of = SelectObject(dc, h->font ? h->font : GetStockObject(SYSTEM_FONT));
+        switch (t) {
+        case SS_LEFT: case SS_CENTER: case SS_RIGHT: case SS_SIMPLE: case SS_LEFTNOWORDWRAP: {
+            HBRUSH bg = w16_ctl_color(h, dc, CTLCOLOR_STATIC);
+            if (t != SS_SIMPLE || 1) FillRect(dc, &r, bg);
+            UINT fmt = t == SS_CENTER ? DT_CENTER | DT_WORDBREAK : t == SS_RIGHT ? DT_RIGHT | DT_WORDBREAK
+                     : t == SS_LEFT ? DT_LEFT | DT_WORDBREAK : DT_LEFT | DT_SINGLELINE;
+            fmt |= DT_EXPANDTABS;
+            if (h->style & SS_NOPREFIX) fmt |= DT_NOPREFIX;
+            SetBkMode(dc, TRANSPARENT);
+            if (h->style & WS_DISABLED) SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
+            DrawText(dc, h->text, -1, &r, fmt);
+            break;
+        }
+        case SS_ICON: {
+            HICON ic = (HICON)GetProp(h, "W16ICON");
+            if (ic) DrawIcon(dc, 0, 0, ic);
+            break;
+        }
+        case SS_BLACKRECT: FillRect(dc, &r, w16_sys_brush(COLOR_WINDOWFRAME)); break;
+        case SS_GRAYRECT: FillRect(dc, &r, w16_sys_brush(COLOR_BACKGROUND)); break;
+        case SS_WHITERECT: FillRect(dc, &r, w16_sys_brush(COLOR_WINDOW)); break;
+        case SS_BLACKFRAME: FrameRect(dc, &r, w16_sys_brush(COLOR_WINDOWFRAME)); break;
+        case SS_GRAYFRAME: FrameRect(dc, &r, w16_sys_brush(COLOR_BACKGROUND)); break;
+        case SS_WHITEFRAME: FrameRect(dc, &r, w16_sys_brush(COLOR_WINDOW)); break;
+        }
+        SelectObject(dc, of);
+        EndPaint(h, &ps);
+        return 0;
+    }
+    case WM_ERASEBKGND: return 1;
+    case WM_SETFONT: h->font = (HFONT)wp; if (lp) InvalidateRect(h, NULL, TRUE); return 0;
+    case WM_GETFONT: return (LRESULT)h->font;
+    case WM_SETTEXT:
+        DefWindowProc(h, m, wp, lp);
+        InvalidateRect(h, NULL, TRUE);
+        UpdateWindow(h);
+        return TRUE;
+    case STM_SETICON: {
+        HICON old = GetProp(h, "W16ICON");
+        SetProp(h, "W16ICON", (HANDLE)wp);
+        if (t == SS_ICON) {
+            /* icon statics size themselves to the icon */
+            RECT pr = h->parent->rc;
+            SetWindowPos(h, NULL, h->rw.left - pr.left, h->rw.top - pr.top, 32, 32, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
+        }
+        InvalidateRect(h, NULL, TRUE);
+        return (LRESULT)old;
+    }
+    case STM_GETICON: return (LRESULT)GetProp(h, "W16ICON");
+    case WM_GETDLGCODE: return DLGC_STATIC;
+    case WM_NCHITTEST: return HTTRANSPARENT;
+    case WM_ENABLE: InvalidateRect(h, NULL, TRUE); return 0;
+    }
+    return DefWindowProc(h, m, wp, lp);
+}

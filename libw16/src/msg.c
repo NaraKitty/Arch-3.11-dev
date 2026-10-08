@@ -1,0 +1,899 @@
+/* USER: message queue, input (SDL2), timers, caret, cursor, DefWindowProc, presentation.
+ * Also: W16_SCRIPT test driver for automated comparisons with real 3.11. */
+#include "w16int.h"
+#include <SDL.h>
+#include <ctype.h>
+#include <unistd.h>
+
+POINT w16_mouse;
+DWORD w16_msg_time;
+int w16_quit_posted, w16_quit_code;
+int w16_keystate[256];
+static int headless;
+
+/* ------------------------------------------------------------------ queue */
+typedef struct QMsg { MSG m; struct QMsg *next; } QMsg;
+static QMsg *qhead, *qtail;
+
+static void enqueue(HWND h, UINT m, WPARAM wp, LPARAM lp, int front)
+{
+    QMsg *q = calloc(1, sizeof *q);
+    q->m.hwnd = h; q->m.message = m; q->m.wParam = wp; q->m.lParam = lp;
+    q->m.time = GetTickCount(); q->m.pt = w16_mouse;
+    if (front) { q->next = qhead; qhead = q; if (!qtail) qtail = q; return; }
+    if (qtail) qtail->next = q; else qhead = q;
+    qtail = q;
+}
+void w16_post(HWND h, UINT m, WPARAM wp, LPARAM lp) { enqueue(h, m, wp, lp, 0); }
+BOOL PostMessage(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    if (h && h != (HWND)0xFFFF && !w16_valid(h)) return FALSE;
+    enqueue(h, m, wp, lp, 0);
+    return TRUE;
+}
+void PostQuitMessage(int code) { w16_quit_posted = 1; w16_quit_code = code; }
+
+static int in_send;
+LRESULT SendMessage(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    if (h == (HWND)0xFFFF) { /* HWND_BROADCAST */
+        for (HWND c = w16_desktop->child; c;) { HWND n = c->next; SendMessage(c, m, wp, lp); c = n; }
+        return 0;
+    }
+    if (!w16_valid(h) && !(h == w16_desktop && h)) return 0;
+    in_send++;
+    LRESULT r = h->proc(h, m, wp, lp);
+    in_send--;
+    return r;
+}
+BOOL InSendMessage(void) { return FALSE; }
+LRESULT CallWindowProc(WNDPROC p, HWND h, UINT m, WPARAM wp, LPARAM lp) { return p ? p(h, m, wp, lp) : 0; }
+
+UINT RegisterWindowMessage(LPCSTR name)
+{
+    static char names[64][64];
+    static int n;
+    for (int i = 0; i < n; i++) if (!strcasecmp(names[i], name)) return 0xC000 + i;
+    if (n < 64) snprintf(names[n++], 64, "%s", name);
+    return 0xC000 + n - 1;
+}
+
+static HWND cmd_hwnd_table[256];
+HWND W16_CMD_HWND(LPARAM lp)
+{
+    /* LOWORD(lParam) of WM_COMMAND from a control carries a small slot index */
+    int i = LOWORD(lp) & 0xFF;
+    return w16_valid(cmd_hwnd_table[i]) ? cmd_hwnd_table[i] : NULL;
+}
+WORD w16_cmd_slot(HWND h)
+{
+    static int next = 1;
+    for (int i = 1; i < 256; i++) if (cmd_hwnd_table[i] == h) return i;
+    for (int k = 0; k < 255; k++) {
+        int i = next;
+        next = next % 255 + 1;
+        if (!w16_valid(cmd_hwnd_table[i])) { cmd_hwnd_table[i] = h; return i; }
+    }
+    return 0;
+}
+void w16_notify_parent(HWND h, int code)
+{
+    if (!w16_valid(h) || !w16_valid(h->parent)) return;
+    SendMessage(h->parent, WM_COMMAND, h->id, MAKELPARAM(w16_cmd_slot(h), code));
+}
+
+/* ------------------------------------------------------------------ timers */
+typedef struct Timer { HWND h; UINT id; UINT ms; DWORD due; TIMERPROC fn; int sys; struct Timer *next; } Timer;
+static Timer *timers;
+UINT SetTimer(HWND h, UINT id, UINT ms, TIMERPROC fn)
+{
+    if (ms < 55) ms = 55; /* the 3.x timer resolution is one 18.2 Hz tick */
+    for (Timer *t = timers; t; t = t->next)
+        if (t->h == h && t->id == id && h) { t->ms = ms; t->due = GetTickCount() + ms; t->fn = fn; return id; }
+    Timer *t = calloc(1, sizeof *t);
+    static UINT autoid = 0x7F00;
+    t->h = h; t->id = h ? id : ++autoid; t->ms = ms; t->due = GetTickCount() + ms; t->fn = fn;
+    t->next = timers;
+    timers = t;
+    return t->id;
+}
+BOOL KillTimer(HWND h, UINT id)
+{
+    for (Timer **p = &timers; *p; p = &(*p)->next)
+        if ((*p)->h == h && (*p)->id == id) { Timer *t = *p; *p = t->next; free(t); return TRUE; }
+    return FALSE;
+}
+void w16_timers_on_destroy(HWND h)
+{
+    for (Timer **p = &timers; *p;)
+        if ((*p)->h == h) { Timer *t = *p; *p = t->next; free(t); }
+        else p = &(*p)->next;
+}
+static Timer *due_timer(DWORD now, int *wait)
+{
+    Timer *best = NULL;
+    for (Timer *t = timers; t; t = t->next) {
+        int d = (int)(t->due - now);
+        if (d <= 0 && (!best || (int)(t->due - best->due) < 0)) best = t;
+        else if (d > 0 && d < *wait) *wait = d;
+    }
+    return best;
+}
+
+/* ------------------------------------------------------------------ caret */
+static struct { HWND h; int x, y, w, ht, hide, on, created; DWORD next; UINT blink; } caret = {.blink = 530};
+
+static void caret_xor(void)
+{
+    if (!w16_valid(caret.h)) return;
+    HDC dc = GetDC(caret.h);
+    RECT r = {caret.x, caret.y, caret.x + caret.w, caret.y + caret.ht};
+    int a = r.left, b = r.top, c = r.right, d = r.bottom;
+    w16_lp_to_dp(dc, &a, &b);
+    w16_lp_to_dp(dc, &c, &d);
+    w16_invert_dev(dc, &(RECT){a, b, c, d});
+    ReleaseDC(caret.h, dc);
+    caret.on = !caret.on;
+}
+static void caret_off(void) { if (caret.on) caret_xor(); }
+BOOL CreateCaret(HWND h, HBITMAP bm, int w, int ht)
+{
+    (void)bm;
+    DestroyCaret();
+    caret.h = h; caret.w = w ? w : GetSystemMetrics(SM_CXBORDER); caret.ht = ht ? ht : GetSystemMetrics(SM_CYBORDER);
+    caret.hide = 1; caret.on = 0; caret.created = 1;
+    caret.blink = GetProfileInt("windows", "CursorBlinkRate", 530);
+    return TRUE;
+}
+void DestroyCaret(void) { caret_off(); caret.h = NULL; caret.created = 0; }
+void ShowCaret(HWND h)
+{
+    if (!caret.created || (h && h != caret.h)) return;
+    if (caret.hide > 0 && --caret.hide == 0) { caret_xor(); caret.next = GetTickCount() + caret.blink; }
+}
+void HideCaret(HWND h)
+{
+    if (!caret.created || (h && h != caret.h)) return;
+    if (caret.hide++ == 0) caret_off();
+}
+void SetCaretPos(int x, int y)
+{
+    if (!caret.created) return;
+    int was = caret.on;
+    caret_off();
+    caret.x = x; caret.y = y;
+    if (was || caret.hide == 0) { caret_xor(); caret.next = GetTickCount() + caret.blink; }
+}
+void GetCaretPos(LPPOINT p) { p->x = caret.x; p->y = caret.y; }
+void SetCaretBlinkTime(UINT ms) { caret.blink = ms; }
+UINT GetCaretBlinkTime(void) { return caret.blink; }
+void w16_caret_hide_for_paint(HWND h) { if (caret.created && (caret.h == h || IsChild(h, caret.h))) HideCaret(caret.h); }
+void w16_caret_restore_after_paint(HWND h) { if (caret.created && (caret.h == h || IsChild(h, caret.h))) ShowCaret(caret.h); }
+void w16_caret_on_destroy(HWND h) { if (caret.h == h) DestroyCaret(); }
+static void caret_tick(DWORD now, int *wait)
+{
+    if (!caret.created || caret.hide > 0 || !w16_valid(caret.h)) return;
+    int d = (int)(caret.next - now);
+    if (d <= 0) { caret_xor(); caret.next = now + caret.blink; d = caret.blink; }
+    if (d < *wait) *wait = d;
+}
+
+/* ------------------------------------------------------------------ presentation */
+static SDL_Window *win;
+static SDL_Renderer *ren;
+static SDL_Texture *tex;
+static int scale = 1;
+static HCURSOR cur_cursor;
+void w16_icon_info(HICON ic, int *w, int *h, int *hx, int *hy, const uint32_t **xorpx, const uint8_t **andm);
+void **w16_icon_native(HICON ic);
+
+void w16_video_init(void)
+{
+    const char *s = getenv("W16_SCALE");
+    scale = s ? atoi(s) : 0;
+    if (getenv("W16_HEADLESS")) { headless = 1; return; }
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
+        fprintf(stderr, "libw16: SDL_Init failed: %s (set W16_HEADLESS=1 for tests)\n", SDL_GetError());
+        exit(1);
+    }
+    if (scale <= 0) {
+        SDL_DisplayMode dm;
+        scale = 1;
+        if (SDL_GetDesktopDisplayMode(0, &dm) == 0)
+            while ((scale + 1) * w16_screen.w <= dm.w && (scale + 1) * w16_screen.h <= dm.h - 64) scale++;
+    }
+    win = SDL_CreateWindow(w16_app_module ? w16_app_module : "arch311", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                           w16_screen.w * scale, w16_screen.h * scale, SDL_WINDOW_ALLOW_HIGHDPI);
+    ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!ren) ren = SDL_CreateRenderer(win, -1, 0);
+    SDL_RenderSetLogicalSize(ren, w16_screen.w, w16_screen.h);
+    SDL_RenderSetIntegerScale(ren, SDL_TRUE);
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+    tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING, w16_screen.w, w16_screen.h);
+    SDL_StartTextInput();
+}
+
+void w16_present(void)
+{
+    if (headless || !w16_screen_dirty) return;
+    w16_screen_dirty = 0;
+    SDL_UpdateTexture(tex, NULL, w16_screen.px, w16_screen.w * 4);
+    SDL_RenderClear(ren);
+    SDL_RenderCopy(ren, tex, NULL, NULL);
+    SDL_RenderPresent(ren);
+}
+
+HCURSOR SetCursor(HCURSOR c)
+{
+    HCURSOR o = cur_cursor;
+    cur_cursor = c;
+    if (headless || !c || c == o) return o;
+    void **nat = w16_icon_native(c);
+    if (!*nat) {
+        int w, h, hx, hy;
+        const uint32_t *xp;
+        const uint8_t *am;
+        w16_icon_info(c, &w, &h, &hx, &hy, &xp, &am);
+        int s = scale > 0 ? scale : 1;
+        SDL_Surface *sf = SDL_CreateRGBSurfaceWithFormat(0, w * s, h * s, 32, SDL_PIXELFORMAT_ARGB8888);
+        uint32_t *px = sf->pixels;
+        for (int y = 0; y < h * s; y++)
+            for (int x = 0; x < w * s; x++) {
+                int i = (y / s) * w + x / s;
+                uint32_t v;
+                if (am[i]) v = xp[i] ? 0xFF000000 : 0; /* inverted pixels approximated as black */
+                else v = 0xFF000000 | xp[i];
+                px[y * (sf->pitch / 4) + x] = v;
+            }
+        *nat = SDL_CreateColorCursor(sf, hx * s, hy * s);
+        SDL_FreeSurface(sf);
+    }
+    if (*nat) SDL_SetCursor(*nat);
+    return o;
+}
+int ShowCursor(BOOL show) { static int n = 0; n += show ? 1 : -1; if (!headless) SDL_ShowCursor(n >= 0); return n; }
+void GetCursorPos(LPPOINT p) { *p = w16_mouse; }
+void SetCursorPos(int x, int y)
+{
+    w16_mouse.x = x; w16_mouse.y = y;
+    if (win) SDL_WarpMouseInWindow(win, x * scale, y * scale);
+}
+
+/* ------------------------------------------------------------------ keyboard */
+static int sdl_to_vk(SDL_Keycode k, SDL_Scancode sc)
+{
+    if (k >= 'a' && k <= 'z') return k - 32;
+    if (k >= '0' && k <= '9') return k;
+    switch (k) {
+    case SDLK_BACKSPACE: return VK_BACK; case SDLK_TAB: return VK_TAB; case SDLK_RETURN: return VK_RETURN;
+    case SDLK_KP_ENTER: return VK_RETURN; case SDLK_ESCAPE: return VK_ESCAPE; case SDLK_SPACE: return VK_SPACE;
+    case SDLK_PAGEUP: return VK_PRIOR; case SDLK_PAGEDOWN: return VK_NEXT; case SDLK_END: return VK_END;
+    case SDLK_HOME: return VK_HOME; case SDLK_LEFT: return VK_LEFT; case SDLK_UP: return VK_UP;
+    case SDLK_RIGHT: return VK_RIGHT; case SDLK_DOWN: return VK_DOWN; case SDLK_INSERT: return VK_INSERT;
+    case SDLK_DELETE: return VK_DELETE; case SDLK_LSHIFT: case SDLK_RSHIFT: return VK_SHIFT;
+    case SDLK_LCTRL: case SDLK_RCTRL: return VK_CONTROL; case SDLK_LALT: case SDLK_RALT: return VK_MENU;
+    case SDLK_CAPSLOCK: return VK_CAPITAL; case SDLK_NUMLOCKCLEAR: return VK_NUMLOCK; case SDLK_SCROLLLOCK: return VK_SCROLL;
+    case SDLK_PAUSE: return VK_PAUSE; case SDLK_PRINTSCREEN: return VK_SNAPSHOT;
+    case SDLK_KP_MULTIPLY: return VK_MULTIPLY; case SDLK_KP_PLUS: return VK_ADD; case SDLK_KP_MINUS: return VK_SUBTRACT;
+    case SDLK_KP_DIVIDE: return VK_DIVIDE; case SDLK_KP_PERIOD: return VK_DECIMAL;
+    case SDLK_SEMICOLON: return 0xBA; case SDLK_EQUALS: return 0xBB; case SDLK_COMMA: return 0xBC;
+    case SDLK_MINUS: return 0xBD; case SDLK_PERIOD: return 0xBE; case SDLK_SLASH: return 0xBF;
+    case SDLK_BACKQUOTE: return 0xC0; case SDLK_LEFTBRACKET: return 0xDB; case SDLK_BACKSLASH: return 0xDC;
+    case SDLK_RIGHTBRACKET: return 0xDD; case SDLK_QUOTE: return 0xDE;
+    }
+    if (k >= SDLK_F1 && k <= SDLK_F12) return VK_F1 + (k - SDLK_F1);
+    if (sc >= SDL_SCANCODE_KP_1 && sc <= SDL_SCANCODE_KP_9) return VK_NUMPAD0 + 1 + (sc - SDL_SCANCODE_KP_1);
+    if (sc == SDL_SCANCODE_KP_0) return VK_NUMPAD0;
+    return 0;
+}
+
+/* US layout (KBDUS) VK -> character */
+static int vk_to_char(int vk, int shift, int ctrl, int caps)
+{
+    if (ctrl) {
+        if (vk >= 'A' && vk <= 'Z') return vk - 'A' + 1;
+        if (vk == 0xDB) return 27; if (vk == 0xDC) return 28; if (vk == 0xDD) return 29;
+        if (vk == VK_BACK) return 127; if (vk == VK_RETURN) return 10;
+        return 0;
+    }
+    if (vk >= 'A' && vk <= 'Z') return (shift ^ caps) ? vk : vk + 32;
+    static const char num[] = ")!@#$%^&*(";
+    if (vk >= '0' && vk <= '9') return shift ? num[vk - '0'] : vk;
+    if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD0 + 9) return '0' + vk - VK_NUMPAD0;
+    switch (vk) {
+    case VK_SPACE: return ' '; case VK_RETURN: return '\r'; case VK_BACK: return 8; case VK_TAB: return 9;
+    case VK_ESCAPE: return 27; case VK_MULTIPLY: return '*'; case VK_ADD: return '+'; case VK_SUBTRACT: return '-';
+    case VK_DIVIDE: return '/'; case VK_DECIMAL: return '.';
+    case 0xBA: return shift ? ':' : ';'; case 0xBB: return shift ? '+' : '='; case 0xBC: return shift ? '<' : ',';
+    case 0xBD: return shift ? '_' : '-'; case 0xBE: return shift ? '>' : '.'; case 0xBF: return shift ? '?' : '/';
+    case 0xC0: return shift ? '~' : '`'; case 0xDB: return shift ? '{' : '['; case 0xDC: return shift ? '|' : '\\';
+    case 0xDD: return shift ? '}' : ']'; case 0xDE: return shift ? '"' : '\'';
+    }
+    return 0;
+}
+
+int GetKeyState(int vk)
+{
+    if (vk < 0 || vk > 255) return 0;
+    int v = w16_keystate[vk];
+    return (v & 0x80 ? (int)0xFF80 : 0) | (v & 1);
+}
+int GetAsyncKeyState(int vk) { return GetKeyState(vk); }
+
+BOOL TranslateMessage(const MSG *m)
+{
+    if (m->message != WM_KEYDOWN && m->message != WM_SYSKEYDOWN) return FALSE;
+    int shift = w16_keystate[VK_SHIFT] & 0x80, ctrl = (w16_keystate[VK_CONTROL] & 0x80) && !(w16_keystate[VK_MENU] & 0x80);
+    int c = vk_to_char((int)m->wParam, shift != 0, ctrl, w16_keystate[VK_CAPITAL] & 1);
+    if (!c) return FALSE;
+    enqueue(m->hwnd, m->message == WM_SYSKEYDOWN ? WM_SYSCHAR : WM_CHAR, c, m->lParam, 1);
+    return TRUE;
+}
+
+/* ------------------------------------------------------------------ mouse routing */
+static DWORD last_click_time;
+static POINT last_click_pt;
+static HWND last_click_hwnd;
+static UINT last_click_msg;
+
+static int mk_flags(void)
+{
+    return ((w16_keystate[VK_LBUTTON] & 0x80) ? MK_LBUTTON : 0) | ((w16_keystate[VK_RBUTTON] & 0x80) ? MK_RBUTTON : 0) |
+           ((w16_keystate[VK_MBUTTON] & 0x80) ? MK_MBUTTON : 0) | ((w16_keystate[VK_SHIFT] & 0x80) ? MK_SHIFT : 0) |
+           ((w16_keystate[VK_CONTROL] & 0x80) ? MK_CONTROL : 0);
+}
+
+static HWND modal_block(HWND h); /* returns NULL if input to h is blocked */
+
+/* base = WM_MOUSEMOVE / WM_LBUTTONDOWN ...; route to the right window as client or NC message */
+static void mouse_event(UINT base)
+{
+    POINT p = w16_mouse;
+    HWND h = w16_capture;
+    int hit = HTCLIENT;
+    if (!h) {
+        h = WindowFromPoint(p);
+        if (!h || h == w16_desktop) {
+            if (base != WM_MOUSEMOVE) { /* desktop click */ }
+            SetCursor(LoadCursor(NULL, IDC_ARROW));
+            if (h == w16_desktop && base == WM_LBUTTONDBLCLK) { /* Task List */ }
+            return;
+        }
+        hit = (int)SendMessage(h, WM_NCHITTEST, 0, MAKELPARAM(p.x, p.y));
+        while (hit == HTTRANSPARENT && h->parent && h->parent != w16_desktop) {
+            h = h->parent;
+            hit = (int)SendMessage(h, WM_NCHITTEST, 0, MAKELPARAM(p.x, p.y));
+        }
+    }
+    /* disabled / modal-blocked windows */
+    HWND top = w16_top_level(h);
+    int blocked = !w16_capture && (!modal_block(h) || (top->style & WS_DISABLED) || ((h->style & WS_DISABLED)));
+    if (!w16_capture && blocked) {
+        if (base == WM_LBUTTONDOWN || base == WM_RBUTTONDOWN) MessageBeep(0);
+        SetCursor(LoadCursor(NULL, IDC_ARROW));
+        return;
+    }
+    if (!w16_capture) SendMessage(h, WM_SETCURSOR, (WPARAM)h, MAKELPARAM(hit, base));
+    if (base == WM_LBUTTONDOWN || base == WM_RBUTTONDOWN || base == WM_MBUTTONDOWN) {
+        /* activation */
+        if (!w16_capture && top != w16_active && top->parent == w16_desktop) {
+            int r = (int)SendMessage(h, WM_MOUSEACTIVATE, (WPARAM)top, MAKELPARAM(hit, base));
+            if (r != MA_NOACTIVATE) w16_activate(top, WA_CLICKACTIVE);
+            if (r == MA_ACTIVATEANDEAT) return;
+        }
+        /* double clicks */
+        DWORD now = GetTickCount();
+        UINT dbl = GetProfileInt("windows", "DoubleClickSpeed", 452);
+        if (h == last_click_hwnd && base == last_click_msg && now - last_click_time <= dbl &&
+            abs(p.x - last_click_pt.x) <= GetSystemMetrics(SM_CXDOUBLECLK) / 2 &&
+            abs(p.y - last_click_pt.y) <= GetSystemMetrics(SM_CYDOUBLECLK) / 2 &&
+            (hit != HTCLIENT || (h->cls->wc.style & CS_DBLCLKS))) {
+            base += 2; /* xBUTTONDBLCLK */
+            last_click_time = 0;
+        } else {
+            last_click_time = now; last_click_pt = p; last_click_hwnd = h; last_click_msg = base;
+        }
+    }
+    if (hit == HTCLIENT || w16_capture) {
+        POINT c = p;
+        ScreenToClient(h, &c);
+        enqueue(h, base, mk_flags(), MAKELPARAM(c.x, c.y), 0);
+    } else if (hit != HTNOWHERE && hit != HTERROR) {
+        UINT nc = base - WM_MOUSEMOVE + WM_NCMOUSEMOVE;
+        enqueue(h, nc, hit, MAKELPARAM(p.x, p.y), 0);
+    }
+}
+
+/* modal dialogs disable their owners; popups of the active app are fine */
+static HWND modal_block(HWND h)
+{
+    for (HWND p = h; p && p != w16_desktop; p = p->parent)
+        if (p->style & WS_DISABLED) return NULL;
+    return h;
+}
+
+static void key_event(UINT msg, int vk, int scancode, int repeat)
+{
+    HWND h = w16_focus;
+    int alt = w16_keystate[VK_MENU] & 0x80;
+    LPARAM lp = 1 | ((scancode & 0xFF) << 16) | (alt ? (1 << 29) : 0) | (repeat ? (1 << 30) : 0) | (msg == WM_KEYUP ? 0xC0000000 : 0);
+    if (!h) {
+        h = w16_active;
+        if (!h) return;
+        /* no focus: keystrokes go to the active window as WM_SYSKEY* (3.1 behaviour) */
+        msg = msg == WM_KEYDOWN ? WM_SYSKEYDOWN : WM_SYSKEYUP;
+    } else if (alt || vk == VK_F10 || vk == VK_MENU) {
+        msg = msg == WM_KEYDOWN ? WM_SYSKEYDOWN : WM_SYSKEYUP;
+    }
+    enqueue(h, msg, vk, lp, 0);
+}
+
+/* ------------------------------------------------------------------ test script driver */
+static FILE *script;
+static DWORD script_wait_until;
+void w16_script_init(void)
+{
+    const char *s = getenv("W16_SCRIPT");
+    if (s && *s) script = fopen(s, "r");
+}
+
+static void synth_key(const char *spec)
+{
+    /* e.g. alt+h, ctrl+shift+f5, a, enter */
+    char buf[64];
+    snprintf(buf, sizeof buf, "%s", spec);
+    int mods[3] = {0}, nm = 0, vk = 0;
+    char *save, *tok = strtok_r(buf, "+", &save);
+    while (tok) {
+        char *next = strtok_r(NULL, "+", &save);
+        int v = 0;
+        if (!strcasecmp(tok, "alt")) v = VK_MENU; else if (!strcasecmp(tok, "ctrl")) v = VK_CONTROL;
+        else if (!strcasecmp(tok, "shift")) v = VK_SHIFT; else if (!strcasecmp(tok, "enter")) v = VK_RETURN;
+        else if (!strcasecmp(tok, "esc")) v = VK_ESCAPE; else if (!strcasecmp(tok, "tab")) v = VK_TAB;
+        else if (!strcasecmp(tok, "space")) v = VK_SPACE; else if (!strcasecmp(tok, "down")) v = VK_DOWN;
+        else if (!strcasecmp(tok, "up")) v = VK_UP; else if (!strcasecmp(tok, "left")) v = VK_LEFT;
+        else if (!strcasecmp(tok, "right")) v = VK_RIGHT; else if (!strcasecmp(tok, "del")) v = VK_DELETE;
+        else if (!strcasecmp(tok, "bs")) v = VK_BACK; else if (!strcasecmp(tok, "home")) v = VK_HOME;
+        else if (!strcasecmp(tok, "end")) v = VK_END;
+        else if ((tok[0] == 'f' || tok[0] == 'F') && isdigit((unsigned char)tok[1])) v = VK_F1 + atoi(tok + 1) - 1;
+        else if (strlen(tok) == 1) v = toupper((unsigned char)tok[0]);
+        if (next && nm < 3) mods[nm++] = v; else vk = v;
+        tok = next;
+    }
+    for (int i = 0; i < nm; i++) { w16_keystate[mods[i]] |= 0x80; key_event(WM_KEYDOWN, mods[i], 0, 0); }
+    w16_keystate[vk] |= 0x80;
+    key_event(WM_KEYDOWN, vk, 0, 0);
+    w16_keystate[vk] &= ~0x80;
+    key_event(WM_KEYUP, vk, 0, 0);
+    for (int i = nm - 1; i >= 0; i--) { w16_keystate[mods[i]] &= ~0x80; key_event(WM_KEYUP, mods[i], 0, 0); }
+}
+
+/* returns 1 if it produced input */
+static int script_step(void)
+{
+    if (!script || (int)(GetTickCount() - script_wait_until) < 0) return 0;
+    if (qhead || w16_any_paint_pending()) return 0; /* run only when idle, like a user would */
+    char line[512];
+    while (fgets(line, sizeof line, script)) {
+        char *c = line;
+        while (*c == ' ' || *c == '\t') c++;
+        c[strcspn(c, "\r\n")] = 0;
+        if (!*c || *c == '#') continue;
+        char cmd[32], arg[480] = "";
+        sscanf(c, "%31s %479[^\n]", cmd, arg);
+        if (!strcmp(cmd, "sleep")) { script_wait_until = GetTickCount() + atoi(arg); return 0; }
+        if (!strcmp(cmd, "key")) { synth_key(arg); script_wait_until = GetTickCount() + 30; return 1; }
+        if (!strcmp(cmd, "type")) {
+            for (char *p = arg; *p; p++) {
+                HWND h = w16_focus ? w16_focus : w16_active;
+                if (h) enqueue(h, WM_CHAR, (unsigned char)*p, 1, 0);
+            }
+            return 1;
+        }
+        if (!strcmp(cmd, "move") || !strcmp(cmd, "click") || !strcmp(cmd, "dblclick") || !strcmp(cmd, "down") || !strcmp(cmd, "up")) {
+            int x, y;
+            if (sscanf(arg, "%d %d", &x, &y) == 2) { w16_mouse.x = x; w16_mouse.y = y; }
+            mouse_event(WM_MOUSEMOVE);
+            if (!strcmp(cmd, "click") || !strcmp(cmd, "down") || !strcmp(cmd, "dblclick")) {
+                w16_keystate[VK_LBUTTON] |= 0x80; mouse_event(WM_LBUTTONDOWN);
+            }
+            if (!strcmp(cmd, "click") || !strcmp(cmd, "up") || !strcmp(cmd, "dblclick")) {
+                w16_keystate[VK_LBUTTON] &= ~0x80; mouse_event(WM_LBUTTONUP);
+            }
+            if (!strcmp(cmd, "dblclick")) {
+                w16_keystate[VK_LBUTTON] |= 0x80; mouse_event(WM_LBUTTONDOWN);
+                w16_keystate[VK_LBUTTON] &= ~0x80; mouse_event(WM_LBUTTONUP);
+            }
+            script_wait_until = GetTickCount() + 30;
+            return 1;
+        }
+        if (!strcmp(cmd, "shot")) {
+            /* hide the caret so screenshots are deterministic */
+            int on = caret.on;
+            if (on) caret_xor();
+            w16_screenshot(arg);
+            if (on) caret_xor();
+            continue;
+        }
+        if (!strcmp(cmd, "quit")) exit(0);
+    }
+    fclose(script);
+    script = NULL;
+    exit(0);
+}
+
+/* ------------------------------------------------------------------ SDL pump */
+static void handle_sdl(SDL_Event *e)
+{
+    switch (e->type) {
+    case SDL_QUIT:
+        if (w16_active) PostMessage(w16_active, WM_SYSCOMMAND, SC_CLOSE, 0);
+        else exit(0);
+        break;
+    case SDL_MOUSEMOTION:
+        w16_mouse.x = e->motion.x; w16_mouse.y = e->motion.y;
+        mouse_event(WM_MOUSEMOVE);
+        break;
+    case SDL_MOUSEBUTTONDOWN:
+    case SDL_MOUSEBUTTONUP: {
+        w16_mouse.x = e->button.x; w16_mouse.y = e->button.y;
+        int down = e->type == SDL_MOUSEBUTTONDOWN;
+        int vk = e->button.button == SDL_BUTTON_LEFT ? VK_LBUTTON : e->button.button == SDL_BUTTON_RIGHT ? VK_RBUTTON : VK_MBUTTON;
+        UINT base = vk == VK_LBUTTON ? WM_LBUTTONDOWN : vk == VK_RBUTTON ? WM_RBUTTONDOWN : WM_MBUTTONDOWN;
+        if (down) w16_keystate[vk] |= 0x80; else w16_keystate[vk] &= ~0x80;
+        mouse_event(down ? base : base + 1);
+        break;
+    }
+    case SDL_MOUSEWHEEL: {
+        /* 3.1 had no wheel: map to scroll messages for the focus window */
+        HWND h = w16_focus ? w16_focus : w16_active;
+        while (h && !(h->style & WS_VSCROLL) && h->parent != w16_desktop) h = h->parent;
+        if (h) for (int i = 0; i < 3; i++) enqueue(h, WM_VSCROLL, e->wheel.y > 0 ? SB_LINEUP : SB_LINEDOWN, 0, 0);
+        break;
+    }
+    case SDL_KEYDOWN:
+    case SDL_KEYUP: {
+        int vk = sdl_to_vk(e->key.keysym.sym, e->key.keysym.scancode);
+        if (!vk) break;
+        int down = e->type == SDL_KEYDOWN;
+        if (down) { w16_keystate[vk] |= 0x80; if (!e->key.repeat) w16_keystate[vk] ^= 1; }
+        else w16_keystate[vk] &= ~0x80;
+        key_event(down ? WM_KEYDOWN : WM_KEYUP, vk, e->key.keysym.scancode, e->key.repeat);
+        break;
+    }
+    case SDL_TEXTINPUT: {
+        /* characters outside the US layout table (dead keys, IME): deliver as cp1252 WM_CHAR */
+        const unsigned char *s = (const unsigned char *)e->text.text;
+        if (s[0] < 0x80) break;
+        unsigned cp = 0;
+        if ((s[0] & 0xE0) == 0xC0) cp = ((s[0] & 0x1F) << 6) | (s[1] & 0x3F);
+        if (cp >= 0xA0 && cp <= 0xFF && w16_focus) enqueue(w16_focus, WM_CHAR, cp, 1, 0);
+        break;
+    }
+    case SDL_WINDOWEVENT:
+        if (e->window.event == SDL_WINDOWEVENT_EXPOSED) { w16_screen_dirty = 1; w16_present(); }
+        break;
+    }
+}
+
+void w16_pump(int wait_ms)
+{
+    if (script_step()) return;
+    if (headless) {
+        if (wait_ms > 0) usleep((wait_ms > 20 ? 20 : wait_ms) * 1000);
+        return;
+    }
+    SDL_Event e;
+    if (wait_ms > 0 && SDL_WaitEventTimeout(&e, wait_ms)) handle_sdl(&e);
+    while (SDL_PollEvent(&e)) handle_sdl(&e);
+}
+
+void w16_delay(int ms)
+{
+    DWORD end = GetTickCount() + ms;
+    while ((int)(end - GetTickCount()) > 0) { w16_present(); w16_pump(5); }
+}
+
+/* ------------------------------------------------------------------ GetMessage / PeekMessage */
+static int match(const MSG *m, HWND h, UINT f, UINT l)
+{
+    if (h && m->hwnd != h && !IsChild(h, m->hwnd)) return 0;
+    if (f || l) return m->message >= f && m->message <= l;
+    return 1;
+}
+
+static int fetch(LPMSG out, HWND h, UINT first, UINT last, int remove, int *wait)
+{
+    if (w16_quit_posted && (!first || (WM_QUIT >= first && WM_QUIT <= last))) {
+        memset(out, 0, sizeof *out);
+        out->message = WM_QUIT;
+        out->wParam = w16_quit_code;
+        if (remove) w16_quit_posted = 0;
+        return 1;
+    }
+    for (QMsg **p = &qhead, *prev = NULL; *p; prev = *p, p = &(*p)->next) {
+        if (!match(&(*p)->m, h, first, last)) continue;
+        QMsg *q = *p;
+        *out = q->m;
+        if (remove) {
+            *p = q->next;
+            if (qtail == q) qtail = prev;
+            free(q);
+        }
+        if (out->hwnd && !w16_valid(out->hwnd) && out->hwnd != w16_desktop) { if (remove) return fetch(out, h, first, last, remove, wait); }
+        w16_msg_time = out->time;
+        return 1;
+    }
+    /* paint */
+    if (!first || (WM_PAINT >= first && WM_PAINT <= last)) {
+        HWND ph = w16_next_to_paint(NULL);
+        if (ph && (!h || ph == h || IsChild(h, ph))) {
+            memset(out, 0, sizeof *out);
+            out->hwnd = ph;
+            out->message = WM_PAINT;
+            out->time = GetTickCount();
+            out->pt = w16_mouse;
+            return 1;
+        }
+    }
+    /* timers */
+    DWORD now = GetTickCount();
+    caret_tick(now, wait);
+    if (!first || (WM_TIMER >= first && WM_TIMER <= last)) {
+        Timer *t = due_timer(now, wait);
+        if (t && (!h || t->h == h || IsChild(h, t->h))) {
+            memset(out, 0, sizeof *out);
+            out->hwnd = t->h;
+            out->message = WM_TIMER;
+            out->wParam = t->id;
+            out->lParam = (LPARAM)t->fn;
+            out->time = now;
+            out->pt = w16_mouse;
+            if (remove) t->due = now + t->ms;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+BOOL GetMessage(LPMSG m, HWND h, UINT first, UINT last)
+{
+    for (;;) {
+        int wait = 50;
+        if (fetch(m, h, first, last, 1, &wait)) return m->message != WM_QUIT;
+        w16_present();
+        w16_pump(wait > 0 ? wait : 1);
+    }
+}
+
+BOOL PeekMessage(LPMSG m, HWND h, UINT first, UINT last, UINT flags)
+{
+    int wait = 0;
+    w16_present();
+    w16_pump(0);
+    return fetch(m, h, first, last, flags & PM_REMOVE, &wait);
+}
+
+BOOL WaitMessage(void)
+{
+    MSG m;
+    int wait = 50;
+    while (!fetch(&m, NULL, 0, 0, 0, &wait)) { w16_present(); w16_pump(wait > 0 ? wait : 1); wait = 50; }
+    return TRUE;
+}
+BOOL GetInputState(void) { return qhead != NULL; }
+DWORD GetMessagePos(void) { return MAKELONG(w16_mouse.x, w16_mouse.y); }
+LONG GetMessageTime(void) { return (LONG)w16_msg_time; }
+
+LRESULT DispatchMessage(const MSG *m)
+{
+    if (m->message == WM_TIMER && m->lParam) {
+        ((TIMERPROC)m->lParam)(m->hwnd, WM_TIMER, (UINT)m->wParam, GetTickCount());
+        return 0;
+    }
+    if (!w16_valid(m->hwnd)) {
+        if (m->hwnd == w16_desktop && m->hwnd) return w16_desktop->proc(m->hwnd, m->message, m->wParam, m->lParam);
+        return 0;
+    }
+    if (m->message == WM_PAINT) {
+        HWND h = m->hwnd;
+        LRESULT r = SendMessage(h, WM_PAINT, 0, 0);
+        /* an app that does not call BeginPaint must not loop forever */
+        if (w16_valid(h) && (!rgn_empty(&h->upd) || h->need_ncpaint)) {
+            if (h->need_ncpaint) { h->need_ncpaint = 0; SendMessage(h, WM_NCPAINT, 1, 0); }
+            rgn_clear(&h->upd);
+        }
+        return r;
+    }
+    return SendMessage(m->hwnd, m->message, m->wParam, m->lParam);
+}
+
+int w16_modal_loop_step(MSG *m)
+{
+    if (!GetMessage(m, NULL, 0, 0)) { PostQuitMessage((int)m->wParam); return 0; }
+    TranslateMessage(m);
+    DispatchMessage(m);
+    return 1;
+}
+
+void MessageBeep(UINT t)
+{
+    (void)t;
+    if (GetProfileString("windows", "Beep", "yes", (char[8]){0}, 8) && !headless) {
+        /* TODO(T-SND-01): play through the system sound (SDL audio / canberra) */
+        fputc('\a', stderr);
+    }
+}
+
+/* ------------------------------------------------------------------ DefWindowProc */
+static HCURSOR size_cursor(int hit)
+{
+    switch (hit) {
+    case HTLEFT: case HTRIGHT: return LoadCursor(NULL, IDC_SIZEWE);
+    case HTTOP: case HTBOTTOM: return LoadCursor(NULL, IDC_SIZENS);
+    case HTTOPLEFT: case HTBOTTOMRIGHT: return LoadCursor(NULL, IDC_SIZENWSE);
+    case HTTOPRIGHT: case HTBOTTOMLEFT: return LoadCursor(NULL, IDC_SIZENESW);
+    case HTSIZE: return LoadCursor(NULL, IDC_SIZENWSE);
+    }
+    return NULL;
+}
+
+static int menu_alt_pending;
+
+LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    switch (m) {
+    case WM_NCCREATE: {
+        CREATESTRUCT *cs = (CREATESTRUCT *)lp;
+        if (cs && cs->lpszName && !IS_INTRESOURCE(cs->lpszName)) { free(h->text); h->text = strdup(cs->lpszName); }
+        return TRUE;
+    }
+    case WM_NCCALCSIZE: return 0;
+    case WM_NCPAINT:
+        if (IsIconic(h)) return 0;
+        w16_nc_paint(h, h->parent == w16_desktop ? (h == w16_active || (h->active_frame && h != w16_active && 0)) : 0);
+        return 0;
+    case WM_NCACTIVATE:
+        if (h->parent == w16_desktop && !IsIconic(h)) {
+            h->active_frame = wp != 0;
+            w16_nc_paint(h, wp != 0);
+        }
+        if (IsIconic(h)) w16_invalidate_screen_rect(&(RECT){h->rw.left - 24, h->rw.top, h->rw.right + 24, h->rw.bottom + 32});
+        return TRUE;
+    case WM_NCHITTEST: return w16_nc_hittest(h, (SHORT)LOWORD(lp), (SHORT)HIWORD(lp));
+    case WM_NCLBUTTONDOWN: return w16_nc_lbuttondown(h, (int)wp, (SHORT)LOWORD(lp), (SHORT)HIWORD(lp));
+    case WM_NCLBUTTONDBLCLK:
+        if (wp == HTCAPTION && (h->style & WS_MAXIMIZEBOX)) SendMessage(h, WM_SYSCOMMAND, IsZoomed(h) ? SC_RESTORE : SC_MAXIMIZE, lp);
+        else if (wp == HTCAPTION && IsIconic(h)) SendMessage(h, WM_SYSCOMMAND, SC_RESTORE, lp);
+        else if (wp == HTSYSMENU) SendMessage(h, WM_SYSCOMMAND, SC_CLOSE, lp);
+        return 0;
+    case WM_NCMOUSEMOVE: case WM_NCLBUTTONUP: case WM_NCRBUTTONDOWN: case WM_NCRBUTTONUP: return 0;
+    case WM_SETCURSOR: {
+        int hit = (SHORT)LOWORD(lp);
+        if (h->parent && h->parent != w16_desktop && (h->style & WS_CHILD)) {
+            if (SendMessage(h->parent, WM_SETCURSOR, wp, lp)) return TRUE;
+        }
+        if (hit == HTERROR) { if (HIWORD(lp) == WM_LBUTTONDOWN) MessageBeep(0); return TRUE; }
+        HCURSOR c = size_cursor(hit);
+        if (!c && hit == HTCLIENT) c = h->cls->wc.hCursor;
+        if (!c) c = LoadCursor(NULL, IDC_ARROW);
+        SetCursor(c);
+        return TRUE;
+    }
+    case WM_MOUSEACTIVATE:
+        if ((h->style & WS_CHILD) && h->parent) {
+            LRESULT r = SendMessage(h->parent, WM_MOUSEACTIVATE, wp, lp);
+            if (r) return r;
+        }
+        return MA_ACTIVATE;
+    case WM_ACTIVATE:
+        if (LOWORD(wp) != WA_INACTIVE && !HIWORD(wp)) SetFocus(h);
+        return 0;
+    case WM_SETTEXT:
+        free(h->text);
+        h->text = strdup(lp ? (const char *)lp : "");
+        if (w16_has_caption(h->style) && w16_window_visible(h)) {
+            HDC dc = GetWindowDC(h);
+            w16_draw_caption(h, dc, h->parent == w16_desktop && h == w16_active);
+            ReleaseDC(h, dc);
+        }
+        if (IsIconic(h)) w16_invalidate_screen_rect(&(RECT){h->rw.left - 24, h->rw.bottom, h->rw.right + 24, h->rw.bottom + 32});
+        return TRUE;
+    case WM_GETTEXT: {
+        int n = (int)wp;
+        if (n <= 0) return 0;
+        snprintf((char *)lp, n, "%s", h->text);
+        return strlen((char *)lp);
+    }
+    case WM_GETTEXTLENGTH: return strlen(h->text);
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        BeginPaint(h, &ps);
+        if (IsIconic(h)) w16_iconic_paint(h);
+        EndPaint(h, &ps);
+        return 0;
+    }
+    case WM_ERASEBKGND: {
+        HBRUSH b = h->cls->wc.hbrBackground;
+        if (!b) return 0;
+        RECT r;
+        GetClientRect(h, &r);
+        HDC dc = (HDC)wp;
+        int sx = dc->brushorgx, sy = dc->brushorgy;
+        FillRect(dc, &r, b);
+        dc->brushorgx = sx; dc->brushorgy = sy;
+        return 1;
+    }
+    case WM_ICONERASEBKGND: {
+        /* the desktop shows through behind icons */
+        HDC dc = (HDC)wp;
+        RECT r;
+        GetClientRect(h, &r);
+        FillRect(dc, &r, w16_sys_brush(COLOR_BACKGROUND));
+        return 1;
+    }
+    case WM_QUERYDRAGICON: return (LRESULT)h->cls->wc.hIcon;
+    case WM_CLOSE: DestroyWindow(h); return 0;
+    case WM_QUERYENDSESSION: case WM_QUERYOPEN: return TRUE;
+    case WM_SYSCOMMAND: w16_sys_command(h, (UINT)wp, (SHORT)LOWORD(lp), (SHORT)HIWORD(lp)); return 0;
+    case WM_SYSKEYDOWN:
+        if (wp == VK_MENU) { menu_alt_pending = 1; return 0; }
+        menu_alt_pending = 0;
+        if (wp == VK_F4 && (HIWORD(lp) & 0x2000)) { PostMessage(w16_top_level(h), WM_SYSCOMMAND, SC_CLOSE, 0); return 0; }
+        if (wp == VK_F10) { menu_alt_pending = 1; return 0; }
+        if (wp == VK_TAB && (HIWORD(lp) & 0x2000)) { SendMessage(w16_top_level(h), WM_SYSCOMMAND, SC_NEXTWINDOW, 0); return 0; }
+        if (wp == VK_ESCAPE && (HIWORD(lp) & 0x2000)) { SendMessage(w16_top_level(h), WM_SYSCOMMAND, SC_PREVWINDOW, 0); return 0; }
+        return 0;
+    case WM_SYSKEYUP:
+        if ((wp == VK_MENU || wp == VK_F10) && menu_alt_pending) {
+            menu_alt_pending = 0;
+            HWND t = w16_top_level(h);
+            SendMessage(t, WM_SYSCOMMAND, SC_KEYMENU, 0);
+        }
+        return 0;
+    case WM_SYSCHAR: {
+        menu_alt_pending = 0;
+        HWND t = (h->style & WS_CHILD) && h->parent && (w16_top_level(h)->menu == NULL) ? w16_top_level(h) : w16_top_level(h);
+        if (wp == ' ') { SendMessage(t, WM_SYSCOMMAND, SC_KEYMENU, ' '); return 0; }
+        if (wp == 27) return 0;
+        SendMessage(t, WM_SYSCOMMAND, SC_KEYMENU, (LPARAM)tolower((int)wp));
+        return 0;
+    }
+    case WM_KEYDOWN:
+        if (wp == VK_F10) menu_alt_pending = 1;
+        return 0;
+    case WM_KEYUP:
+        if (wp == VK_F10 && menu_alt_pending) { menu_alt_pending = 0; SendMessage(w16_top_level(h), WM_SYSCOMMAND, SC_KEYMENU, 0); }
+        return 0;
+    case WM_CTLCOLOR: {
+        HDC dc = (HDC)wp;
+        int type = HIWORD(lp);
+        if (type == CTLCOLOR_SCROLLBAR) {
+            SetBkColor(dc, RGB(255, 255, 255));
+            SetTextColor(dc, 0);
+            return (LRESULT)w16_sys_brush(COLOR_SCROLLBAR);
+        }
+        SetBkColor(dc, GetSysColor(COLOR_WINDOW));
+        SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+        return (LRESULT)w16_sys_brush(COLOR_WINDOW);
+    }
+    case WM_WINDOWPOSCHANGED: {
+        WINDOWPOS *wpos = (WINDOWPOS *)lp;
+        RECT pr = {0, 0, 0, 0};
+        if (h->parent && h->parent != w16_desktop) pr = h->parent->rc;
+        if (!(wpos->flags & SWP_NOMOVE)) SendMessage(h, WM_MOVE, 0, MAKELPARAM(h->rc.left - pr.left, h->rc.top - pr.top));
+        if (!(wpos->flags & SWP_NOSIZE))
+            SendMessage(h, WM_SIZE, IsZoomed(h) ? SIZE_MAXIMIZED : IsIconic(h) ? SIZE_MINIMIZED : SIZE_RESTORED,
+                        MAKELPARAM(h->rc.right - h->rc.left, h->rc.bottom - h->rc.top));
+        return 0;
+    }
+    case WM_VKEYTOITEM: case WM_CHARTOITEM: return -1;
+    case WM_SETREDRAW:
+        h->redraw_off = !wp;
+        return 0;
+    case WM_SHOWWINDOW: return 0;
+    case WM_VSCROLL: case WM_HSCROLL: return 0;
+    case WM_DROPFILES: return 0;
+    }
+    return 0;
+}

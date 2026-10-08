@@ -1,0 +1,783 @@
+/* USER dialog manager: templates, modal/modeless dialogs, keyboard interface, MessageBox.
+ * 3.1 rules measured from real 3.11: dialog fonts are bold, base units come from
+ * ((width of "A..Za..z") / 26 + 1) / 2 and the font height; dialogs have a white background. */
+#include "w16int.h"
+#include <ctype.h>
+
+static uint16_t u16(const uint8_t *p) { return p[0] | (p[1] << 8); }
+static uint32_t u32(const uint8_t *p) { return u16(p) | ((uint32_t)u16(p + 2) << 16); }
+
+W16Dialog *w16_dlg(HWND h)
+{
+    if (!w16_valid(h) || !h->is_dialog) return NULL;
+    return (W16Dialog *)h->ctl;
+}
+
+/* ------------------------------------------------------------------ base units */
+static void char_dims(HFONT f, int *cx, int *cy)
+{
+    HDC dc = GetDC(NULL);
+    HGDIOBJ old = SelectObject(dc, f ? f : GetStockObject(SYSTEM_FONT));
+    TEXTMETRIC tm;
+    GetTextMetrics(dc, &tm);
+    *cx = tm.tmAveCharWidth;
+    *cy = tm.tmHeight;
+    if (tm.tmPitchAndFamily & 1) { /* variable pitch */
+        const char *s = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        *cx = ((LOWORD(GetTextExtent(dc, s, 52)) / 26) + 1) / 2;
+    }
+    SelectObject(dc, old);
+    ReleaseDC(NULL, dc);
+}
+
+DWORD GetDialogBaseUnits(void)
+{
+    int cx, cy;
+    char_dims(NULL, &cx, &cy);
+    return MAKELONG(cx, cy);
+}
+
+void MapDialogRect(HWND h, LPRECT r)
+{
+    W16Dialog *d = w16_dlg(h);
+    int cx = d ? d->cxchar : 8, cy = d ? d->cychar : 16;
+    r->left = (r->left * cx + 2) / 4;
+    r->right = (r->right * cx + 2) / 4;
+    r->top = (r->top * cy + 4) / 8;
+    r->bottom = (r->bottom * cy + 4) / 8;
+}
+
+/* ------------------------------------------------------------------ template parsing */
+static const char *sz(const uint8_t **p)
+{
+    const char *s = (const char *)*p;
+    *p += strlen(s) + 1;
+    return s;
+}
+static int name_or_ord(const uint8_t **p, const char **name)
+{
+    if (**p == 0xFF) { int v = u16(*p + 1); *p += 3; *name = NULL; return v; }
+    *name = sz(p);
+    return 0;
+}
+
+static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC proc, LPARAM lp, int modal)
+{
+    DWORD style = u32(t);
+    int n = t[4];
+    int x = (SHORT)u16(t + 5), y = (SHORT)u16(t + 7), cx = (SHORT)u16(t + 9), cy = (SHORT)u16(t + 11);
+    const uint8_t *p = t + 13;
+    const char *menuname, *clsname, *caption;
+    int menuord = name_or_ord(&p, &menuname);
+    int clsord = name_or_ord(&p, &clsname);
+    (void)clsord;
+    caption = sz(&p);
+    HFONT font = NULL;
+    int ownfont = 0;
+    if (style & DS_SETFONT) {
+        int pt = u16(p);
+        p += 2;
+        const char *face = sz(&p);
+        font = CreateFont(-((pt * 96 + 36) / 72), 0, 0, 0, FW_BOLD, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, 0, face);
+        ownfont = 1;
+    }
+    int cxc, cyc;
+    char_dims(font, &cxc, &cyc);
+    /* dialog rectangle: template units -> pixels (client area), relative to the owner's client */
+    RECT rc = {0, 0, (cx * cxc + 2) / 4, (cy * cyc + 4) / 8};
+    int px = (x * cxc + 2) / 4, py = (y * cyc + 4) / 8;
+    DWORD ex = 0;
+    DWORD wstyle = style & ~(DS_SETFONT | DS_MODALFRAME | DS_SYSMODAL | DS_LOCALEDIT | DS_ABSALIGN | DS_NOIDLEMSG);
+    if (style & DS_MODALFRAME) { ex |= WS_EX_DLGMODALFRAME; wstyle |= WS_DLGFRAME; }
+    if (!(wstyle & WS_CHILD)) wstyle |= WS_POPUP;
+    int visible = (wstyle & WS_VISIBLE) != 0;
+    wstyle &= ~WS_VISIBLE;
+    /* frame size for this style */
+    struct W16Window fake;
+    memset(&fake, 0, sizeof fake);
+    fake.style = wstyle;
+    fake.exstyle = ex;
+    fake.parent = (wstyle & WS_CHILD) ? (HWND)1 : w16_desktop;
+    RECT big = {0, 0, 1000, 1000}, inner;
+    w16_nc_calc(&fake, &big, &inner);
+    int fl = inner.left, ft = inner.top, fr = 1000 - inner.right, fb = 1000 - inner.bottom;
+    if (menuord || menuname) ft += GetSystemMetrics(SM_CYMENU) + 1;
+    int wx = px, wy = py;
+    if (!(style & DS_ABSALIGN) && owner && w16_valid(owner) && !(wstyle & WS_CHILD)) {
+        HWND o = owner;
+        wx += o->rc.left;
+        wy += o->rc.top;
+    }
+    int ww = rc.right + fl + fr, wh = rc.bottom + ft + fb;
+    if (!(wstyle & WS_CHILD)) {
+        /* keep on screen */
+        if (wx + ww > w16_screen.w) wx = w16_screen.w - ww;
+        if (wy + wh > w16_screen.h) wy = w16_screen.h - wh;
+        if (wx < 0) wx = 0;
+        if (wy < 0) wy = 0;
+    }
+    const char *cls = clsname && *clsname ? clsname : "#32770";
+    W16Dialog *dd = calloc(1, sizeof *dd);
+    dd->proc = proc;
+    dd->font = font;
+    dd->ownfont = ownfont;
+    dd->cxchar = cxc;
+    dd->cychar = cyc;
+    dd->owner = owner;
+    dd->defid = IDOK;
+    HMENU menu = NULL;
+    if (menuord) menu = LoadMenu(inst, MAKEINTRESOURCE(menuord));
+    else if (menuname && *menuname) menu = LoadMenu(inst, menuname);
+    /* create without WM_CREATE side effects of the dialog proc: the proc gets WM_INITDIALOG */
+    W16Class *c = w16_find_class(cls, inst);
+    if (!c) c = w16_find_class("#32770", NULL);
+    WNDPROC saved = c->wc.lpfnWndProc;
+    HWND h = CreateWindowEx(ex, c->name, caption, wstyle, wx - (owner && !(wstyle & WS_CHILD) && !(style & DS_ABSALIGN) ? 0 : 0), wy, ww, wh,
+                            (wstyle & WS_CHILD) ? owner : owner, menu, inst, NULL);
+    (void)saved;
+    if (!h) { free(dd); return NULL; }
+    h->is_dialog = 1;
+    h->ctl = dd;
+    if (font) SendMessage(h, WM_SETFONT, (WPARAM)font, 0);
+    /* controls */
+    HWND first = NULL;
+    for (int i = 0; i < n; i++) {
+        int ix = (SHORT)u16(p), iy = (SHORT)u16(p + 2), icx = (SHORT)u16(p + 4), icy = (SHORT)u16(p + 6);
+        int id = u16(p + 8);
+        DWORD is = u32(p + 10);
+        p += 14;
+        const char *ccls;
+        static const char *pre[] = {"BUTTON", "EDIT", "STATIC", "LISTBOX", "SCROLLBAR", "COMBOBOX"};
+        if (*p & 0x80) { int k = *p - 0x80; ccls = k < 6 ? pre[k] : "STATIC"; p++; }
+        else ccls = sz(&p);
+        const char *txt;
+        int ord = name_or_ord(&p, &txt);
+        int extra = *p;
+        p += 1 + extra;
+        RECT r = {ix, iy, ix + icx, iy + icy};
+        r.left = (r.left * cxc + 2) / 4; r.right = (r.right * cxc + 2) / 4;
+        r.top = (r.top * cyc + 4) / 8; r.bottom = (r.bottom * cyc + 4) / 8;
+        HWND ch = CreateWindowEx(WS_EX_NOPARENTNOTIFY, ccls, ord ? "" : txt, (is | WS_CHILD) & ~WS_POPUP,
+                                 r.left, r.top, r.right - r.left, r.bottom - r.top, h, (HMENU)(uintptr_t)id, inst, NULL);
+        if (!ch) { W16_LOG("dialog: could not create control class %s\n", ccls); continue; }
+        if (font) SendMessage(ch, WM_SETFONT, (WPARAM)font, 0);
+        if (ord && !strcasecmp(ccls, "STATIC") && (is & 0xF) == SS_ICON) {
+            HICON ic = LoadIcon(inst, MAKEINTRESOURCE(ord));
+            SendMessage(ch, STM_SETICON, (WPARAM)ic, 0);
+        }
+        if (!first && (is & WS_TABSTOP) && !(is & WS_DISABLED) && (is & WS_VISIBLE)) first = ch;
+        if (!strcasecmp(ccls, "BUTTON") && (is & 0xF) == BS_DEFPUSHBUTTON) dd->defid = id;
+    }
+    if (!first) first = GetNextDlgTabItem(h, NULL, FALSE);
+    dd->focus = first;
+    if (SendMessage(h, WM_INITDIALOG, (WPARAM)first, lp) && w16_valid(h)) {
+        if (first) {
+            dd->focus = first;
+            if (visible || modal) { /* focus is set when shown/activated */ }
+        }
+    } else if (w16_valid(h) && w16_focus && IsChild(h, w16_focus))
+        dd->focus = w16_focus;
+    if (!w16_valid(h)) return NULL;
+    if (visible || modal) {
+        ShowWindow(h, SW_SHOWNORMAL);
+        if (dd->focus && w16_valid(dd->focus)) SetFocus(dd->focus);
+        if (dd->focus && w16_valid(dd->focus) && (SendMessage(dd->focus, WM_GETDLGCODE, 0, 0) & DLGC_HASSETSEL))
+            SendMessage(dd->focus, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
+    }
+    return h;
+}
+
+HWND CreateDialogIndirectParam(HINSTANCE h, const void *tmpl, HWND owner, DLGPROC proc, LPARAM lp)
+{
+    return create_dialog(h, tmpl, owner, proc, lp, 0);
+}
+HWND CreateDialogParam(HINSTANCE h, LPCSTR name, HWND owner, DLGPROC proc, LPARAM lp)
+{
+    const W16Res *r = w16_find_res(h, name, RT_DIALOG);
+    if (!r) return NULL;
+    return create_dialog(h, w16_res_data(h, r), owner, proc, lp, 0);
+}
+HWND CreateDialog(HINSTANCE h, LPCSTR name, HWND owner, DLGPROC proc) { return CreateDialogParam(h, name, owner, proc, 0); }
+
+static int run_modal(HWND h, HWND owner)
+{
+    W16Dialog *d = w16_dlg(h);
+    if (!d) return -1;
+    HWND top = owner ? w16_top_level(owner) : NULL;
+    int owner_was_enabled = top && IsWindowEnabled(top);
+    if (top) EnableWindow(top, FALSE);
+    MSG m;
+    while (w16_valid(h) && !d->ended) {
+        if (!GetMessage(&m, NULL, 0, 0)) { PostQuitMessage((int)m.wParam); break; }
+        if (!IsDialogMessage(h, &m)) {
+            TranslateMessage(&m);
+            DispatchMessage(&m);
+        }
+    }
+    int result = d->result;
+    if (top && owner_was_enabled) EnableWindow(top, TRUE);
+    if (w16_valid(h)) DestroyWindow(h);
+    if (top && w16_valid(top)) w16_activate(top, WA_ACTIVE);
+    if (d->ownfont) DeleteObject(d->font);
+    free(d);
+    return result;
+}
+
+int DialogBoxIndirectParam(HINSTANCE h, const void *tmpl, HWND owner, DLGPROC proc, LPARAM lp)
+{
+    HWND d = create_dialog(h, tmpl, owner, proc, lp, 1);
+    if (!d) return -1;
+    return run_modal(d, owner);
+}
+int DialogBoxParam(HINSTANCE h, LPCSTR name, HWND owner, DLGPROC proc, LPARAM lp)
+{
+    const W16Res *r = w16_find_res(h, name, RT_DIALOG);
+    if (!r) return -1;
+    return DialogBoxIndirectParam(h, w16_res_data(h, r), owner, proc, lp);
+}
+int DialogBox(HINSTANCE h, LPCSTR name, HWND owner, DLGPROC proc) { return DialogBoxParam(h, name, owner, proc, 0); }
+
+void EndDialog(HWND h, int result)
+{
+    W16Dialog *d = w16_dlg(h);
+    if (!d) return;
+    d->ended = 1;
+    d->result = result;
+    /* 3.1 hides the dialog immediately; it is destroyed when the modal loop unwinds */
+    ShowWindow(h, SW_HIDE);
+}
+
+/* ------------------------------------------------------------------ dialog window procedure */
+static void set_default_button(HWND dlg, HWND focus)
+{
+    W16Dialog *d = w16_dlg(dlg);
+    if (!d) return;
+    /* the focused push button becomes the default; otherwise the template default */
+    int want = d->defid;
+    if (focus && (SendMessage(focus, WM_GETDLGCODE, 0, 0) & (DLGC_DEFPUSHBUTTON | DLGC_UNDEFPUSHBUTTON))) want = GetDlgCtrlID(focus);
+    for (HWND c = dlg->child; c; c = c->next) {
+        LRESULT code = SendMessage(c, WM_GETDLGCODE, 0, 0);
+        if (code & DLGC_DEFPUSHBUTTON && GetDlgCtrlID(c) != want) SendMessage(c, BM_SETSTYLE, BS_PUSHBUTTON, TRUE);
+        else if (code & DLGC_UNDEFPUSHBUTTON && GetDlgCtrlID(c) == want) SendMessage(c, BM_SETSTYLE, BS_DEFPUSHBUTTON, TRUE);
+    }
+}
+
+LRESULT DefDlgProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    W16Dialog *d = w16_dlg(h);
+    switch (m) {
+    case WM_ERASEBKGND: {
+        HDC dc = (HDC)wp;
+        HBRUSH b = (HBRUSH)SendMessage(h, WM_CTLCOLOR, wp, MAKELPARAM(0, CTLCOLOR_DLG));
+        if (!b) b = w16_sys_brush(COLOR_WINDOW);
+        RECT r;
+        GetClientRect(h, &r);
+        FillRect(dc, &r, b);
+        return 1;
+    }
+    case WM_CLOSE: {
+        HWND c = GetDlgItem(h, IDCANCEL);
+        if (!c || IsWindowEnabled(c)) PostMessage(h, WM_COMMAND, IDCANCEL, MAKELPARAM(0, BN_CLICKED));
+        return 0;
+    }
+    case WM_ACTIVATE:
+        if (d && LOWORD(wp) != WA_INACTIVE) {
+            if (d->focus && w16_valid(d->focus) && IsChild(h, d->focus)) SetFocus(d->focus);
+            else { HWND f = GetNextDlgTabItem(h, NULL, FALSE); if (f) SetFocus(f); }
+        } else if (d && w16_focus && IsChild(h, w16_focus))
+            d->focus = w16_focus;
+        return 0;
+    case WM_SETFOCUS:
+        if (d && d->focus && w16_valid(d->focus)) SetFocus(d->focus);
+        return 0;
+    case WM_NEXTDLGCTL: {
+        HWND n;
+        if (LOWORD(lp)) n = (HWND)wp; /* only usable from libw16 code (pointer handle) */
+        else n = GetNextDlgTabItem(h, w16_focus, wp != 0);
+        if (n) {
+            SetFocus(n);
+            if (SendMessage(n, WM_GETDLGCODE, 0, 0) & DLGC_HASSETSEL) SendMessage(n, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
+        }
+        return 0;
+    }
+    case DM_GETDEFID: return d ? MAKELONG(d->defid, DC_HASDEFID) : 0;
+    case DM_SETDEFID:
+        if (d) { d->defid = (int)wp; set_default_button(h, w16_focus); }
+        return TRUE;
+    case WM_GETFONT: return d ? (LRESULT)d->font : 0;
+    case WM_SETFONT: if (d) d->font = (HFONT)wp; return 0;
+    case WM_SHOWWINDOW: return 0;
+    case WM_PARENTNOTIFY: return 0;
+    case WM_COMMAND:
+        /* focus changes inside the dialog keep the default button in sync */
+        return 0;
+    }
+    return DefWindowProc(h, m, wp, lp);
+}
+
+LRESULT w16_dialog_wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    W16Dialog *d = w16_dlg(h);
+    if (d && d->proc) {
+        d->msgresult = 0;
+        BOOL r = d->proc(h, m, wp, lp);
+        if (!w16_valid(h)) return r;
+        if (r) {
+            if (m == WM_CTLCOLOR || m == WM_COMPAREITEM || m == WM_VKEYTOITEM || m == WM_CHARTOITEM ||
+                m == WM_QUERYDRAGICON || m == WM_INITDIALOG)
+                return r;
+            return d->msgresult ? d->msgresult : r;
+        }
+    }
+    if (m == WM_INITDIALOG) return TRUE;
+    return DefDlgProc(h, m, wp, lp);
+}
+
+/* DWL_MSGRESULT etc. */
+intptr_t w16_dlg_get(HWND h, int idx)
+{
+    W16Dialog *d = w16_dlg(h);
+    if (!d) return 0;
+    if (idx == DWL_MSGRESULT) return d->msgresult;
+    if (idx == DWL_DLGPROC) return (intptr_t)d->proc;
+    if (idx == DWL_USER) return d->user;
+    return 0;
+}
+
+/* ------------------------------------------------------------------ item helpers */
+HWND GetDlgItem(HWND h, int id)
+{
+    if (!w16_valid(h)) return NULL;
+    for (HWND c = h->child; c; c = c->next)
+        if ((int)(WORD)c->id == (int)(WORD)id) return c;
+    return NULL;
+}
+int GetDlgCtrlID(HWND h) { return w16_valid(h) ? (int)h->id : 0; }
+UINT GetDlgItemText(HWND h, int id, LPSTR buf, int cb) { HWND c = GetDlgItem(h, id); if (!c) { if (cb) buf[0] = 0; return 0; } return GetWindowText(c, buf, cb); }
+void SetDlgItemText(HWND h, int id, LPCSTR s) { HWND c = GetDlgItem(h, id); if (c) SetWindowText(c, s); }
+LRESULT SendDlgItemMessage(HWND h, int id, UINT m, WPARAM wp, LPARAM lp) { HWND c = GetDlgItem(h, id); return c ? SendMessage(c, m, wp, lp) : 0; }
+void SetDlgItemInt(HWND h, int id, UINT v, BOOL sign)
+{
+    char b[32];
+    if (sign) wsprintf(b, "%d", (int)v); else wsprintf(b, "%u", v);
+    SetDlgItemText(h, id, b);
+}
+UINT GetDlgItemInt(HWND h, int id, BOOL *ok, BOOL sign)
+{
+    char b[64];
+    GetDlgItemText(h, id, b, sizeof b);
+    char *p = b, *e;
+    while (*p == ' ') p++;
+    long v = strtol(p, &e, 10);
+    while (*e == ' ') e++;
+    int good = e != p && !*e && (sign || v >= 0) && v <= (sign ? 32767 : 65535) && v >= (sign ? -32768 : 0);
+    if (ok) *ok = good;
+    return good ? (UINT)v : 0;
+}
+void CheckDlgButton(HWND h, int id, UINT c) { SendDlgItemMessage(h, id, BM_SETCHECK, c, 0); }
+UINT IsDlgButtonChecked(HWND h, int id) { return (UINT)SendDlgItemMessage(h, id, BM_GETCHECK, 0, 0); }
+void CheckRadioButton(HWND h, int first, int last, int check)
+{
+    for (int i = first; i <= last; i++) SendDlgItemMessage(h, i, BM_SETCHECK, i == check, 0);
+}
+
+/* ------------------------------------------------------------------ navigation */
+static int tabbable(HWND c)
+{
+    return (c->style & WS_VISIBLE) && !(c->style & WS_DISABLED) && (c->style & WS_TABSTOP);
+}
+
+HWND GetNextDlgTabItem(HWND dlg, HWND ctl, BOOL prev)
+{
+    if (!w16_valid(dlg) || !dlg->child) return NULL;
+    HWND list[512];
+    int n = 0, cur = -1;
+    for (HWND c = dlg->child; c && n < 512; c = c->next) {
+        if (c == ctl) cur = n;
+        list[n++] = c;
+    }
+    if (n == 0) return NULL;
+    for (int k = 1; k <= n; k++) {
+        int i = cur < 0 ? (prev ? n - k : k - 1) : (cur + (prev ? -k : k) + n * 2) % n;
+        if (tabbable(list[i])) return list[i];
+    }
+    return ctl;
+}
+
+HWND GetNextDlgGroupItem(HWND dlg, HWND ctl, BOOL prev)
+{
+    if (!w16_valid(dlg) || !w16_valid(ctl)) return NULL;
+    /* group: from the last WS_GROUP item at or before ctl up to the next WS_GROUP item */
+    HWND list[512];
+    int n = 0, cur = -1;
+    for (HWND c = dlg->child; c && n < 512; c = c->next) {
+        if (c == ctl) cur = n;
+        list[n++] = c;
+    }
+    if (cur < 0) return ctl;
+    int start = cur;
+    while (start > 0 && !(list[start]->style & WS_GROUP)) start--;
+    int end = cur + 1;
+    while (end < n && !(list[end]->style & WS_GROUP)) end++;
+    int len = end - start;
+    for (int k = 1; k < len; k++) {
+        int i = start + ((cur - start) + (prev ? -k : k) + len * 2) % len;
+        HWND c = list[i];
+        if ((c->style & WS_VISIBLE) && !(c->style & WS_DISABLED)) return c;
+    }
+    return ctl;
+}
+
+static HWND find_mnemonic(HWND dlg, int ch, HWND from)
+{
+    ch = toupper(ch);
+    HWND list[512];
+    int n = 0, cur = -1;
+    for (HWND c = dlg->child; c && n < 512; c = c->next) {
+        if (c == from) cur = n;
+        list[n++] = c;
+    }
+    for (int k = 1; k <= n; k++) {
+        int i = (cur + k + n) % n;
+        HWND c = list[i];
+        if (!(c->style & WS_VISIBLE) || (c->style & WS_DISABLED)) continue;
+        LRESULT code = SendMessage(c, WM_GETDLGCODE, 0, 0);
+        if (!(code & (DLGC_STATIC | DLGC_BUTTON | DLGC_DEFPUSHBUTTON | DLGC_UNDEFPUSHBUTTON | DLGC_RADIOBUTTON))) {
+            if (strcasecmp(c->cls->name, "BUTTON") && strcasecmp(c->cls->name, "STATIC")) continue;
+        }
+        if ((c->style & SS_NOPREFIX) && !strcasecmp(c->cls->name, "STATIC")) continue;
+        if (w16_mnemonic(c->text) == ch) return c;
+    }
+    return NULL;
+}
+
+static void activate_ctl(HWND dlg, HWND c)
+{
+    if (!strcasecmp(c->cls->name, "STATIC")) {
+        /* a label gives focus to the next tab-stop control */
+        HWND n = c->next;
+        while (n && !tabbable(n)) n = n->next;
+        if (n) {
+            SetFocus(n);
+            if (SendMessage(n, WM_GETDLGCODE, 0, 0) & DLGC_HASSETSEL) SendMessage(n, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
+        }
+        return;
+    }
+    LRESULT code = SendMessage(c, WM_GETDLGCODE, 0, 0);
+    if (code & (DLGC_BUTTON | DLGC_DEFPUSHBUTTON | DLGC_UNDEFPUSHBUTTON | DLGC_RADIOBUTTON)) {
+        SetFocus(c);
+        SendMessage(c, WM_KEYDOWN, VK_SPACE, 0); /* click */
+        SendMessage(c, WM_KEYUP, VK_SPACE, 0);
+        return;
+    }
+    SetFocus(c);
+    (void)dlg;
+}
+
+BOOL IsDialogMessage(HWND dlg, LPMSG m)
+{
+    if (!w16_valid(dlg)) return FALSE;
+    if (m->hwnd != dlg && !IsChild(dlg, m->hwnd)) return FALSE;
+    W16Dialog *d = w16_dlg(dlg);
+    HWND f = w16_focus && IsChild(dlg, w16_focus) ? w16_focus : NULL;
+    LRESULT code = f ? SendMessage(f, WM_GETDLGCODE, m->wParam, (LPARAM)m) : 0;
+    switch (m->message) {
+    case WM_KEYDOWN:
+        switch (m->wParam) {
+        case VK_TAB:
+            if (code & (DLGC_WANTTAB | DLGC_WANTALLKEYS)) break;
+            {
+                HWND n = GetNextDlgTabItem(dlg, f, (w16_keystate[VK_SHIFT] & 0x80) != 0);
+                if (n) {
+                    SetFocus(n);
+                    if (SendMessage(n, WM_GETDLGCODE, 0, 0) & DLGC_HASSETSEL) SendMessage(n, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
+                }
+            }
+            return TRUE;
+        case VK_LEFT: case VK_RIGHT: case VK_UP: case VK_DOWN:
+            if (code & (DLGC_WANTARROWS | DLGC_WANTALLKEYS)) break;
+            if (f) {
+                HWND n = GetNextDlgGroupItem(dlg, f, m->wParam == VK_LEFT || m->wParam == VK_UP);
+                if (n && n != f) {
+                    SetFocus(n);
+                    if (SendMessage(n, WM_GETDLGCODE, 0, 0) & DLGC_RADIOBUTTON) {
+                        /* auto radio buttons check themselves as focus arrives */
+                        if ((n->style & 0xF) == BS_AUTORADIOBUTTON) SendMessage(n, WM_KEYDOWN, VK_SPACE, 0), SendMessage(n, WM_KEYUP, VK_SPACE, 0);
+                        else w16_notify_parent(n, BN_CLICKED);
+                    }
+                }
+            }
+            return TRUE;
+        case VK_RETURN:
+            if (code & (DLGC_WANTALLKEYS)) break;
+            if (f && (code & DLGC_DEFPUSHBUTTON)) {
+                SendMessage(dlg, WM_COMMAND, GetDlgCtrlID(f), MAKELPARAM(0, BN_CLICKED));
+                return TRUE;
+            }
+            {
+                int id = d ? d->defid : IDOK;
+                HWND b = GetDlgItem(dlg, id);
+                if (!b || IsWindowEnabled(b)) SendMessage(dlg, WM_COMMAND, id, MAKELPARAM(0, BN_CLICKED));
+                else MessageBeep(0);
+            }
+            return TRUE;
+        case VK_ESCAPE:
+            if (code & DLGC_WANTALLKEYS) break;
+            {
+                HWND b = GetDlgItem(dlg, IDCANCEL);
+                if (!b || IsWindowEnabled(b)) SendMessage(dlg, WM_COMMAND, IDCANCEL, MAKELPARAM(0, BN_CLICKED));
+            }
+            return TRUE;
+        }
+        break;
+    case WM_CHAR:
+        if (code & (DLGC_WANTCHARS | DLGC_WANTALLKEYS)) break;
+        if (m->wParam == '\t' || m->wParam == '\r' || m->wParam == 27) return TRUE;
+        {
+            HWND c = find_mnemonic(dlg, (int)m->wParam, f);
+            if (c) { activate_ctl(dlg, c); return TRUE; }
+        }
+        break;
+    case WM_SYSCHAR:
+        {
+            HWND c = find_mnemonic(dlg, (int)m->wParam, f);
+            if (c) { activate_ctl(dlg, c); return TRUE; }
+        }
+        break;
+    }
+    TranslateMessage(m);
+    DispatchMessage(m);
+    if (w16_valid(dlg) && w16_focus && IsChild(dlg, w16_focus)) {
+        if (d) d->focus = w16_focus;
+        set_default_button(dlg, w16_focus);
+    }
+    return TRUE;
+}
+
+/* ------------------------------------------------------------------ MessageBox */
+typedef struct { const char *text; UINT type; HICON icon; int ids[3]; int nb; int def; } MbData;
+
+static BOOL mb_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    if (m == WM_INITDIALOG) {
+        MbData *mb = (MbData *)lp;
+        HWND def = GetDlgItem(h, mb->ids[mb->def]);
+        if (def) { SetFocus(def); SendMessage(def, BM_SETSTYLE, BS_DEFPUSHBUTTON, TRUE); w16_dlg(h)->defid = mb->ids[mb->def]; }
+        return FALSE;
+    }
+    if (m == WM_COMMAND) {
+        int id = (int)wp;
+        if (id == IDCANCEL && !GetDlgItem(h, IDCANCEL)) {
+            /* Esc only works when there is a Cancel (or a lone OK) button */
+            if (GetDlgItem(h, IDOK) && !GetDlgItem(h, IDYES)) { EndDialog(h, IDOK); return TRUE; }
+            return TRUE;
+        }
+        if (id >= IDOK && id <= IDNO) EndDialog(h, id);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static LRESULT mb_icon_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    if (m == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(h, &ps);
+        HICON ic = (HICON)GetProp(h, "W16ICON");
+        if (ic) DrawIcon(dc, 0, 0, ic);
+        EndPaint(h, &ps);
+        return 0;
+    }
+    return DefWindowProc(h, m, wp, lp);
+}
+
+int MessageBox(HWND owner, LPCSTR text, LPCSTR caption, UINT type)
+{
+    HINSTANCE user = w16_system_module("USER.EXE");
+    char sOK[16] = "OK", sCancel[16] = "Cancel", sAbort[16] = "&Abort", sRetry[16] = "&Retry",
+         sIgnore[16] = "&Ignore", sYes[16] = "&Yes", sNo[16] = "&No", sErr[16] = "Error";
+    if (user) {
+        LoadString(user, 84, sOK, 16); LoadString(user, 85, sCancel, 16); LoadString(user, 86, sAbort, 16);
+        LoadString(user, 87, sRetry, 16); LoadString(user, 88, sIgnore, 16); LoadString(user, 89, sYes, 16);
+        LoadString(user, 90, sNo, 16); LoadString(user, 78, sErr, 16);
+    }
+    if (!caption) caption = sErr;
+    MbData mb = {text, type, NULL, {0}, 0, 0};
+    const char *labels[3];
+    switch (type & MB_TYPEMASK) {
+    case MB_OKCANCEL: mb.ids[0] = IDOK; mb.ids[1] = IDCANCEL; labels[0] = sOK; labels[1] = sCancel; mb.nb = 2; break;
+    case MB_ABORTRETRYIGNORE: mb.ids[0] = IDABORT; mb.ids[1] = IDRETRY; mb.ids[2] = IDIGNORE; labels[0] = sAbort; labels[1] = sRetry; labels[2] = sIgnore; mb.nb = 3; break;
+    case MB_YESNOCANCEL: mb.ids[0] = IDYES; mb.ids[1] = IDNO; mb.ids[2] = IDCANCEL; labels[0] = sYes; labels[1] = sNo; labels[2] = sCancel; mb.nb = 3; break;
+    case MB_YESNO: mb.ids[0] = IDYES; mb.ids[1] = IDNO; labels[0] = sYes; labels[1] = sNo; mb.nb = 2; break;
+    case MB_RETRYCANCEL: mb.ids[0] = IDRETRY; mb.ids[1] = IDCANCEL; labels[0] = sRetry; labels[1] = sCancel; mb.nb = 2; break;
+    default: mb.ids[0] = IDOK; labels[0] = sOK; mb.nb = 1; break;
+    }
+    mb.def = ((type & MB_DEFMASK) >> 8);
+    if (mb.def >= mb.nb) mb.def = 0;
+    switch (type & MB_ICONMASK) {
+    case MB_ICONHAND: mb.icon = LoadIcon(NULL, IDI_HAND); break;
+    case MB_ICONQUESTION: mb.icon = LoadIcon(NULL, IDI_QUESTION); break;
+    case MB_ICONEXCLAMATION: mb.icon = LoadIcon(NULL, IDI_EXCLAMATION); break;
+    case MB_ICONASTERISK: mb.icon = LoadIcon(NULL, IDI_ASTERISK); break;
+    }
+    /* layout in pixels with the system font (3.1 message boxes use it) */
+    W16Font *f = w16_font_system();
+    int cxc = f->avgw, cyc = f->height;
+    HDC dc = GetDC(NULL);
+    SelectObject(dc, GetStockObject(SYSTEM_FONT));
+    RECT tr = {0, 0, w16_screen.w * 5 / 8, 0};
+    DrawText(dc, text, -1, &tr, DT_CALCRECT | DT_WORDBREAK | DT_EXPANDTABS | DT_NOPREFIX);
+    int capw = LOWORD(GetTextExtent(dc, caption, strlen(caption)));
+    ReleaseDC(NULL, dc);
+    int bw = cxc * 9 + 2, bh = cyc * 7 / 4, gap = cxc * 2;
+    int iconw = mb.icon ? 32 + cxc * 2 : 0;
+    int textw = tr.right - tr.left, texth = tr.bottom - tr.top;
+    int contentw = max(iconw + textw, mb.nb * bw + (mb.nb - 1) * gap);
+    contentw = max(contentw, capw + 40);
+    int cw = contentw + cxc * 4;
+    int toph = max(texth, mb.icon ? 32 : 0);
+    int ch = cyc + toph + cyc + bh + cyc * 3 / 4;
+    /* build an in-memory dialog */
+    HWND parent = owner && w16_valid(owner) ? w16_top_level(owner) : NULL;
+    static int cls_done;
+    if (!cls_done) {
+        WNDCLASS wc = {0};
+        wc.lpfnWndProc = mb_icon_proc;
+        wc.lpszClassName = "W16MBICON";
+        wc.style = CS_GLOBALCLASS;
+        RegisterClass(&wc);
+        cls_done = 1;
+    }
+    W16Dialog *dd = calloc(1, sizeof *dd);
+    dd->proc = mb_proc;
+    dd->cxchar = cxc;
+    dd->cychar = cyc;
+    dd->defid = mb.ids[mb.def];
+    struct W16Window fake;
+    memset(&fake, 0, sizeof fake);
+    fake.style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_DLGFRAME;
+    fake.exstyle = WS_EX_DLGMODALFRAME;
+    fake.parent = w16_desktop;
+    RECT big = {0, 0, 1000, 1000}, inner;
+    w16_nc_calc(&fake, &big, &inner);
+    int ww = cw + inner.left + (1000 - inner.right), wh = ch + inner.top + (1000 - inner.bottom);
+    int wx = (w16_screen.w - ww) / 2, wy = (w16_screen.h - wh) / 2;
+    HWND h = CreateWindowEx(WS_EX_DLGMODALFRAME, "#32770", caption, WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_DLGFRAME,
+                            wx, wy, ww, wh, parent, NULL, NULL, NULL);
+    h->is_dialog = 1;
+    h->ctl = dd;
+    int tx = cxc * 2 + iconw;
+    if (mb.icon) {
+        HWND ic = CreateWindow("W16MBICON", "", WS_CHILD | WS_VISIBLE, cxc * 2, cyc, 32, 32, h, (HMENU)(uintptr_t)0xFFFF, NULL, NULL);
+        SetProp(ic, "W16ICON", mb.icon);
+    }
+    CreateWindow("STATIC", text, WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX, tx, cyc + (toph - texth) / 2, textw + 2, texth, h,
+                 (HMENU)(uintptr_t)0xFFFF, NULL, NULL);
+    int total = mb.nb * bw + (mb.nb - 1) * gap;
+    int bx = (cw - total) / 2, by = cyc + toph + cyc;
+    for (int i = 0; i < mb.nb; i++) {
+        HWND b = CreateWindow("BUTTON", labels[i], WS_CHILD | WS_VISIBLE | WS_TABSTOP | (i == mb.def ? BS_DEFPUSHBUTTON : BS_PUSHBUTTON),
+                              bx + i * (bw + gap), by, bw, bh, h, (HMENU)(uintptr_t)mb.ids[i], NULL, NULL);
+        (void)b;
+    }
+    SendMessage(h, WM_INITDIALOG, 0, (LPARAM)&mb);
+    dd->focus = GetDlgItem(h, mb.ids[mb.def]);
+    ShowWindow(h, SW_SHOWNORMAL);
+    MessageBeep(type & MB_ICONMASK);
+    return run_modal(h, parent);
+}
+
+/* ------------------------------------------------------------------ DlgDirList (simple) */
+#include <dirent.h>
+#include <sys/stat.h>
+static int dir_fill(HWND dlg, LPSTR path, int idlist, int idstatic, UINT attr, int combo)
+{
+    char spec[260] = "*.*", dir[260] = "";
+    if (path && *path) {
+        char *bs = strrchr(path, '\\');
+        if (strchr(path, '*') || strchr(path, '?')) {
+            if (bs) { snprintf(spec, sizeof spec, "%s", bs + 1); snprintf(dir, sizeof dir, "%.*s", (int)(bs - path + 1), path); }
+            else snprintf(spec, sizeof spec, "%s", path);
+        } else snprintf(dir, sizeof dir, "%s", path);
+    }
+    char host[1024];
+    if (w16_dos_to_host(dir[0] ? dir : ".", host, sizeof host)) return 0;
+    HWND lb = idlist ? GetDlgItem(dlg, idlist) : NULL;
+    UINT reset = combo ? CB_RESETCONTENT : LB_RESETCONTENT, add = combo ? CB_ADDSTRING : LB_ADDSTRING;
+    if (lb) SendMessage(lb, reset, 0, 0);
+    DIR *d = opendir(host);
+    if (!d) return 0;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.' && strcmp(e->d_name, "..")) continue;
+        char full[1400];
+        snprintf(full, sizeof full, "%s/%s", host, e->d_name);
+        struct stat st;
+        if (stat(full, &st)) continue;
+        char name[300];
+        if (S_ISDIR(st.st_mode)) {
+            if (!(attr & 0x10)) continue;
+            snprintf(name, sizeof name, "[%s]", e->d_name);
+        } else {
+            if (attr & 0x8000) continue;
+            extern int w16_wildmatch(const char *pat, const char *s);
+            if (!w16_wildmatch(spec, e->d_name)) continue;
+            snprintf(name, sizeof name, "%s", e->d_name);
+        }
+        AnsiLower(name);
+        if (lb) SendMessage(lb, add, 0, (LPARAM)name);
+    }
+    closedir(d);
+    if (attr & 0x4000) { /* drives */
+        for (char c = 'a'; c <= 'z'; c++) {
+            char t[8] = {c, ':', '\\', 0}, hh[1024];
+            if (w16_dos_to_host(t, hh, sizeof hh) == 0) {
+                char nm[16];
+                snprintf(nm, sizeof nm, "[-%c-]", c);
+                if (lb) SendMessage(lb, add, 0, (LPARAM)nm);
+            }
+        }
+    }
+    if (idstatic) {
+        char dos[300];
+        if (w16_host_to_dos(host, dos, sizeof dos) == 0) { AnsiLower(dos); SetDlgItemText(dlg, idstatic, dos); }
+    }
+    if (path) snprintf(path, 260, "%s", spec);
+    return 1;
+}
+int DlgDirList(HWND dlg, LPSTR path, int idlist, int idstatic, UINT attr) { return dir_fill(dlg, path, idlist, idstatic, attr, 0); }
+int DlgDirListComboBox(HWND dlg, LPSTR path, int idc, int ids, UINT attr) { return dir_fill(dlg, path, idc, ids, attr, 1); }
+static BOOL dir_select(HWND dlg, LPSTR buf, int id, int combo)
+{
+    char t[300] = "";
+    int sel = (int)SendDlgItemMessage(dlg, id, combo ? CB_GETCURSEL : LB_GETCURSEL, 0, 0);
+    if (sel < 0) { buf[0] = 0; return FALSE; }
+    SendDlgItemMessage(dlg, id, combo ? CB_GETLBTEXT : LB_GETTEXT, sel, (LPARAM)t);
+    if (t[0] == '[') {
+        if (t[1] == '-') snprintf(buf, 260, "%c:", t[2]);
+        else { t[strlen(t) - 1] = 0; snprintf(buf, 260, "%s\\", t + 1); }
+        return TRUE;
+    }
+    snprintf(buf, 260, "%s", t);
+    return FALSE;
+}
+BOOL DlgDirSelect(HWND dlg, LPSTR buf, int id) { return dir_select(dlg, buf, id, 0); }
+BOOL DlgDirSelectComboBox(HWND dlg, LPSTR buf, int id) { return dir_select(dlg, buf, id, 1); }
+
+int w16_wildmatch(const char *p, const char *s)
+{
+    /* DOS-style: "*.*" matches everything, '?' one char, case-insensitive */
+    if (!strcmp(p, "*.*") || !strcmp(p, "*")) return 1;
+    while (*p) {
+        if (*p == '*') {
+            p++;
+            if (!*p) return 1;
+            for (; *s; s++) if (w16_wildmatch(p, s)) return 1;
+            return !*p;
+        }
+        if (!*s) return *p == '.' && p[1] == '*' && !p[2];
+        if (*p != '?' && tolower((unsigned char)*p) != tolower((unsigned char)*s)) return 0;
+        p++; s++;
+    }
+    return !*s;
+}

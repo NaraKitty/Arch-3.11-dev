@@ -1,0 +1,143 @@
+/* icons and cursors from the user's files (application modules and VGA.DRV) */
+#include "w16int.h"
+
+struct W16Icon {
+    int w, h, hotx, hoty;
+    uint32_t *xorpx;   /* 0xRRGGBB */
+    uint8_t *andm;     /* 1 = transparent (screen kept / inverted) */
+    int cursor;
+    void *native;      /* SDL_Cursor for cursors in windowed mode */
+};
+
+static uint16_t u16(const uint8_t *p) { return p[0] | (p[1] << 8); }
+static uint32_t u32(const uint8_t *p) { return u16(p) | ((uint32_t)u16(p + 2) << 16); }
+
+static HICON from_dib(const uint8_t *d, int cursor)
+{
+    int hot_x = 0, hot_y = 0;
+    if (cursor) { hot_x = u16(d); hot_y = u16(d + 2); d += 4; }
+    uint32_t hs = u32(d);
+    int w, h2, bpp, ncol;
+    if (hs == 12) { w = u16(d + 4); h2 = u16(d + 6); bpp = u16(d + 10); ncol = 1 << bpp; }
+    else { w = (int32_t)u32(d + 4); h2 = (int32_t)u32(d + 8); bpp = u16(d + 14); ncol = u32(d + 32); if (!ncol && bpp <= 8) ncol = 1 << bpp; }
+    int h = h2 / 2;
+    int pal4 = hs != 12;
+    const uint8_t *pal = d + hs;
+    const uint8_t *xb = pal + ncol * (pal4 ? 4 : 3);
+    int xs = ((w * bpp + 31) / 32) * 4;
+    const uint8_t *ab = xb + xs * h;
+    int as = ((w + 31) / 32) * 4;
+    HICON ic = calloc(1, sizeof *ic);
+    ic->w = w; ic->h = h; ic->hotx = hot_x; ic->hoty = hot_y; ic->cursor = cursor;
+    ic->xorpx = calloc(w * h, 4);
+    ic->andm = calloc(w * h, 1);
+    for (int y = 0; y < h; y++) {
+        const uint8_t *xr = xb + (h - 1 - y) * xs, *ar = ab + (h - 1 - y) * as;
+        for (int x = 0; x < w; x++) {
+            int idx = 0;
+            uint32_t p = 0;
+            if (bpp == 1) idx = (xr[x / 8] >> (7 - (x & 7))) & 1;
+            else if (bpp == 4) idx = (xr[x / 2] >> ((x & 1) ? 0 : 4)) & 15;
+            else if (bpp == 8) idx = xr[x];
+            if (bpp <= 8) {
+                const uint8_t *e = pal + idx * (pal4 ? 4 : 3);
+                p = (e[2] << 16) | (e[1] << 8) | e[0];
+            } else if (bpp == 24) p = (xr[x * 3 + 2] << 16) | (xr[x * 3 + 1] << 8) | xr[x * 3];
+            ic->xorpx[y * w + x] = p;
+            ic->andm[y * w + x] = (ar[x / 8] >> (7 - (x & 7))) & 1;
+        }
+    }
+    return ic;
+}
+
+static HICON load_group(HINSTANCE m, LPCSTR name, int cursor)
+{
+    const W16Res *g = w16_find_res(m, name, cursor ? RT_GROUP_CURSOR : RT_GROUP_ICON);
+    if (!g) return NULL;
+    const uint8_t *d = w16_res_data(m, g);
+    int n = u16(d + 4), best = -1, bestscore = -1;
+    for (int i = 0; i < n; i++) {
+        const uint8_t *e = d + 6 + i * 14;
+        int w, h, bpp, id = u16(e + 12);
+        if (cursor) { w = u16(e); h = u16(e + 2) / 2; bpp = u16(e + 6); }
+        else { w = e[0] ? e[0] : 256; h = e[1] ? e[1] : 256; bpp = u16(e + 6); if (!bpp) bpp = e[2] == 2 ? 1 : 4; }
+        /* VGA: prefer 32x32 at <=4 bpp, like the display driver's icon selection */
+        int score = (w == 32 && h == 32 ? 100 : 0) + (bpp <= 4 ? bpp * 4 : 1);
+        if (score > bestscore) { bestscore = score; best = id; }
+    }
+    if (best < 0) return NULL;
+    const W16Res *r = w16_find_res(m, MAKEINTRESOURCE(best), cursor ? RT_CURSOR : RT_ICON);
+    if (!r) return NULL;
+    return from_dib(w16_res_data(m, r), cursor);
+}
+
+static HICON cache_get(HINSTANCE m, LPCSTR name, int cursor)
+{
+    typedef struct C { HINSTANCE m; uintptr_t id; char nm[64]; int cur; HICON ic; struct C *next; } C;
+    static C *cache;
+    for (C *c = cache; c; c = c->next)
+        if (c->m == m && c->cur == cursor &&
+            (IS_INTRESOURCE(name) ? c->id == (uintptr_t)name : (!c->id && !strcasecmp(c->nm, name))))
+            return c->ic;
+    HICON ic = load_group(m, name, cursor);
+    if (!ic) return NULL;
+    C *c = calloc(1, sizeof *c);
+    c->m = m; c->cur = cursor; c->ic = ic;
+    if (IS_INTRESOURCE(name)) c->id = (uintptr_t)name;
+    else snprintf(c->nm, sizeof c->nm, "%s", name);
+    c->next = cache;
+    cache = c;
+    return ic;
+}
+
+HCURSOR LoadCursor(HINSTANCE h, LPCSTR name)
+{
+    if (!h) {
+        HINSTANCE drv = w16_system_module("VGA.DRV");
+        HCURSOR c = drv ? cache_get(drv, name, 1) : NULL;
+        if (!c) { HINSTANCE u = w16_system_module("USER.EXE"); c = u ? cache_get(u, name, 1) : NULL; }
+        return c;
+    }
+    return cache_get(h, name, 1);
+}
+
+HICON LoadIcon(HINSTANCE h, LPCSTR name)
+{
+    if (!h) {
+        HINSTANCE drv = w16_system_module("VGA.DRV");
+        HICON c = drv ? cache_get(drv, name, 0) : NULL;
+        if (!c) { HINSTANCE u = w16_system_module("USER.EXE"); c = u ? cache_get(u, name, 0) : NULL; }
+        return c;
+    }
+    return cache_get(h, name, 0);
+}
+
+BOOL DestroyIcon(HICON i) { (void)i; return TRUE; }
+HICON w16_icon_for_size(HICON i, int w, int h) { (void)w; (void)h; return i; }
+
+BOOL DrawIcon(HDC dc, int x, int y, HICON ic)
+{
+    if (!ic) return FALSE;
+    w16_lp_to_dp(dc, &x, &y);
+    Region e;
+    w16_dc_clip_iter_begin(dc, &e);
+    W16Bitmap *t = dc->target ? dc->target : &w16_screen;
+    for (int yy = 0; yy < ic->h; yy++)
+        for (int xx = 0; xx < ic->w; xx++) {
+            int px = x + xx, py = y + yy;
+            if (px < 0 || py < 0 || px >= t->w || py >= t->h || !rgn_contains(&e, px, py)) continue;
+            uint32_t *d = &t->px[py * t->w + px];
+            uint32_t v = ic->andm[yy * ic->w + xx] ? *d : 0;
+            *d = (v ^ ic->xorpx[yy * ic->w + xx]) & 0xFFFFFF;
+        }
+    rgn_free(&e);
+    if (!dc->target) w16_screen_dirty = 1;
+    return TRUE;
+}
+
+/* accessors for the presenter (SDL cursor creation / software cursor) */
+void w16_icon_info(HICON ic, int *w, int *h, int *hx, int *hy, const uint32_t **xorpx, const uint8_t **andm)
+{
+    *w = ic->w; *h = ic->h; *hx = ic->hotx; *hy = ic->hoty; *xorpx = ic->xorpx; *andm = ic->andm;
+}
+void **w16_icon_native(HICON ic) { return &ic->native; }

@@ -1,8 +1,38 @@
-# NEVER commit user-supplied or Microsoft/Netscape-derived material (see docs/LEGAL.md)
-build/
+# ---------------------------------------------------------------- secrets: never upload
+.env
+.env.*
+!.env.example
+*.env
+.envrc
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*secret*
+*secrets*
+*credential*
+*.token
+api_key*
+apikey*
+api-keys*
+.netrc
+.npmrc
+.pypirc
+.git-credentials
+.aws/
+.config/gh/
+
+# ---------------------------------------------------------------- Microsoft / Netscape material
+# NEVER commit user-supplied media or anything ripped/derived from it (see docs/LEGAL.md)
 media/
+assets/
+ripped/
+work/
 *.IMG
 *.img
+*.ima
 *.iso
 *.ISO
 *.exe
@@ -13,8 +43,23 @@ media/
 *.DRV
 *.fon
 *.FON
+*.fot
+*.FOT
+*.ttf
+*.TTF
 *.hlp
 *.HLP
+*.wav
+*.WAV
+*.bmp
+*.BMP
+*.asm
+
+# ---------------------------------------------------------------- build output
+build/
 out/
-work/
+*.o
+*.a
+*.so
 __pycache__/
+*.pyc
