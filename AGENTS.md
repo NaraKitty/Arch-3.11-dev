@@ -133,3 +133,34 @@ Known: Print Setup opened via Alt+F,R shows focus on "Portrait" (likely the 'r' 
 dialog) - check against real 3.11.
 NEXT: rebuild the DOSBox-X reference rig on the owner's PC and pixel-compare Notepad + the common
 dialogs; then T-PRN-01 (printer DC -> PDF -> CUPS); then Calculator, Clock.
+
+### Session 4 (Claude Code on the owner's PC, Oct 7 2026)
+Reference rig (tools/ref311, committed): WfW 3.11 installs unattended in DOSBox-X from the owner's
+floppies (ARCH311.SHH, ~1 min) into %USERPROFILE%\arch311-ref\c-pristine; ref-run.ps1 copies it,
+sets the app as SYSTEM.INI shell=, types AUTOTYPE keys and records every stable screen through
+PrintWindow (no focus needed); compare.py diffs/measures; scenario.py drives both sides from one file.
+Known rig limits: long AUTOTYPE lines were unreliable (an 845-char scenario typed nothing; probe
+results inconsistent); posting WM_KEYDOWN to the DOSBox-X window does not reach the guest. Short
+scenarios work. Next agent: split scenarios or find a reliable host->guest key path.
+Accuracy work, each measured against real 3.11 screenshots (Notepad main window now differs only by
+the mouse cursor, which VGA draws into the framebuffer):
+- VGA monitor colours from VGA.DRV seg4:00F0 (attribute table + DAC 7/15), applied on output only.
+- CW_USEDEFAULT placement ported from USER seg6:01B4 (+ CreateWindow's overlapped-window part).
+- WM_SIZE/WM_MOVE deferred to the first ShowWindow for hidden windows (WFSENDSIZEMOVE).
+- Menu bar spans the scroll-bar column; CS_BYTEALIGNCLIENT windows round item widths to bytes.
+- Borderless multiline edits have no format inset; launch dir becomes the DOS current directory.
+Control Panel: apps/control/control.c is a port of CONTROL.EXE (all of seg1: module loading through
+the CPlApplet protocol, the owner-drawn "lb" icon list, "Text" status line, Settings menu, F1/About,
+CONTROL.INI [MMCPL]/[don't load], "control NAME"). Applets are native modules (cplreg.c). New
+arch311 applets in 3.11 style: Volume (volcpl.c: speaker/microphone level + mute, output device,
+Test plays the ripped DING.WAV; PipeWire via wpctl, audio.c) and Network (netcpl.c: computer name,
+connections, Wi-Fi password, TCP/IP settings; NetworkManager via nmcli, net.c; WfW's Network icon
+from the ripped MAIN.CPL #34). System tools run through sysexec.c (fork/execvp, no shell; Wi-Fi
+password on stdin). ARCH311_SIMULATE=1 uses sample data; apps/control/tests/smoke.w16 passes with it.
+libw16: dialog templates from code (dlgtmpl.c), CreateIcon, SystemParametersInfo, GetWindowPlacement,
+W16_CMD_LPARAM, CTLCOLOR_* public, EndDialog re-enables the owner before hiding (focus came back
+nowhere), hiding the active window activates its owner, group-box mnemonics focus the next control.
+UNTESTED: the real back ends (no PipeWire/NetworkManager in WSL; nmcli --ask with a piped password in
+particular), hostnamectl permissions (polkit), Help (no help viewer yet).
+NEXT: port MAIN.CPL (Color, Fonts, Ports, Mouse, Desktop, Keyboard, Printers, International,
+Date/Time) into apps/control; test Volume/Network on a real Arch install; T-PRN-01; Calculator, Clock.

@@ -292,6 +292,7 @@ typedef struct {
     int ownfont;
     int cxchar, cychar;
     HWND owner;
+    HWND disabled_owner; /* top-level owner the modal loop disabled (re-enabled by EndDialog) */
 } W16Dialog;
 W16Dialog *w16_dlg(HWND h);
 LRESULT w16_dialog_wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp);
@@ -306,13 +307,6 @@ LRESULT w16_scrollbar_proc(HWND, UINT, WPARAM, LPARAM);
 LRESULT w16_desktop_proc(HWND, UINT, WPARAM, LPARAM);
 LRESULT w16_combolbox_proc(HWND, UINT, WPARAM, LPARAM);
 HBRUSH w16_ctl_color(HWND ctl, HDC dc, int type);
-#define CTLCOLOR_MSGBOX 0
-#define CTLCOLOR_EDIT 1
-#define CTLCOLOR_LISTBOX 2
-#define CTLCOLOR_BTN 3
-#define CTLCOLOR_DLG 4
-#define CTLCOLOR_SCROLLBAR 5
-#define CTLCOLOR_STATIC 6
 void w16_draw_prefix_text(HDC dc, int x, int y, const char *s, int n, int noprefix);
 int w16_prefix_text_width(HDC dc, const char *s, int n);
 char w16_mnemonic(const char *s);

@@ -76,6 +76,7 @@ WORD w16_cmd_slot(HWND h)
     }
     return 0;
 }
+LPARAM W16_CMD_LPARAM(HWND ctl, int code) { return MAKELPARAM(w16_cmd_slot(ctl), code); }
 void w16_notify_parent(HWND h, int code)
 {
     if (!w16_valid(h) || !w16_valid(h->parent)) return;

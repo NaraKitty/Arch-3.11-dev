@@ -141,3 +141,27 @@ void w16_icon_info(HICON ic, int *w, int *h, int *hx, int *hy, const uint32_t **
     *w = ic->w; *h = ic->h; *hx = ic->hotx; *hy = ic->hoty; *xorpx = ic->xorpx; *andm = ic->andm;
 }
 void **w16_icon_native(HICON ic) { return &ic->native; }
+
+/* standard 16-colour order of 4bpp icon/DIB pixels */
+static const uint32_t std16[16] = {
+    0x000000, 0x800000, 0x008000, 0x808000, 0x000080, 0x800080, 0x008080, 0xC0C0C0,
+    0x808080, 0xFF0000, 0x00FF00, 0xFFFF00, 0x0000FF, 0xFF00FF, 0x00FFFF, 0xFFFFFF};
+
+HICON CreateIcon(HINSTANCE inst, int w, int h, BYTE planes, BYTE bpp, const void *andbits, const void *xorbits)
+{
+    (void)inst;
+    if (w <= 0 || h <= 0 || planes != 1 || (bpp != 1 && bpp != 4)) return NULL;
+    const uint8_t *a = andbits, *x = xorbits;
+    int as = ((w + 15) / 16) * 2, xs = ((w * bpp + 15) / 16) * 2; /* WORD-aligned rows, top-down */
+    HICON ic = calloc(1, sizeof *ic);
+    ic->w = w; ic->h = h;
+    ic->xorpx = calloc((size_t)w * h, 4);
+    ic->andm = calloc((size_t)w * h, 1);
+    for (int y = 0; y < h; y++)
+        for (int i = 0; i < w; i++) {
+            int idx = bpp == 1 ? (x[y * xs + i / 8] >> (7 - (i & 7))) & 1 : (x[y * xs + i / 2] >> ((i & 1) ? 0 : 4)) & 15;
+            ic->xorpx[y * w + i] = bpp == 1 ? (idx ? 0xFFFFFF : 0) : std16[idx];
+            ic->andm[y * w + i] = (a[y * as + i / 8] >> (7 - (i & 7))) & 1;
+        }
+    return ic;
+}

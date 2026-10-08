@@ -209,6 +209,7 @@ static int run_modal(HWND h, HWND owner)
     HWND top = owner ? w16_top_level(owner) : NULL;
     int owner_was_enabled = top && IsWindowEnabled(top);
     if (top) EnableWindow(top, FALSE);
+    if (top && owner_was_enabled) d->disabled_owner = top;
     MSG m;
     while (w16_valid(h) && !d->ended) {
         if (!GetMessage(&m, NULL, 0, 0)) { PostQuitMessage((int)m.wParam); break; }
@@ -218,7 +219,7 @@ static int run_modal(HWND h, HWND owner)
         }
     }
     int result = d->result;
-    if (top && owner_was_enabled) EnableWindow(top, TRUE);
+    if (d->disabled_owner && w16_valid(d->disabled_owner)) EnableWindow(d->disabled_owner, TRUE);
     if (w16_valid(h)) DestroyWindow(h);
     if (top && w16_valid(top)) w16_activate(top, WA_ACTIVE);
     if (d->ownfont) DeleteObject(d->font);
@@ -246,7 +247,13 @@ void EndDialog(HWND h, int result)
     if (!d) return;
     d->ended = 1;
     d->result = result;
-    /* 3.1 hides the dialog immediately; it is destroyed when the modal loop unwinds */
+    /* as USER does: re-enable the owner first, so that hiding the dialog hands activation and the
+     * focus back to it; 3.1 hides the dialog immediately and destroys it when the loop unwinds */
+    if (d->disabled_owner) {
+        HWND o = d->disabled_owner;
+        d->disabled_owner = NULL;
+        if (w16_valid(o)) EnableWindow(o, TRUE);
+    }
     ShowWindow(h, SW_HIDE);
 }
 
@@ -456,8 +463,8 @@ static HWND find_mnemonic(HWND dlg, int ch, HWND from)
 
 static void activate_ctl(HWND dlg, HWND c)
 {
-    if (!strcasecmp(c->cls->name, "STATIC")) {
-        /* a label gives focus to the next tab-stop control */
+    if (!strcasecmp(c->cls->name, "STATIC") || (SendMessage(c, WM_GETDLGCODE, 0, 0) & DLGC_STATIC)) {
+        /* a label (or a group box: DLGC_STATIC) gives focus to the next tab-stop control */
         HWND n = c->next;
         while (n && !tabbable(n)) n = n->next;
         if (n) {

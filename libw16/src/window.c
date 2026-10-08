@@ -766,9 +766,13 @@ static BOOL show_window(HWND h, int cmd)
             SendMessage(h, WM_SHOWWINDOW, FALSE, 0);
             SetWindowPos(h, NULL, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
             if (h == w16_active) {
+                /* activation goes to the owner (a dialog's parent dialog or window), else to the
+                 * topmost other visible, enabled window - as in DestroyWindow */
                 w16_active = NULL;
-                for (HWND c = w16_desktop->child; c; c = c->next)
-                    if ((c->style & WS_VISIBLE) && c != h) { w16_activate(c, WA_ACTIVE); break; }
+                HWND next = (w16_valid(h->owner) && (h->owner->style & WS_VISIBLE) && !(h->owner->style & WS_DISABLED)) ? h->owner : NULL;
+                for (HWND c = w16_desktop->child; c && !next; c = c->next)
+                    if ((c->style & WS_VISIBLE) && !(c->style & WS_DISABLED) && c != h) next = c;
+                if (next) w16_activate(next, WA_ACTIVE);
             }
             if (w16_focus && (w16_focus == h || IsChild(h, w16_focus))) w16_focus = NULL;
         }
@@ -1240,4 +1244,19 @@ void w16_desktop_create(void)
     }
     rgn_set(&h->upd, &h->rw);
     h->need_erase = 1;
+}
+
+BOOL GetWindowPlacement(HWND h, WINDOWPLACEMENT *wp)
+{
+    if (!w16_valid(h) || !wp) return FALSE;
+    RECT pr = h->parent && h->parent != w16_desktop ? h->parent->rc : (RECT){0, 0, 0, 0};
+    wp->length = sizeof *wp;
+    wp->flags = 0;
+    wp->showCmd = !(h->style & WS_VISIBLE) ? SW_HIDE : IsIconic(h) ? SW_SHOWMINIMIZED : IsZoomed(h) ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+    RECT n = (h->style & (WS_MINIMIZE | WS_MAXIMIZE)) ? h->restore : h->rw;
+    OffsetRect(&n, -pr.left, -pr.top);
+    wp->rcNormalPosition = n;
+    wp->ptMinPosition = (POINT){-1, -1};
+    wp->ptMaxPosition = (POINT){-1, -1};
+    return TRUE;
 }

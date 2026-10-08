@@ -197,3 +197,32 @@ int main(int argc, char **argv)
     }
     return WinMain(inst, NULL, cmd, SW_SHOWNORMAL);
 }
+
+/* ------------------------------------------------------------------ SystemParametersInfo */
+BOOL SystemParametersInfo(UINT action, UINT param, void *pv, UINT winini)
+{
+    (void)param; (void)winini;
+    switch (action) {
+    case SPI_GETBEEP:
+        if (pv) { char b[8]; GetProfileString("windows", "Beep", "yes", b, sizeof b); *(BOOL *)pv = !strcasecmp(b, "yes"); }
+        return TRUE;
+    case SPI_GETBORDER:
+        if (pv) *(int *)pv = w16_border_width;
+        return TRUE;
+    case SPI_ICONHORIZONTALSPACING:
+        if (pv) *(int *)pv = GetProfileInt("desktop", "IconSpacing", 75);
+        return TRUE;
+    case SPI_GETICONTITLELOGFONT: {
+        /* WIN.INI [desktop] IconTitleFaceName / IconTitleSize / IconTitleStyle, 3.1 defaults */
+        LOGFONT *lf = pv;
+        if (!lf) return FALSE;
+        memset(lf, 0, sizeof *lf);
+        int pt = GetProfileInt("desktop", "IconTitleSize", 8);
+        lf->lfHeight = -((pt * 96 + 36) / 72);
+        lf->lfWeight = GetProfileInt("desktop", "IconTitleStyle", 0) ? FW_BOLD : FW_NORMAL;
+        GetProfileString("desktop", "IconTitleFaceName", "MS Sans Serif", lf->lfFaceName, sizeof lf->lfFaceName);
+        return TRUE;
+    }
+    }
+    return FALSE;
+}

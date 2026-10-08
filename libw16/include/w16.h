@@ -104,6 +104,8 @@ typedef void *FARPROC;
 #define GET_WM_COMMAND_ID(wp, lp) ((UINT)(wp))
 #define GET_WM_COMMAND_CMD(wp, lp) HIWORD(lp)
 HWND W16_CMD_HWND(LPARAM lp);
+/* the WM_COMMAND lParam a control sends its parent: MAKELONG(hwnd slot, notification) */
+LPARAM W16_CMD_LPARAM(HWND ctl, int code);
 
 /* ------------------------------------------------------------------ messages */
 #define WM_NULL 0x0000
@@ -129,6 +131,14 @@ HWND W16_CMD_HWND(LPARAM lp);
 #define WM_ENDSESSION 0x0016
 #define WM_SHOWWINDOW 0x0018
 #define WM_CTLCOLOR 0x0019
+/* HIWORD(lParam) of WM_CTLCOLOR */
+#define CTLCOLOR_MSGBOX 0
+#define CTLCOLOR_EDIT 1
+#define CTLCOLOR_LISTBOX 2
+#define CTLCOLOR_BTN 3
+#define CTLCOLOR_DLG 4
+#define CTLCOLOR_SCROLLBAR 5
+#define CTLCOLOR_STATIC 6
 #define WM_WININICHANGE 0x001A
 #define WM_ACTIVATEAPP 0x001C
 #define WM_FONTCHANGE 0x001D
@@ -1426,6 +1436,29 @@ BOOL UnionRect(LPRECT d, LPCRECT a, LPCRECT b);
 BOOL EqualRect(LPCRECT a, LPCRECT b);
 HCURSOR LoadCursor(HINSTANCE h, LPCSTR name);
 HICON LoadIcon(HINSTANCE h, LPCSTR name);
+/* planes = 1; bpp 1 (mono) or 4 (the standard 16-colour order); rows are WORD aligned as in Win16 */
+HICON CreateIcon(HINSTANCE inst, int w, int h, BYTE planes, BYTE bpp, const void *andbits, const void *xorbits);
+
+/* SystemParametersInfo (3.1 subset) */
+#define SPI_GETBEEP 0x0001
+#define SPI_GETBORDER 0x0005
+#define SPI_ICONHORIZONTALSPACING 0x000D
+#define SPI_GETICONTITLELOGFONT 0x001F
+BOOL SystemParametersInfo(UINT action, UINT param, void *pv, UINT winini);
+
+typedef struct {
+    UINT length, flags, showCmd;
+    POINT ptMinPosition, ptMaxPosition;
+    RECT rcNormalPosition;
+} WINDOWPLACEMENT;
+BOOL GetWindowPlacement(HWND h, WINDOWPLACEMENT *wp);
+
+/* dialog templates built in code (Win16 DIALOG format; use with DialogBoxIndirectParam) */
+typedef struct W16DlgTemplate W16DlgTemplate;
+W16DlgTemplate *w16_dlgt_new(DWORD style, int x, int y, int cx, int cy, LPCSTR caption, int pt, LPCSTR face);
+void w16_dlgt_add(W16DlgTemplate *t, LPCSTR cls, LPCSTR text, int id, DWORD style, int x, int y, int cx, int cy);
+const void *w16_dlgt_data(W16DlgTemplate *t);
+void w16_dlgt_free(W16DlgTemplate *t);
 BOOL DestroyIcon(HICON i);
 HICON w16_icon_for_size(HICON i, int w, int h);
 
