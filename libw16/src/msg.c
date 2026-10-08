@@ -622,6 +622,19 @@ static int script_step(void)
             if (on != want) caret_xor();
             w16_screenshot(arg);
             if (on != want) caret_xor();
+            /* the active window's rectangle goes into rects.txt beside the screenshot, so
+             * tools/regress.sh can compare just that window with real 3.11 */
+            if (w16_active) {
+                const char *slash = strrchr(arg, '/');
+                char path[600];
+                snprintf(path, sizeof path, "%.*srects.txt", slash ? (int)(slash - arg + 1) : 0, arg);
+                FILE *rf = fopen(path, "a");
+                if (rf) {
+                    RECT r = w16_active->rw;
+                    fprintf(rf, "%s %d %d %d %d\n", slash ? slash + 1 : arg, (int)r.left, (int)r.top, (int)r.right, (int)r.bottom);
+                    fclose(rf);
+                }
+            }
             continue;
         }
         if (!strcmp(cmd, "quit")) exit(0);

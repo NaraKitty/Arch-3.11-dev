@@ -1,4 +1,5 @@
 # functional pass: find, save as, reopen, about, print setup
+# regress: sh tools/run-app-test.sh apps/build/notepad "$TEST" "$OUT"
 sleep 300
 type Hello from Windows 3.11 Notepad, running natively on Linux.
 key enter

@@ -1,5 +1,6 @@
 # Control Panel: the MAIN.CPL applets (Network last), Sound, then Volume; run with
 # ARCH311_SIMULATE=1. End selects Volume, two Lefts Network, whatever else is ported.
+# regress: sh tools/run-cp-test.sh "$TEST" "$OUT"
 sleep 600
 shot shots/01-control.png
 key end
