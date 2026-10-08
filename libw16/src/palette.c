@@ -3,10 +3,12 @@
  * a logical palette only stores its entries: SelectPalette returns the previous one, RealizePalette
  * maps nothing and returns 0, UpdateColors does nothing. UNTESTED against 3.1's GDI return values.
  * Bitmap bits: rows are word aligned as GetObject reports them - 1 bit per pixel for monochrome
- * bitmaps, else (planes 1, 4 bits per pixel) one VGA colour index per nibble, high nibble first.
- * CreateBitmapIndirect / SetBitmapBits also take VGA.DRV's own layout (4 planes of 1 bit, the planes
- * of each scan line one after the other, plane 0 = bit 0 of the index), as .CLP files written by real
- * 3.11 hold it (UNTESTED: no such file compared yet). */
+ * bitmaps, else VGA.DRV's device layout: 4 planes of 1 bit, the planes of each scan line one after
+ * the other, the planes' bits forming the hardware pixel value, which is VGA.DRV's colour index with
+ * 7 and 8 swapped (its attribute table). Measured: a .CLP bitmap in this layout shows the same
+ * colours on 3.11 and here, and 3.11's Clipboard Viewer writes GetObject's BITMAP (planes 4, 1 bit,
+ * bmBits 0) and GetBitmapBits' bits back byte for byte. CreateBitmapIndirect still reads
+ * (planes 1, 4 bits) one colour index per nibble, high nibble first. */
 #include "w16int.h"
 
 int w16_vga_index(uint32_t rgb);
@@ -33,19 +35,35 @@ UINT GetPaletteEntries(HPALETTE p, UINT start, UINT n, PALETTEENTRY *out)
     return n;
 }
 
+/* the DC keeps its palette: a brush of PALETTEINDEX(i) shows that palette's entry i (measured: the
+ * Clipboard Viewer's Palette view on 3.11's VGA shows each entry's colour, dithered as an RGB brush) */
 HPALETTE SelectPalette(HDC dc, HPALETTE p, BOOL bkgnd)
 {
-    static HPALETTE current;
-    (void)dc; (void)bkgnd;
-    HPALETTE old = current ? current : GetStockObject(DEFAULT_PALETTE);
-    current = p;
+    (void)bkgnd;
+    HPALETTE def = GetStockObject(DEFAULT_PALETTE);
+    if (!dc || (p && p->kind != OBJ_PAL)) return NULL;
+    HPALETTE old = dc->pal ? dc->pal : def;
+    dc->pal = p == def ? NULL : p;
     return old;
+}
+
+/* a PALETTEINDEX colour as the RGB of the DC's palette entry (left as it is without one) */
+COLORREF w16_palette_color(HDC dc, COLORREF c)
+{
+    if ((c >> 24) != 1 || !dc || !dc->pal || !dc->pal->u.pal.e) return c;
+    WORD i = (WORD)c;
+    if (i >= dc->pal->u.pal.n) i = 0;
+    const PALETTEENTRY *e = &dc->pal->u.pal.e[i];
+    return RGB(e->peRed, e->peGreen, e->peBlue);
 }
 
 UINT RealizePalette(HDC dc) { (void)dc; return 0; }
 int UpdateColors(HDC dc) { (void)dc; return 0; }
 
 static int row_bytes(int w, int bits) { return ((w * bits + 15) / 16) * 2; }
+
+/* hardware pixel value <-> VGA.DRV colour index (the same swap both ways) */
+static int hw_index(int v) { return v == 7 ? 8 : v == 8 ? 7 : v; }
 
 /* load packed bits into a bitmap's pixels */
 static void put_bits(W16Bitmap *b, int planes, int bpp, const uint8_t *s, size_t cb)
@@ -62,7 +80,7 @@ static void put_bits(W16Bitmap *b, int planes, int bpp, const uint8_t *s, size_t
                 int i = 0;
                 for (int p = 0; p < 4; p++)
                     if (s[(y * 4 + p) * wb + x / 8] & (0x80 >> (x & 7))) i |= 1 << p;
-                b->px[y * b->w + x] = w16_vga_color(i);
+                b->px[y * b->w + x] = w16_vga_color(hw_index(i));
             }
     } else {
         int wb = row_bytes(b->w, 4);
@@ -91,7 +109,7 @@ LONG SetBitmapBits(HBITMAP h, DWORD cb, const void *in)
 {
     W16Bitmap *b = w16_bitmap_of(h);
     if (!b || !in) return 0;
-    put_bits(b, 1, b->mono ? 1 : 4, in, cb);
+    put_bits(b, b->mono ? 1 : 4, 1, in, cb);
     return (LONG)cb;
 }
 
@@ -99,18 +117,19 @@ LONG GetBitmapBits(HBITMAP h, LONG cb, void *out)
 {
     W16Bitmap *b = w16_bitmap_of(h);
     if (!b || !out || cb <= 0) return 0;
-    int bits = b->mono ? 1 : 4, wb = row_bytes(b->w, bits);
-    LONG total = (LONG)wb * b->h;
+    int planes = b->mono ? 1 : 4, wb = row_bytes(b->w, 1);
+    LONG total = (LONG)wb * planes * b->h;
     if (cb > total) cb = total;
     uint8_t *d = out;
     memset(d, 0, cb);
     for (int y = 0; y < b->h; y++)
         for (int x = 0; x < b->w; x++) {
-            LONG at = (LONG)y * wb + (b->mono ? x / 8 : x / 2);
-            if (at >= cb) return cb;
             uint32_t p = b->px[y * b->w + x];
-            if (b->mono) { if (p & 0xFFFFFF) d[at] |= (uint8_t)(0x80 >> (x & 7)); }
-            else d[at] |= (uint8_t)(x & 1 ? w16_vga_index(p) : w16_vga_index(p) << 4);
+            int v = b->mono ? (p & 0xFFFFFF) != 0 : hw_index(w16_vga_index(p));
+            for (int k = 0; k < planes; k++) {
+                LONG at = ((LONG)y * planes + k) * wb + x / 8;
+                if (at < cb && (v >> k & 1)) d[at] |= (uint8_t)(0x80 >> (x & 7));
+            }
         }
     return cb;
 }

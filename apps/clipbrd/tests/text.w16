@@ -1,0 +1,76 @@
+# Clipboard Viewer: the keys of arch311-ref/scn/clipbrd-text.scn (tools/ref311/scenario.py w16)
+# Opens SYSTEM\CBTEXT.CLP (40 lines of text with tabs, one line broken at the window's width, OEM
+# text), scrolls by lines and pages, shows the OEM text, saves TEXT.CLP.
+# compare: clipbrd-text/03.png 01.png ignore 320 240 333 261
+# compare: clipbrd-text/04.png 02.png ignore 320 240 333 261
+# compare: clipbrd-text/05.png 03.png ignore 320 240 333 261
+# compare: clipbrd-text/06.png 04.png ignore 320 240 333 261
+# compare: clipbrd-text/07.png 05.png ignore 320 240 333 261
+# compare: clipbrd-text/08.png 06.png ignore 320 240 333 261
+# compare: clipbrd-text/10.png 07.png ignore 320 240 333 261
+# file: files/text.clp run-clipbrd-text/WINDOWS/TEXT.CLP apps/clipbrd/tests/clpcmp.py
+# regress: sh apps/clipbrd/tests/run.sh "$TEST" "$OUT"
+sleep 400
+key alt
+key f
+key o
+key s
+key y
+key s
+key t
+key e
+key m
+key backslash
+key c
+key b
+key t
+key e
+key x
+key t
+key period
+key c
+key l
+key p
+key enter
+sleep 400
+shot shots/01.png
+key down
+key down
+key down
+sleep 400
+shot shots/02.png
+key pagedown
+sleep 400
+shot shots/03.png
+key pageup
+sleep 400
+shot shots/04.png
+key alt
+key d
+key o
+sleep 400
+shot shots/05.png
+key alt
+key d
+key t
+key pagedown
+key pagedown
+key pagedown
+key pagedown
+sleep 400
+shot shots/06.png
+key alt
+key f
+key a
+key t
+key e
+key x
+key t
+key period
+key c
+key l
+key p
+key enter
+sleep 400
+shot shots/07.png
+quit

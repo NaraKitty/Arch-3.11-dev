@@ -587,9 +587,10 @@ int GetObject(HGDIOBJ o, int cb, void *out)
         memset(b, 0, sizeof *b);
         b->bmWidth = o->u.bmp.w;
         b->bmHeight = o->u.bmp.h;
-        b->bmPlanes = 1;
-        b->bmBitsPixel = o->u.bmp.mono ? 1 : 4;
-        b->bmWidthBytes = ((b->bmWidth * b->bmBitsPixel + 15) / 16) * 2;
+        /* VGA.DRV's device bitmaps: 4 planes of 1 bit (palette.c has the bits' layout) */
+        b->bmPlanes = o->u.bmp.mono ? 1 : 4;
+        b->bmBitsPixel = 1;
+        b->bmWidthBytes = ((b->bmWidth + 15) / 16) * 2;
         return sizeof *b;
     }
     if (o->kind == OBJ_FONT && cb >= (int)sizeof(LOGFONT)) {
@@ -991,7 +992,7 @@ static uint32_t brush_px(HDC dc, HBRUSH b, int x, int y)
 {
     int bx = (x - dc->ox - dc->brushorgx) & 7, by = (y - dc->oy - dc->brushorgy) & 7;
     switch (b->u.brush.style) {
-    case BS_SOLID: return w16_dither(b->u.brush.color, bx, by);
+    case BS_SOLID: return w16_dither(w16_palette_color(dc, b->u.brush.color), bx, by);
     case BS_HATCHED: {
         int on = 0;
         switch (b->u.brush.hatch) {

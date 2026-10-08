@@ -98,6 +98,7 @@ struct W16DC {
     int mapmode;
     int worgx, worgy, vorgx, vorgy, wextx, wexty, vextx, vexty;
     int brushorgx, brushorgy;
+    HPALETTE pal;        /* SelectPalette's; NULL = the default palette */
     int charextra;
     int saved_depth;
     struct W16DC *saved;
@@ -114,6 +115,7 @@ uint32_t w16_display_px(uint32_t p);         /* logical pixel -> what the VGA mo
 const uint32_t *w16_display_frame(void);     /* the screen converted with w16_display_px */
 uint32_t w16_rgb(COLORREF c);              /* COLORREF -> 0xRRGGBB (nearest VGA colour) */
 uint32_t w16_dither(COLORREF c, int x, int y);
+COLORREF w16_palette_color(HDC dc, COLORREF c);
 uint32_t w16_invert_px(uint32_t p);
 void w16_fill_rect_dev(HDC dc, const RECT *r, HBRUSH b);
 void w16_fill_solid_dev(HDC dc, const RECT *r, uint32_t rgb);

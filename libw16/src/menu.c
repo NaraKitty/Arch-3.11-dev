@@ -150,12 +150,18 @@ BOOL DeleteMenu(HMENU m, UINT pos, UINT f)
     o->it[i].sub = NULL;
     return RemoveMenu(o, i, MF_BYPOSITION);
 }
+/* USER seg9:01A8: the action flag is taken off before the call (MF_APPEND is also MF_OWNERDRAW's
+ * value); a separator with no item to put it before is appended, no text means a separator;
+ * MF_REMOVE removes by position */
 BOOL ChangeMenu(HMENU m, UINT cmd, LPCSTR t, UINT id, UINT f)
 {
-    if (f & MF_APPEND) return AppendMenu(m, f, id, t);
-    if (f & MF_DELETE) return DeleteMenu(m, cmd, f);
-    if (f & MF_REMOVE) return RemoveMenu(m, cmd, f);
-    if (f & MF_CHANGE) return ModifyMenu(m, cmd, f, id, t);
+    if (!m) return FALSE;
+    if ((f & MF_SEPARATOR) && !cmd && !(f & MF_CHANGE)) f |= MF_APPEND;
+    if (!t) f |= MF_SEPARATOR;
+    if (f & MF_REMOVE) return RemoveMenu(m, cmd, (f & ~MF_REMOVE) | MF_BYPOSITION);
+    if (f & MF_DELETE) return DeleteMenu(m, cmd, f & ~MF_DELETE);
+    if (f & MF_CHANGE) return ModifyMenu(m, cmd, f & 0x4C7F, id, t);
+    if (f & MF_APPEND) return AppendMenu(m, f & ~MF_APPEND, id, t);
     return InsertMenu(m, cmd, f, id, t);
 }
 BOOL EnableMenuItem(HMENU m, UINT id, UINT f)

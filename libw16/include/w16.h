@@ -91,6 +91,8 @@ typedef void *FARPROC;
 #define MAKELPARAM(lo, hi) ((LPARAM)MAKELONG(lo, hi))
 #define MAKEPOINT(l) (*(POINT *)&(l))
 #define RGB(r, g, b) ((COLORREF)(((BYTE)(r)) | ((WORD)((BYTE)(g)) << 8) | (((DWORD)(BYTE)(b)) << 16)))
+#define PALETTERGB(r, g, b) (0x02000000 | RGB(r, g, b))
+#define PALETTEINDEX(i) ((COLORREF)(0x01000000 | (DWORD)(WORD)(i)))
 #define GetRValue(c) ((BYTE)(c))
 #define GetGValue(c) ((BYTE)((c) >> 8))
 #define GetBValue(c) ((BYTE)((c) >> 16))

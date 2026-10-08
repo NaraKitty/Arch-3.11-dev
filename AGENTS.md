@@ -770,3 +770,34 @@ ES_CENTER/ES_RIGHT (Date & Time fields still pass their tests), read-only and di
 Rig: AUTOTYPE stops typing when another DOSBox-X window starts (takes the focus) - long typing fails
 whenever other agents capture; the recorder in this session used a BitBlt grab (no PrintWindow hang).
 Caret-only moves never make a new frame (tolerance > caret) - type a marker after a move.
+
+### Session 10 (Oct 8, Clipboard Viewer worktree) - CLIPBRD.EXE
+apps/clipbrd/clipbrd.c ports CLIPBRD.EXE 3.10.0.103 (all of seg1, each function with its offset): the
+viewer chain (WM_DRAWCLIPBOARD/WM_CHANGECBCHAIN), the Display menu rebuilt from EnumClipboardFormats
+(names from the program's strings 1-12/128-131 or GetClipboardFormatName; formats it cannot show grayed),
+Auto's 16-format priority list, text (its own line breaker seg1:0D52: 8-column tabs, breaks by character at
+the width, scroll range kept in 16 bits as 3.1 does), OEM text in OEM_FIXED_FONT, bitmaps, DIBs, palettes
+(a framed square per entry), pictures (mapping-mode extents through GetDeviceCaps sizes, iso/anisotropic
+stretched to the window), owner display (WM_PAINTCLIPBOARD/SIZE/V/HSCROLLCLIPBOARD), the messages
+"<Cannot display ...>", scrolling by keys and bars, Edit > Delete with its question, File > Open (formats
+promised, rendered from the file on WM_RENDERFORMAT / WM_RENDERALLFORMATS) and Save As (then the viewer owns
+the clipboard from the saved file, as in 3.1), Help, About.
+Tests (apps/clipbrd/tests, tools/regress.sh): bmp, text, wmf, note, realclp, sylk, reg against rig runs
+clipbrd-bmp/text/wmf/note/sylk/reg (shell clipbrd.exe; note: Program Manager shell, run=clipbrd.exe
+notepad.exe). mkclp.py writes the test .CLP files (our own content) for both sides; run.sh gives a private
+drive, config and shared clipboard, starts in C:\WINDOWS, can run Notepad first (CLIPBRD_NOTEPAD) and can
+load .CLP files real 3.11 saved (CLIPBRD_REF_CLP). Every compared viewer frame is 0 px apart except the
+picture's ellipse outline (48 single pixels: libw16's Ellipse vs 3.1's GDI scan conversion - open), and
+every .CLP the port saves equals the one real 3.11 saved (apps/clipbrd/tests/clpcmp.py: all bytes except
+the name field after its terminator and a picture's hMF word, which 3.1 fills with stack garbage and a
+handle value). New regress line: "# file: OUT REF [TOOL]".
+libw16: ChangeMenu = USER seg9:01A8 (action flag removed before the call - MF_APPEND is MF_OWNERDRAW's
+value; separators; MF_REMOVE by position); SelectPalette per DC and PALETTEINDEX brushes take the DC
+palette's entry (dithered as RGB, measured); colour bitmaps report VGA.DRV's layout (GetObject planes 4,
+1 bit; Get/SetBitmapBits planar, hardware value = colour index with 7/8 swapped - measured); GlobalAlloc
+blocks come in 32-byte steps and GlobalSize reports them (measured in real .CLP files); PALETTEINDEX /
+PALETTERGB macros.
+UNTESTED: owner display (no 3.1 program offers it), palettes on a palette device (VGA is not one),
+DSP formats, BITMAPCOREHEADER DIBs, WM_RENDERALLFORMATS when the owner viewer quits, Help (WinHelp),
+the "FileName" format (File Manager), mouse scrolling (the rig types keys only), MM_TEXT/HIMETRIC pictures.
+The Open/Save As dialogs differ from 3.11 (commdlg.c's business; not compared here).

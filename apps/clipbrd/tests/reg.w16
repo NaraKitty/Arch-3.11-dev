@@ -1,0 +1,62 @@
+# Clipboard Viewer: the keys of arch311-ref/scn/clipbrd-reg.scn (tools/ref311/scenario.py w16)
+# A monochrome bitmap, then (after the Clear Clipboard question) a registered format with DIF: the
+# unknown-format message, both items grayed in the Display menu.
+# compare: clipbrd-reg/03.png 01.png ignore 320 240 333 261
+# compare: clipbrd-reg/05.png 02.png ignore 320 240 333 261
+# compare: clipbrd-reg/06.png 03.png ignore 320 240 333 261
+# compare: clipbrd-reg/07.png 04.png ignore 320 240 333 261
+# regress: sh apps/clipbrd/tests/run.sh "$TEST" "$OUT"
+sleep 400
+key alt
+key f
+key o
+key s
+key y
+key s
+key t
+key e
+key m
+key backslash
+key c
+key b
+key m
+key o
+key n
+key o
+key period
+key c
+key l
+key p
+key enter
+sleep 400
+shot shots/01.png
+key alt
+key f
+key o
+key s
+key y
+key s
+key t
+key e
+key m
+key backslash
+key c
+key b
+key r
+key e
+key g
+key period
+key c
+key l
+key p
+key enter
+sleep 400
+shot shots/02.png
+key y
+sleep 400
+shot shots/03.png
+key alt
+key d
+sleep 400
+shot shots/04.png
+quit

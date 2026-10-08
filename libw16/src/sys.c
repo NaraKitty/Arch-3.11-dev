@@ -593,8 +593,28 @@ static void *mem_realloc(void *h, size_t n, int zero)
     m->size = n;
     return h;
 }
-HGLOBAL GlobalAlloc(UINT f, DWORD n) { return mem_alloc(n, f & GMEM_ZEROINIT); }
-HGLOBAL GlobalReAlloc(HGLOBAL h, DWORD n, UINT f) { return mem_realloc(h, n, f & GMEM_ZEROINIT); }
+/* KERNEL's global heap (386 enhanced mode) hands out blocks in 32-byte steps, and GlobalSize gives the
+ * block's size: measured in .CLP files real 3.11's Clipboard Viewer writes (each format is GlobalSize
+ * bytes: 1451 -> 1472, 25 -> 32, a 188-byte metafile -> 192). The extra bytes are zero here (they were
+ * on the rig; 3.1 does not clear them without GMEM_ZEROINIT). */
+static DWORD global_round(DWORD n) { return n ? (n + 31) & ~(DWORD)31 : 0; }
+static void zero_tail(HGLOBAL h, DWORD from)
+{
+    MemH *m = mh(h);
+    if (m && m->size > from) memset((char *)m->p + from, 0, m->size - from);
+}
+HGLOBAL GlobalAlloc(UINT f, DWORD n)
+{
+    HGLOBAL h = mem_alloc(global_round(n), f & GMEM_ZEROINIT);
+    if (h && !(f & GMEM_ZEROINIT)) zero_tail(h, n);
+    return h;
+}
+HGLOBAL GlobalReAlloc(HGLOBAL h, DWORD n, UINT f)
+{
+    HGLOBAL r = mem_realloc(h, global_round(n), f & GMEM_ZEROINIT);
+    if (r) zero_tail(r, n);
+    return r;
+}
 void *GlobalLock(HGLOBAL h) { MemH *m = mh(h); if (!m) return NULL; m->locks++; return m->p; }
 BOOL GlobalUnlock(HGLOBAL h) { MemH *m = mh(h); if (m && m->locks) m->locks--; return m && m->locks; }
 HGLOBAL GlobalFree(HGLOBAL h) { MemH *m = mh(h); if (!m) return h; free(m->p); m->magic = 0; free(m); return NULL; }
