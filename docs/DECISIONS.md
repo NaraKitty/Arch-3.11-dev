@@ -30,3 +30,30 @@ Native Linux applications are framed by `arch311-wm`, an X11 reparenting window 
 programs keep drawing their own frames in undecorated X windows, so the 3.11 frame has one
 implementation. X11 over Wayland because a reparenting window manager is far smaller than a
 compositor; Wayland can follow behind the same theme code.
+
+## ADR-006 (session 7, owner) - MS-DOS Prompt is a DOSBox; Terminal is the Linux terminal
+Supersedes the earlier plan that the MS-DOS Prompt item opens the Linux terminal emulator. The MS-DOS
+Prompt starts arch311's built-in DOS emulator (DOSBox, a packaged dependency - DOSBox-X like the
+reference rig unless a later ADR picks another), so DOS programs and games run emulated, never natively
+(hard rule 3 still holds: no guest code runs on the host CPU). The Linux terminal is a port of 3.11's
+Terminal (TERMINAL.EXE): its windows, menus, dialogs and VT-100/VT-52/TTY emulation are kept and look as
+in 3.11, but it talks to a shell on a pseudo-terminal instead of a modem; dial-up features (phone
+number, modem commands) have no modem to drive. Windows programs stay native ports (ADR-001).
+
+## ADR-007 (session 7, owner) - Media players are shells over libVLC
+The owner will supply a Windows 3.11 MP3 player and an MP4 (video) player. Like the browsers (ADR-003),
+they become separate arch311 programs whose windows, menus, dialogs and behaviour are decompiled and
+reproduced 1:1 from the originals (enough of the original code is decoded to make them accurate), while
+decoding and playback use libVLC (VideoLAN's VLC engine, a packaged dependency) instead of the
+originals' code. The same engine may later stand behind MCI for 3.11's own Media Player and Sound
+Recorder. Their assets come from the user's own copies, as with every program.
+Addendum (owner): the players open everything libVLC can read and play, not only MP3/MP4.
+
+## ADR-008 (session 7, owner) - Program Manager groups for Linux apps; preferred applications
+- Krita is installed as an item in Accessories next to Paintbrush, with a 3.11-style icon (drawn in
+  the theme's style, never a copied Microsoft icon).
+- A new "Media" group holds the MP3 player and the video player (ADR-007).
+- Files open with a preferred application, as on a modern OS: 3.1's own association mechanism
+  (WIN.INI [Extensions], File Manager's Associate dialog, ShellExecute/FindExecutable) is kept and
+  extended so that the media players are the default for the formats they play, and Linux defaults
+  (xdg-mime / mimeapps.list) and 3.1's [Extensions] agree in both directions.

@@ -79,6 +79,10 @@ static int nearest16(uint32_t rgb)
     return best;
 }
 
+/* a pixel's 4-bit device colour index and back (bitmap bits: palette.c) */
+int w16_vga_index(uint32_t rgb) { return nearest16(rgb); }
+uint32_t w16_vga_color(int i) { return vga16[i & 15]; }
+
 /* COLORREF -> displayed pixel for pens/text (nearest solid colour on a 16-colour device) */
 /* inversion as the VGA hardware does it: on palette index (black<->white, light<->dark gray,
  * navy<->yellow ...). Non-VGA colours (true-colour themes) are inverted per channel. */
@@ -568,6 +572,7 @@ BOOL DeleteObject(HGDIOBJ o)
     if (!o || o->stock) return FALSE;
     if (o->kind == OBJ_BITMAP) free(o->u.bmp.px);
     if (o->kind == OBJ_RGN) rgn_free(&o->u.rgn);
+    if (o->kind == OBJ_PAL) free(o->u.pal.e);
     o->kind = 0;
     free(o);
     return TRUE;
@@ -576,6 +581,7 @@ BOOL DeleteObject(HGDIOBJ o)
 int GetObject(HGDIOBJ o, int cb, void *out)
 {
     if (!o) return 0;
+    if (o->kind == OBJ_PAL && cb >= 2) { *(WORD *)out = (WORD)o->u.pal.n; return 2; } /* its entry count */
     if (o->kind == OBJ_BITMAP && cb >= (int)sizeof(BITMAP)) {
         BITMAP *b = out;
         memset(b, 0, sizeof *b);
@@ -832,7 +838,9 @@ int GetDeviceCaps(HDC dc, int i)
     case VERTSIZE: return 156;
     case HORZRES: return w16_screen.w;
     case VERTRES: return w16_screen.h;
-    case BITSPIXEL: return 1;
+    /* VGA: 4 planes of 1 bit; 256 colours and true colour are one plane of 8 and 24 bits (USER
+     * picks icon images by planes * bits, so a true-colour screen must not look monochrome) */
+    case BITSPIXEL: return ncolors > 256 ? 24 : ncolors > 16 ? 8 : 1;
     case PLANES: return ncolors > 16 ? 1 : 4;
     case NUMBRUSHES: return -1;
     case NUMPENS: return 80;

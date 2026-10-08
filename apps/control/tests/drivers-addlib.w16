@@ -1,0 +1,32 @@
+# Drivers > Add... > Ad Lib from drive A: (MSADLIB.DRV, VADLIBD.386):
+#   ARCH311_REF_INI=1 ARCH311_A_FILES="MSADLIB.DRV VADLIBD.386" tools/run-cp-test.sh apps/control/tests/drivers-addlib.w16 OUT Drivers
+# Same keys as arch311-ref/scn/drivers-addlib.scn (rig run with A: holding the same two files): both
+# files copied to SYSTEM with VerInstallFile, "device=vadlibd.386" added to [386Enh], MIDI=msadlib.drv,
+# MSADLIB.DRV's DRV_INSTALL asks for a restart (Don't Restart Now), close
+# regress: ARCH311_REF_INI=1 ARCH311_A_FILES="MSADLIB.DRV VADLIBD.386" sh tools/run-cp-test.sh "$TEST" "$OUT" Drivers
+# compare: drivers-addlib/04.png 01-adlib.png active ignore 320 239 333 261
+# compare: drivers-addlib/06.png 02-restart.png active ignore 320 239 333 261
+# compare: drivers-addlib/07.png 03-added.png active ignore 320 239 333 261
+# ini: SYSTEM.INI drivers MIDI=msadlib.drv
+# ini: SYSTEM.INI 386Enh device=vtdapi.386
+# ini: CONTROL.INI Userinstallable.drivers MIDI=msadlib.drv
+# ini: CONTROL.INI related.desc MIDI=
+# ini: CONTROL.INI drivers.desc msadlib.drv=Ad Lib
+sleep 900
+key tab
+key tab
+key space
+sleep 500
+type a
+sleep 300
+shot shots/01-adlib.png
+key enter
+sleep 1000
+shot shots/02-restart.png
+key esc
+sleep 500
+shot shots/03-added.png
+key esc
+sleep 300
+shot shots/04-closed.png
+quit

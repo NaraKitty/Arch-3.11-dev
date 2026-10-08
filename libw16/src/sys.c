@@ -287,21 +287,48 @@ static int ini_get(const char *path, LPCSTR app, LPCSTR key, LPSTR out, int cb, 
     return found;
 }
 
-/* KERNEL's WriteProfileString as measured on 3.11 (Desktop applet, WIN.INI [Desktop]): a key that is
- * there keeps its own spelling and only the value after its '=' changes ("Wallpaper=" stays when
- * MAIN.CPL writes "WallPaper"); a new key goes after the last line of its section that is not
- * blank; a new section goes at the end after an empty line. key NULL removes the section, val NULL
- * the key. */
-static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
+/* KERNEL seg1:6864: a string written to a profile ends at its first control character (0..0x0D)
+ * and loses its trailing blanks (3.1 even cuts the caller's buffer there): MAIN.CPL's keyboard
+ * layout "kbdgr.dll " is written as "kbdgr.dll" (measured) */
+static char *ini_cut(const char *s)
+{
+    size_t n = 0;
+    while ((unsigned char)s[n] > 0x0D) n++;
+    while (n && s[n - 1] == ' ') n--;
+    char *c = malloc(n + 1);
+    memcpy(c, s, n);
+    c[n] = 0;
+    return c;
+}
+
+/* "key=value" at `at` in out (a buffer with room), after a line break if the text before lacks one */
+static void ini_insert(char *out, size_t at, const char *key, const char *val)
+{
+    char line[2100];
+    int lead = at && out[at - 1] != '\n';
+    snprintf(line, sizeof line, "%s%s=%s\r\n", lead ? "\r\n" : "", key, val);
+    size_t n = strlen(line);
+    memmove(out + at + n, out + at, strlen(out + at) + 1);
+    memcpy(out + at, line, n);
+}
+
+/* KERNEL's WriteProfileString (seg1:6CEC), as measured on 3.11: a key that is there keeps its line up
+ * to the '=' - its own spelling too ("Wallpaper=" stays when MAIN.CPL writes "WallPaper", USER's
+ * "LANGUAGE.DLL" rewrote SYSTEM.INI's "language.dll=" line) - and only the value changes; a new key
+ * goes after the last line of its section that is not blank; a new section goes at the end after an
+ * empty line (at the top of an empty file without one: Clock's CLOCK.INI). key NULL removes the
+ * section, val NULL the key. */
+static int ini_set(const char *path, LPCSTR app0, LPCSTR key0, LPCSTR val0)
 {
     char *d = read_all(path);
     if (!d)
         d = strdup("");
+    char *app = ini_cut(app0), *key = key0 ? ini_cut(key0) : NULL, *val = val0 ? ini_cut(val0) : NULL;
     size_t cap = strlen(d) + strlen(app) + (key ? strlen(key) : 0) + (val ? strlen(val) : 0) + 64;
     char *out = malloc(cap);
     out[0] = 0;
     int in = 0, done = 0, sawsec = 0;
-    size_t after_last = 0;   /* in out: the end of the section's last line that is not blank */
+    size_t sec_end = 0;   /* where the section's last non-blank line (or its header) ends in out */
     char *p = d;
     while (*p) {
         char *nl = strchr(p, '\n');
@@ -313,11 +340,7 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
         trim(t);
         if (t[0] == '[') {
             if (in && !done && key && val) {
-                /* the new key after the section's last line */
-                char line[2048];
-                snprintf(line, sizeof line, "%s=%s\r\n", key, val);
-                memmove(out + after_last + strlen(line), out + after_last, strlen(out + after_last) + 1);
-                memcpy(out + after_last, line, strlen(line));
+                ini_insert(out, sec_end, key, val);
                 done = 1;
             }
             char *e = strchr(t, ']');
@@ -325,13 +348,6 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
             in = !done && !strcasecmp(t + 1, app);
             if (in) sawsec = 1;
             if (in && !key) { p += n; continue; } /* delete whole section */
-            if (in) {
-                strncat(out, p, n);
-                if (!nl) strcat(out, "\r\n");
-                after_last = strlen(out);
-                p += n;
-                continue;
-            }
         } else if (in) {
             if (!key) { p += n; continue; }
             char *eq = strchr(t, '=');
@@ -340,44 +356,34 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
                 trim(t);
                 if (!strcasecmp(t, key)) {
                     if (val && !done) {
-                        /* the line up to its '=' stays */
-                        size_t pre = (size_t)(strchr(p, '=') - p) + 1;
+                        /* the line up to its '=', the value, the line's own ending */
+                        size_t pre = strchr(p, '=') - p + 1, end = n;
+                        while (end > pre && (p[end - 1] == '\n' || p[end - 1] == '\r')) end--;
                         strncat(out, p, pre);
                         strcat(out, val);
-                        strcat(out, "\r\n");
-                        after_last = strlen(out);
+                        strncat(out, p + end, n - end);
+                        if (end == n) strcat(out, "\r\n");
+                        sec_end = strlen(out);
                     }
                     done = 1;
                     p += n;
                     continue;
                 }
             }
-            if (t[0]) {
-                strncat(out, p, n);
-                if (!nl) strcat(out, "\r\n");
-                after_last = strlen(out);
-                p += n;
-                continue;
-            }
         }
         strncat(out, p, n);
         p += n;
+        if (in && t[0]) sec_end = strlen(out);
     }
-    if (!done && key && val) {
-        if (!sawsec) {
-            /* a new section follows a blank line, except at the top of an empty file (real 3.11's
-             * Clock created CLOCK.INI as "[Clock]\r\nMaximized=0\r\n...") */
-            size_t L = strlen(out);
-            if (L && out[L - 1] != '\n') strcat(out, "\r\n");
-            strcat(out, L ? "\r\n[" : "["); strcat(out, app); strcat(out, "]\r\n");
-            strcat(out, key); strcat(out, "="); strcat(out, val); strcat(out, "\r\n");
-        } else {
-            /* the section ends the file */
-            char line[2048];
-            snprintf(line, sizeof line, "%s=%s\r\n", key, val);
-            memmove(out + after_last + strlen(line), out + after_last, strlen(out + after_last) + 1);
-            memcpy(out + after_last, line, strlen(line));
-        }
+    if (in && !done && key && val) {   /* the section is the file's last one */
+        ini_insert(out, sec_end, key, val);
+        done = 1;
+    }
+    if (!done && key && val && !sawsec) {
+        size_t L = strlen(out);
+        if (L && out[L - 1] != '\n') strcat(out, "\r\n");
+        strcat(out, L ? "\r\n[" : "["); strcat(out, app); strcat(out, "]\r\n");
+        strcat(out, key); strcat(out, "="); strcat(out, val); strcat(out, "\r\n");
     }
     FILE *f = fopen(path, "wb");
     if (f) {
@@ -386,6 +392,9 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
     }
     free(out);
     free(d);
+    free(app);
+    free(key);
+    free(val);
     return f != NULL;
 }
 
@@ -398,7 +407,9 @@ int GetPrivateProfileString(LPCSTR app, LPCSTR key, LPCSTR def, LPSTR out, int c
         return 0;
     if (app && ini_get(path, app, key, out, cb, &len))
         return len;
-    snprintf(out, cb, "%s", def ? def : "");
+    /* the default may be the output buffer itself (DRIVERS.CPL passes the same buffer) */
+    if (def != out) snprintf(out, cb, "%s", def ? def : "");
+    else if ((int)strlen(out) >= cb) out[cb - 1] = 0;
     return strlen(out);
 }
 int GetPrivateProfileInt(LPCSTR app, LPCSTR key, int def, LPCSTR file)
@@ -413,6 +424,8 @@ int GetPrivateProfileInt(LPCSTR app, LPCSTR key, int def, LPCSTR file)
 BOOL WritePrivateProfileString(LPCSTR app, LPCSTR key, LPCSTR val, LPCSTR file)
 {
     char path[1200];
+    /* NULL section: KERNEL writes its cached profile out; libw16 keeps no cache */
+    if (!app) return TRUE;
     ini_path(file, path, sizeof path);
     return ini_set(path, app, key, val);
 }
@@ -422,6 +435,10 @@ BOOL WriteProfileString(LPCSTR a, LPCSTR k, LPCSTR v) { return WritePrivateProfi
 
 UINT GetWindowsDirectory(LPSTR buf, UINT cb) { snprintf(buf, cb, "C:\\WINDOWS"); return strlen(buf); }
 UINT GetSystemDirectory(LPSTR buf, UINT cb) { snprintf(buf, cb, "C:\\WINDOWS\\SYSTEM"); return strlen(buf); }
+/* KERNEL's flags for 3.11 in 386 enhanced mode on the reference machine (DOSBox-X, a Pentium: KERNEL
+ * reports a 486 or later as WF_CPU486) with a coprocessor and paging. UNTESTED: the value itself was
+ * not read on the rig; programs test the CPU and mode bits */
+DWORD GetWinFlags(void) { return WF_PMODE | WF_CPU486 | WF_ENHANCED | WF_80x87 | WF_PAGING; }
 
 void w16_sys_init(void)
 {
@@ -604,14 +621,41 @@ static unsigned char lo1252(unsigned char c)
 int lstrlen(LPCSTR s) { return s ? (int)strlen(s) : 0; }
 LPSTR lstrcpy(LPSTR d, LPCSTR s) { return strcpy(d, s ? s : ""); }
 LPSTR lstrcat(LPSTR d, LPCSTR s) { return strcat(d, s ? s : ""); }
-int lstrcmp(LPCSTR a, LPCSTR b) { return strcmp(a, b); }
-int lstrcmpi(LPCSTR a, LPCSTR b)
+/* USER seg11:005E: a character's sort weight without a language driver (the ranges at seg11:0010:
+ * first, last, added, lower case). Digits and letters weigh more than every other character, upper
+ * and lower case (accented letters too) weigh the same */
+static unsigned sort_weight(unsigned char c, int *lower)
 {
-    for (;; a++, b++) {
-        int x = lo1252(*(unsigned char *)a), y = lo1252(*(unsigned char *)b);
-        if (x != y || !x) return x - y;
+    static const unsigned char ranges[7][4] = {
+        {'0', '9', 0xD0, 0}, {'A', 'Z', 0xD0, 0}, {'a', 'z', 0xB0, 1}, {0xC0, 0xD6, 0x20, 0},
+        {0xD8, 0xDE, 0x20, 0}, {0xE0, 0xF6, 0x00, 1}, {0xF8, 0xFE, 0x00, 1}};
+    *lower = 0;
+    for (int i = 0; i < 7 && c >= ranges[i][0]; i++)
+        if (c <= ranges[i][1]) {
+            *lower = ranges[i][3];
+            return c + ranges[i][2];
+        }
+    return c;
+}
+
+/* USER seg11:0088, behind lstrcmp (fCase) and lstrcmpi: the first characters that differ decide by
+ * weight; lstrcmp then orders strings that differ only in case by their first such difference (the
+ * lower-case one after). Returns 1, 0 or -1 */
+static int user_strcmp(LPCSTR a, LPCSTR b, int fCase)
+{
+    int ca = 0, cb = 0;
+    for (;;) {
+        unsigned char x = *a++, y = *b++;
+        if (!x || !y) return x ? 1 : y ? -1 : ca > cb ? 1 : ca < cb ? -1 : 0;
+        if (x == y) continue;
+        int lx, ly;
+        unsigned wx = sort_weight(x, &lx), wy = sort_weight(y, &ly);
+        if (wx != wy) return wx > wy ? 1 : -1;
+        if (fCase && lx != ly && !(ca | cb)) { ca = lx; cb = ly; }
     }
 }
+int lstrcmp(LPCSTR a, LPCSTR b) { return user_strcmp(a, b, 1); }
+int lstrcmpi(LPCSTR a, LPCSTR b) { return user_strcmp(a, b, 0); }
 LPSTR AnsiUpper(LPSTR s)
 {
     if (IS_INTRESOURCE(s)) return (LPSTR)(uintptr_t)up1252((unsigned char)(uintptr_t)s);
@@ -875,11 +919,31 @@ static void dos_resolve(LPCSTR in, char *out, size_t cb)
     for (int i = 0; i < n && o < cb; i++) o += snprintf(out + o, cb - o, "\\%s", parts[i]);
 }
 
+/* 3.1 keeps the profiles in the Windows directory: <windir>\NAME.INI is the file Get/Write(Private)-
+ * ProfileString use (in the config directory here), so programs that read or rewrite WIN.INI and
+ * SYSTEM.INI as files (DRIVERS.CPL adds [386Enh] device= lines that way) see the same data. Only
+ * profiles that exist (WIN, SYSTEM and CONTROL.INI are seeded on first use) */
+static int profile_host(const char *full, char *host, size_t cb)
+{
+    char win[260], path[1200];
+    GetWindowsDirectory(win, sizeof win);
+    size_t n = strlen(win), l;
+    const char *name = full + n + 1;
+    if (strncasecmp(full, win, n) || full[n] != '\\' || strchr(name, '\\') || (l = strlen(name)) < 5 ||
+        strcasecmp(name + l - 4, ".INI"))
+        return 0;
+    ini_path(name, path, sizeof path);
+    if (access(path, F_OK)) return 0;
+    snprintf(host, cb, "%s", path);
+    return 1;
+}
+
 int w16_dos_to_host(LPCSTR dos, char *host, size_t cb)
 {
     load_drives();
     char full[520];
     dos_resolve(dos, full, sizeof full);
+    if (profile_host(full, host, cb)) return 0;
     char drv = full[0];
     const char *root = NULL, *rest = full + 2;
     for (int i = 0; i < ndrives; i++)

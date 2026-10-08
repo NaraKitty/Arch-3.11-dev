@@ -1,0 +1,19 @@
+# Printers > Install (arch311 behaviour, no 3.11 frame): ARCH311_SIM_PRINTERS= ARCH311_REF=<rig> sh tools/run-cp-test.sh apps/control/tests/printers-install.w16 OUT Printers
+# A CUPS without queues: Generic / Text Only from the List of Printers, Install... makes the queue
+# Generic_Text_Only on the first port, LPT1: (lpadmin -p -m -v -E, simulated), which becomes the default
+# as the first printer; Esc closes. 3.11 would copy TTY.DRV from a disk and write "Generic / Text
+# Only=TTY,LPT1:"; the values below are what arch311 writes for the CUPS queue.
+# regress: ARCH311_SIM_PRINTERS= sh tools/run-cp-test.sh "$TEST" "$OUT" Printers
+# ini: WIN.INI windows device=Generic_Text_Only,CUPS,LPT1:
+# ini: WIN.INI PrinterPorts Generic_Text_Only=CUPS,LPT1:,15,45
+# ini: WIN.INI devices Generic_Text_Only=CUPS,LPT1:
+sleep 900
+shot shots/01-open.png
+key down
+key tab
+key space
+sleep 600
+shot shots/02-installed.png
+key esc
+sleep 400
+quit

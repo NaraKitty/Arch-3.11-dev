@@ -52,6 +52,7 @@ const W16Res *w16_find_res(HINSTANCE m, LPCSTR name, LPCSTR type);
 const uint8_t *w16_res_data(HINSTANCE m, const W16Res *r);
 HINSTANCE w16_system_module(const char *file); /* USER.EXE, VGA.DRV, ... (NULL if absent) */
 int w16_wildmatch(const char *pat, const char *s); /* DOS wildcards, case-insensitive */
+int w16_driver_in_use(LPCSTR file);                /* an installable driver holds the file (driver.c) */
 
 /* ------------------------------------------------------------------ GDI */
 enum { OBJ_PEN = 1, OBJ_BRUSH, OBJ_FONT, OBJ_BITMAP, OBJ_RGN, OBJ_PAL };
@@ -74,6 +75,7 @@ struct W16GdiObj {
         struct { LOGFONT lf; W16Font *f; } font;
         W16Bitmap bmp;
         Region rgn;
+        struct { int n; PALETTEENTRY *e; } pal;
     } u;
 };
 
@@ -229,6 +231,11 @@ void w16_clamp_window_size(HWND h, int *cx, int *cy);    /* USER seg1:0000 */
 HWND w16_top_level(HWND h);
 HWND w16_window_under(HWND h, POINT pt); /* hit testing past an HTTRANSPARENT window */
 int w16_window_visible(HWND h); /* visible including ancestors */
+char *w16_ansi_to_utf8(const char *s);   /* malloc'd; cp1252 <-> UTF-8 for the Linux clipboard */
+char *w16_utf8_to_ansi(const char *s);
+void w16_clipboard_on_destroy(HWND h);   /* USER: the owner renders all before WM_DESTROY */
+void w16_clipboard_on_free(HWND h);      /* a freed window leaves the clipboard's records */
+void w16_clipboard_poll(void);           /* the shared clipboard, from the message loop */
 void w16_activate(HWND h, int how);
 void w16_send_paint_cascade(HWND h); /* UpdateWindow semantics */
 UINT w16_paint_msg(HWND h);          /* WM_PAINT, or WM_PAINTICON for an icon with a class icon */

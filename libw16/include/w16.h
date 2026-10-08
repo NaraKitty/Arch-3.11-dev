@@ -1156,6 +1156,56 @@ typedef struct {
 #define CF_OEMTEXT 7
 #define CF_DIB 8
 #define CF_PALETTE 9
+#define CF_PENDATA 10
+#define CF_RIFF 11
+#define CF_WAVE 12
+#define CF_OWNERDISPLAY 0x0080
+#define CF_DSPTEXT 0x0081
+#define CF_DSPBITMAP 0x0082
+#define CF_DSPMETAFILEPICT 0x0083
+#define CF_PRIVATEFIRST 0x0200
+#define CF_PRIVATELAST 0x02FF
+#define CF_GDIOBJFIRST 0x0300
+#define CF_GDIOBJLAST 0x03FF
+#define WM_VSCROLLCLIPBOARD 0x030A
+#define WM_SIZECLIPBOARD 0x030B
+#define WM_ASKCBFORMATNAME 0x030C
+#define WM_HSCROLLCLIPBOARD 0x030E
+UINT RegisterClipboardFormat(LPCSTR name);
+int GetClipboardFormatName(UINT fmt, LPSTR buf, int cb);
+HWND GetClipboardOwner(void);
+HWND GetClipboardViewer(void);
+HWND GetOpenClipboardWindow(void);
+int GetPriorityClipboardFormat(UINT *list, int n);
+
+/* metafiles: in 3.1 a memory metafile's handle is the global handle of its bits */
+typedef HGLOBAL HMETAFILE;
+typedef struct { short mm, xExt, yExt; HMETAFILE hMF; } METAFILEPICT;
+typedef METAFILEPICT *LPMETAFILEPICT;
+HMETAFILE SetMetaFileBits(HGLOBAL h);
+HGLOBAL GetMetaFileBits(HMETAFILE h);
+BOOL DeleteMetaFile(HMETAFILE h);
+BOOL IsValidMetaFile(HMETAFILE h);
+BOOL PlayMetaFile(HDC dc, HMETAFILE h);
+
+/* palettes */
+typedef struct { BYTE peRed, peGreen, peBlue, peFlags; } PALETTEENTRY;
+typedef struct { WORD palVersion, palNumEntries; PALETTEENTRY palPalEntry[1]; } LOGPALETTE;
+HPALETTE CreatePalette(const LOGPALETTE *lp);
+UINT GetPaletteEntries(HPALETTE p, UINT start, UINT n, PALETTEENTRY *out);
+HPALETTE SelectPalette(HDC dc, HPALETTE p, BOOL bkgnd);
+UINT RealizePalette(HDC dc);
+int UpdateColors(HDC dc);
+
+/* tasks: one per program */
+typedef void *HTASK;
+HTASK GetCurrentTask(void);
+BOOL InitAtomTable(int n);
+
+/* bitmap bits */
+HBITMAP CreateBitmapIndirect(const BITMAP *bm);
+LONG GetBitmapBits(HBITMAP b, LONG cb, void *out);
+LONG SetBitmapBits(HBITMAP b, DWORD cb, const void *in);
 
 /* memory */
 #define GMEM_FIXED 0x0000
@@ -1256,6 +1306,17 @@ void *LocalLock(HLOCAL h);
 BOOL LocalUnlock(HLOCAL h);
 HLOCAL LocalFree(HLOCAL h);
 UINT LocalSize(HLOCAL h);
+/* KERNEL atoms (the local table) and USER's global atom table: counted strings, compared without
+ * case; "#nnn" and MAKEINTATOM(n) are integer atoms (n < 0xC000) */
+#define MAKEINTATOM(i) ((LPCSTR)(uintptr_t)(WORD)(i))
+ATOM AddAtom(LPCSTR name);
+ATOM DeleteAtom(ATOM atom);
+ATOM FindAtom(LPCSTR name);
+UINT GetAtomName(ATOM atom, LPSTR buf, int cb);
+ATOM GlobalAddAtom(LPCSTR name);
+ATOM GlobalDeleteAtom(ATOM atom);
+ATOM GlobalFindAtom(LPCSTR name);
+UINT GlobalGetAtomName(ATOM atom, LPSTR buf, int cb);
 int lstrlen(LPCSTR s);
 LPSTR lstrcpy(LPSTR d, LPCSTR s);
 LPSTR lstrcat(LPSTR d, LPCSTR s);
@@ -1311,6 +1372,15 @@ UINT _lread(HFILE f, void *buf, UINT n);
 UINT _lwrite(HFILE f, const void *buf, UINT n);
 LONG _llseek(HFILE f, LONG off, int origin);
 HFILE _lclose(HFILE f);
+/* LZEXPAND (uncompressed files only, see lzexpand.c) */
+#define LZERROR_BADINHANDLE (-1)
+#define LZERROR_BADOUTHANDLE (-2)
+#define LZERROR_READ (-3)
+#define LZERROR_WRITE (-4)
+HFILE LZOpenFile(LPCSTR name, OFSTRUCT *of, UINT style);
+LONG LZSeek(HFILE f, LONG off, int origin);
+int LZRead(HFILE f, void *buf, int cb);
+void LZClose(HFILE f);
 /* "C:\\FOO\\BAR.TXT" <-> "/home/user/FOO/BAR.TXT" (drive map in ~/.config/arch311/drives) */
 int w16_dos_to_host(LPCSTR dos, char *host, size_t cb);
 int w16_host_to_dos(const char *host, LPSTR dos, size_t cb);
@@ -1537,6 +1607,7 @@ HICON CreateIcon(HINSTANCE inst, int w, int h, BYTE planes, BYTE bpp, const void
 #define SPI_SETBORDER 0x0006
 #define SPI_GETKEYBOARDSPEED 0x000A
 #define SPI_SETKEYBOARDSPEED 0x000B
+#define SPI_SETLANGDRIVER 0x000C
 #define SPI_ICONHORIZONTALSPACING 0x000D
 #define SPI_GETSCREENSAVETIMEOUT 0x000E
 #define SPI_SETSCREENSAVETIMEOUT 0x000F
@@ -1580,6 +1651,7 @@ BOOL GetWindowPlacement(HWND h, WINDOWPLACEMENT *wp);
 typedef struct W16DlgTemplate W16DlgTemplate;
 W16DlgTemplate *w16_dlgt_new(DWORD style, int x, int y, int cx, int cy, LPCSTR caption, int pt, LPCSTR face);
 void w16_dlgt_add(W16DlgTemplate *t, LPCSTR cls, LPCSTR text, int id, DWORD style, int x, int y, int cx, int cy);
+void w16_dlgt_item(W16DlgTemplate *t, int cls, const char *text, int len, int id, DWORD style, int x, int y, int cx, int cy);
 const void *w16_dlgt_data(W16DlgTemplate *t);
 void w16_dlgt_free(W16DlgTemplate *t);
 BOOL DestroyIcon(HICON i);
@@ -1813,6 +1885,95 @@ int SetDIBitsToDevice(HDC dc, int x, int y, int cx, int cy, int xsrc, int ysrc, 
 UINT DragQueryFile(HANDLE drop, UINT i, LPSTR buf, UINT cb);
 void DragFinish(HANDLE drop);
 HINSTANCE ShellExecute(HWND h, LPCSTR op, LPCSTR file, LPCSTR params, LPCSTR dir, int show);
+
+/* ------------------------------------------------------------------ installable drivers (driver.c) */
+/* USER's installable-driver interface. In 3.1 a driver is a 16-bit DLL exporting DriverProc; arch311
+ * runs none, so a driver file that exists is answered by a native stand-in that replies as that
+ * 3.11 driver does (see driver.c), or by a native driver registered for its file name. */
+typedef struct W16Drvr *HDRVR;
+#define DRV_LOAD 0x0001
+#define DRV_ENABLE 0x0002
+#define DRV_OPEN 0x0003
+#define DRV_CLOSE 0x0004
+#define DRV_DISABLE 0x0005
+#define DRV_FREE 0x0006
+#define DRV_CONFIGURE 0x0007
+#define DRV_QUERYCONFIGURE 0x0008
+#define DRV_INSTALL 0x0009
+#define DRV_REMOVE 0x000A
+#define DRV_EXITSESSION 0x000B
+#define DRV_EXITAPPLICATION 0x000C
+#define DRV_POWER 0x000F
+#define DRV_RESERVED 0x0800
+#define DRV_USER 0x4000
+#define DRVCNF_CANCEL 0x0000
+#define DRVCNF_OK 0x0001
+#define DRVCNF_RESTART 0x0002
+typedef struct {
+    DWORD dwDCISize;            /* sizeof(DRVCONFIGINFO); 3.1's 16-bit structure is 12 bytes */
+    LPCSTR lpszDCISectionName;
+    LPCSTR lpszDCIAliasName;
+} DRVCONFIGINFO, *LPDRVCONFIGINFO;
+typedef LRESULT (*DRIVERPROC)(ULONG_PTR dwDriverID, HDRVR hDriver, UINT msg, LPARAM lParam1, LPARAM lParam2);
+HDRVR OpenDriver(LPCSTR name, LPCSTR section, LPARAM lParam2);
+LRESULT CloseDriver(HDRVR h, LPARAM lParam1, LPARAM lParam2);
+LRESULT SendDriverMessage(HDRVR h, UINT msg, LPARAM lParam1, LPARAM lParam2);
+HINSTANCE GetDriverModuleHandle(HDRVR h);
+LRESULT DefDriverProc(ULONG_PTR dwDriverID, HDRVR h, UINT msg, LPARAM lParam1, LPARAM lParam2);
+/* a native DriverProc for driver file `file` ("MCIWAVE.DRV"), e.g. a port of its setup dialog; it
+ * replaces the stand-in for that file */
+BOOL w16_register_driver(LPCSTR file, DRIVERPROC proc);
+
+/* VER.DLL (ver.c) */
+#define VFFF_ISSHAREDFILE 0x0001
+#define VFF_CURNEDEST 0x0001
+#define VFF_FILEINUSE 0x0002
+#define VFF_BUFFTOOSMALL 0x0004
+#define VIFF_FORCEINSTALL 0x0001
+#define VIFF_DONTDELETEOLD 0x0002
+#define VIF_TEMPFILE 0x00000001L
+#define VIF_MISMATCH 0x00000002L
+#define VIF_SRCOLD 0x00000004L
+#define VIF_DIFFLANG 0x00000008L
+#define VIF_DIFFCODEPG 0x00000010L
+#define VIF_DIFFTYPE 0x00000020L
+#define VIF_WRITEPROT 0x00000040L
+#define VIF_FILEINUSE 0x00000080L
+#define VIF_OUTOFSPACE 0x00000100L
+#define VIF_ACCESSVIOLATION 0x00000200L
+#define VIF_SHARINGVIOLATION 0x00000400L
+#define VIF_CANNOTCREATE 0x00000800L
+#define VIF_CANNOTDELETE 0x00001000L
+#define VIF_CANNOTRENAME 0x00002000L
+#define VIF_CANNOTDELETECUR 0x00004000L
+#define VIF_OUTOFMEMORY 0x00008000L
+#define VIF_CANNOTREADSRC 0x00010000L
+#define VIF_CANNOTREADDST 0x00020000L
+#define VIF_BUFFTOOSMALL 0x00040000L
+UINT VerFindFile(UINT flags, LPCSTR file, LPCSTR windir, LPCSTR appdir, LPSTR curdir, UINT *curlen,
+                 LPSTR destdir, UINT *destlen);
+DWORD VerInstallFile(UINT flags, LPCSTR srcfile, LPCSTR destfile, LPCSTR srcdir, LPCSTR destdir,
+                     LPCSTR curdir, LPSTR tmpfile, UINT *tmplen);
+DWORD GetFileVersionInfoSize(LPCSTR file, DWORD *handle);
+BOOL GetFileVersionInfo(LPCSTR file, DWORD handle, DWORD len, void *data);
+BOOL VerQueryValue(const void *block, LPCSTR subblock, void **buf, UINT *len);
+
+/* KERNEL GetWinFlags */
+#define WF_PMODE 0x0001
+#define WF_CPU286 0x0002
+#define WF_CPU386 0x0004
+#define WF_CPU486 0x0008
+#define WF_STANDARD 0x0010
+#define WF_WIN286 0x0010
+#define WF_ENHANCED 0x0020
+#define WF_WIN386 0x0020
+#define WF_CPU086 0x0040
+#define WF_CPU186 0x0080
+#define WF_LARGEFRAME 0x0100
+#define WF_SMALLFRAME 0x0200
+#define WF_80x87 0x0400
+#define WF_PAGING 0x0800
+DWORD GetWinFlags(void);
 
 /* ------------------------------------------------------------------ libw16 specifics */
 /* where ripped assets live (default ~/.local/share/arch311, env ARCH311_ASSETS) */

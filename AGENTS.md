@@ -51,6 +51,13 @@ NOTHING BOOTS YET.
 | T-SB-01 | bwrap + seccomp + Landlock launcher, virtual C:\\ | |
 | T-BR-01 | QtWebEngine browser with IE5 chrome; T-BR-02 Netscape chrome | ADR-003 |
 | T-APP-nn | Optional clean-room native ports (Notepad, Calc, Clock, Winmine, Sol) | Respect `docs/LEGAL.md` |
+| T-DOS-01 | MS-DOS Prompt starts the built-in DOSBox (C: = arch311's C: drive, 3.11's prompt banner) | ADR-006; needs DOSBox installed |
+| T-WM-APPS | Test real Linux apps under arch311-wm + Qt/GTK styles: Krita first (owner), a GTK app, a CEF window | docs/WM.md; needs an X server (Xvfb) and the apps installed |
+| T-THEME-DARK | Light/Dark toggle in the theme manager: sets only the freedesktop/GTK/Qt colour-scheme preference for Linux apps, never the arch311 theme's look | After the theme manager and the other themes' colours (docs/THEMES.md) |
+| T-MEDIA-01 | MP3 and MP4 players (owner supplies the 3.11 programs): UI decompiled 1:1, playback through libVLC | ADR-007; needs libvlc installed |
+| T-PM-LINUX | Program Manager: Krita item in Accessories (3.11-style icon), Media group with the players | ADR-008; after the Program Manager port |
+| T-ASSOC | Preferred applications: WIN.INI [Extensions] + Associate dialog kept, players default for their formats, synced with xdg-mime | ADR-008 |
+| T-TERM-01 | Port TERMINAL.EXE with a pseudo-terminal back end: the Linux terminal in 3.11's Terminal look | ADR-006 |
 
 ## Known quirks and findings
 - The media is **Windows for Workgroups 3.11** (NetWare/WINPOPUP files present), not plain 3.11.
@@ -511,3 +518,120 @@ a Python model of the decode (session scratchpad, not committed): 0 px. Whole su
 UNTESTED against 3.11 (the rig cannot click): mouse play, winning, the name prompt (g2 runs port-only),
 the sound itself, EGA (640x350) bitmaps, WinHelp, XYZZY; true-colour displays make WINMINE choose the
 monochrome bitmaps (NUMCOLORS -1) as 3.1 would - tests run with W16_COLORS=16.
+
+### Session 9 (Oct 8, Printers worktree) - MAIN.CPL Printers over CUPS; USER's MessageBox
+apps/control/prntcpl.c ports Printers (dialog 1, seg20/21), Connect (12), Install with the unlisted
+path (23, 29, Install Driver 30, Browse 38 on COMMDLG) and printer connections (21, 32, seg17, seg3:0010);
+the data layer is CUPS (apps/control/cups.c through sysexec.c: lpstat -v/-d, lpinfo -l -v/-l -m, lpadmin
+-p -m|-P -v -E / -v / -x, lpoptions -d / -p -o; parsers in cupsparse.c, unit test tests/cups_test.c,
+`make -C apps check`). Mapping: the installed list is the CUPS queues as "NAME on PORT", PORT from
+w16_printer_port (parallel:/dev/lpN = LPT(N+1):, serial:/dev/ttySN = COM(N+1):, else the URI scheme
+upper-cased; Print Setup gets the same queues through w16_set_printer_enum); an entry's driver is its
+WIN.INI [PrinterPorts]/[devices] driver, else "CUPS"; the default is lpstat -d (WIN.INI device= when
+CUPS has none) and lpoptions -d on Close, where WIN.INI is rewritten exactly as 3.1 does; Connect lists
+[ports]' LPTn:/COMn: with 3.1's statuses (COM: GETBASEIRQ; LPT: CUPS lists parallel:/dev/lpN), then
+CUPS's other devices, then the printer's own URI; List of Printers = lpinfo -m; Install makes the queue
+on the first port the name is not installed on, the name from make-and-model (name_1 ... when taken);
+unlisted printers are PPD files (*.ppd, *.ppd.gz) in the Install Driver path, "Current" = lpadmin -P on
+the queue; a network connection is a raw queue named after its port (LPT2) on smb://server/share or the
+URI typed (the password is not kept). CUPS is told before the list changes; a refusal shows the tool's
+message in MAIN.CPL's box. Setup... shows Print Setup (3.1 runs the driver's dialog). ARCH311_SIMULATE:
+ARCH311_SIM_PRINTERS ("[*]NAME=URI;..."; default the reference's two printers, empty = none),
+ARCH311_SIM_NETWORK, ARCH311_SIM_ERROR; the simulated drivers are the user's CONTROL.INF names.
+Verified (regress.sh, scn/printers-{open,connect,default,empty,unlisted}.scn with ref-run -WinIni: two
+printers on TTY.DRV via -Files): every frame 0 px apart (Connect: one row left out, below) and WIN.INI
+after Connect, Set As Default + Print Manager and the empty install byte-identical to 3.11's;
+printers-{install,remove,forbidden,setup,network}.w16 check arch311's own flows. tools/run-cp-test.sh:
+ARCH311_WININI applies ref-run's -WinIni edits (byte-identical to Set-IniKey's output).
+libw16: MessageBox = USER seg42:04F5/0101 (template in system-font units, button width seg3:23BE, no
+MessageBeep, SC_CLOSE removed without Cancel) - also matches color-mbox1/02, color-mbox2/02,
+color-remove/02 and desk-nowall/04, now compared there; w16_dlgt_item; atoms (atom.c); list boxes keep
+the template height through CreateWindow's WM_SIZE, get their scroll bar back, measure tab stops from
+the client edge (seg35:24A6); TabbedTextOut's default tab = 8 x USER's average width (seg6:0992);
+ConfirmRemove (seg6:0000) uses 0x34 (exclamation). Open: 3.11 shows no focus rectangle on Connect's
+preselected port until a key moves it (USER's list caret, seg35:085C/08E1/0C4E; that row is ignored).
+UNTESTED: everything against a real CUPS server or share, admin rights (lpadmin/lpinfo -v "Forbidden"
+handling only simulated), real PPD files, CPlApplet 100/101, Help.
+### Session 9 (Oct 8, Drivers worktree) - DRIVERS.CPL, installable drivers, VER.DLL
+Drivers applet (apps/control/drvcpl.c = DRIVERS.CPL seg1 + seg2, every live function: dialogs 1001
+Drivers, 1003 Add, 1002 Add Unlisted, 1006 Install Driver (path / insert-disk modes), 1004 System
+Setting Change, 1005 Driver Exists, 38 Browse hook; the list from SYSTEM.INI [MCI]/[Drivers] with
+CONTROL.INI [drivers.desc] / SETUP.INF / NE descriptions; Add from SETUP.INF or an OEMSETUP.INF with its
+INF reader and FileCopy over VerInstallFile, [386Enh] device= rewrite, aliases, [boot] drivers=;
+Remove with RenumberAliases), registered as DRIVERS.CPL after MAIN.CPL as 3.11 loads it.
+16-bit drivers never run: libw16/src/driver.c ports USER's installable-driver layer (OpenDriver/
+CloseDriver/SendDriverMessage/GetDriverModuleHandle/DefDriverProc, seg41 + seg2) whose modules are
+native stand-ins answering DRV_QUERYCONFIGURE/INSTALL/REMOVE as each 3.11 driver's DriverProc does
+(table in driver.c: MCIWAVE, MCISEQ, MCICDA, TIMER, MIDIMAP, MSADLIB, MPU401, SNDBLST, SNDBLST2; Setup
+enabled/disabled and the restart prompts checked on the rig); DRV_CONFIGURE shows nothing (TODO: native
+ports of the drivers' setup dialogs, w16_register_driver takes a file name over). OpenDriver fails only
+for a missing file or one without a DriverProc export (MMSOUND.DRV), as USER does.
+Verified (tools/regress.sh, apps/control/tests/drivers*.w16 vs arch311-ref/scn/drivers-*.scn): opening
+and walking the list, the Add list, Add Timer (Driver Exists -> Current, restart prompt), Add Ad Lib
+from A: (files copied, device=vadlibd.386), Unlisted path dialog twice, insert-disk prompt + Cancel,
+Remove (No / Yes, two drivers) - every compared frame 0 px; SYSTEM.INI and CONTROL.INI after each run
+byte-identical to the real run's except the rig's own shell= line and CONTROL.EXE's [MMCPL] block.
+Pending: the three Remove confirmation frames (MessageBox, "pending-compare:" lines) wait for USER's
+MessageBox from the International branch (with it they differ only in the icon: that branch draws
+IDI_EXCLAMATION's monochrome image where 3.11 shows the 16-colour one). Real 3.11 removing "[MCI] MIDI
+Sequencer" says "The [MCI] MIDI  driver has been removed": RemoveBootDriver's StrStrI scans DGROUP past
+[boot] drivers= and cuts "Sequencer" out of the description buffer - fixed here as the brief asks
+(drivers-remyes ignores that text). Browse (COMMDLG on template 38) works but differs from 3.11
+(caption "Open" instead of the template's "Browse", the current directory highlighted, the volume
+label): commdlg.c's business, not compared.
+libw16: VER.DLL (ver.c: VerInstallFile/VerFindFile/GetFileVersionInfo(Size)/VerQueryValue from VER.DLL
+seg3, LZOpenFile's "X.EX_" fallback and SZDD expansion; checked with a scratch harness: SZDD source
+expanded byte-exact, mismatch -> temp.000 -> VIFF_FORCEINSTALL, missing source, VerFindFile flags);
+GetWinFlags; lstrcmp/lstrcmpi with USER seg11's sort weights; sorted list boxes put "[..." last (USER
+seg43:0614 - real 3.11 lists "MIDI Mapper, Timer, [MCI] ..."); <windir>\X.INI is the profile file
+(DRIVERS.CPL rewrites SYSTEM.INI as a file); WritePrivateProfileString(NULL,...) and a default that is
+the output buffer. tools/run-cp-test.sh: ARCH311_A_FILES="NAME ..." puts ripped files on A:.
+UNTESTED: KWAJ-compressed sources (TODO), OEMSETUP.INF installs (dialog 1002), related drivers (Sound
+Blaster + msadlib), alias numbering beyond one, [boot] drivers= drivers, file-in-use (3.1's MMSYSTEM
+keeps [drivers] open from boot; nothing does here), CD-ROM default source (no MSCDEX), Help, Restart Now.
+
+
+### Session 10 (Oct 8, International applet worktree) - International applet (MAIN.CPL seg10-14), USER's MessageBox
+apps/control/intl.c ports dialog 3 "International" (IntlDlgProc seg12:194D) with its Date (seg11:0824),
+Time (seg14:0000), Number (seg13:0000) and Currency (seg10:0139) dialogs and their helpers: countries
+from CONTROL.INF [country], languages and keyboard layouts from SETUP.INF (seg23 INF reader, through
+libw16's LZOpenFile/LZRead/LZSeek/LZClose - plain files only, TODO SZDD), the samples from the clock
+(ARCH311_CLOCK as datetime.c, nanosecond offset so a script's sleeps decide each sample's second), and
+WIN.INI [intl] written as 3.11 writes it. Language / keyboard changes write SYSTEM.INI [boot]
+language.dll (SystemParametersInfo SPI_SETLANGDRIVER: written only, the DLL is not loaded), [boot.
+description] and [keyboard] keyboard.dll; no driver files are copied (installer dialogs 23/30/38 not
+ported) and the layout is not applied (TODO: map it to XKB).
+libw16: DrawText per USER seg6:0571 (merged into Color's port of the same routine); BM_SETCHECK per
+seg25:1E1B (radio buttons move WS_TABSTOP); KERNEL's profile writer (seg1:6CEC, merged with session
+7's: strings cut at control characters and trailing blanks, a key keeps its line up to '=').
+MessageBox: dev's port (Printers, seg42:04F5) is kept, with what this branch's own port had more:
+task-modal boxes without an owner disable the task's windows (seg42:0000/0073), USER's label set
+incl. "&Close" (114) and PSMGetTextExtent's "&&", the arrow cursor while the box is up, -1 -> 0, a
+NULL text leaves the text static out, an invalid owner fails the call (seg1:AB5D). No MessageBeep
+(3.1's MessageBox never beeps). The x=128 puzzle is CS_BYTEALIGNWINDOW: "#32770" moves the frame to
+the nearest multiple of 8 (window.c already does). Icons: USER's GetIconId choice (seg12:040C: the
+icon size with the display's colour count, else the most colours under it) - IDI_EXCLAMATION's
+16-colour image, not the monochrome one; GetDeviceCaps no longer calls a true-colour screen 1 plane x
+1 bit. Dialog manager: SetFocus (seg1:381D) focuses its window after activating the top-level one
+whatever the activation did; WM_INITDIALOG returns the dialog procedure's FALSE (seg25:051C); no
+focus is kept for RestoreDlgFocus while WM_INITDIALOG runs (hwndFocusSave is 0 then) - together an
+MB_DEFBUTTON2 box keeps No focused and default; a child window's DialogBox belongs to its top-level
+window (seg25:08EB).
+apps/mbox: a test program showing one MessageBox whose caption and text are MODULE:ID string resources
+read at run time (no Windows text in the repo); apps/mbox/tests compare it with real 3.11 boxes of
+programs not ported yet (COMMDLG Open/Save As, 386 Enhanced) and check the answer (ini/MBOX.INI).
+Tests use ARCH311_REF_INI=1 (session 7's name for the pristine INI files).
+Verified (WSL, merged with dev ca655a4): `ARCH311_REF=/mnt/c/Users/pikac/arch311-ref tools/regress.sh`
+-> 464 PASS, 0 FAIL, 0 SKIP. International intl*.w16: every compared frame 0 px apart outside the mouse
+pointer, WIN.INI [intl] values, SYSTEM.INI [boot]/[keyboard] for intl-langkbd. Message boxes, all 0 px
+apart: intl-numerr, desk-nowall (215), color-mbox1/2 and color-remove (in the Color tests),
+drivers-remno/remyes/remmap (the Drivers tests' former pending-compare lines), c386-badbg,
+cdlg-missing (2), cdlg-save (2, one MB_DEFBUTTON2) with the button each run pressed; the Drivers and
+Ports restart dialogs with IDI_EXCLAMATION still match. UNTESTED against 3.11: three-button boxes (no
+reference), nested boxes' cascade, task-modal disabling, MB_SYSTEMMODAL (USER draws SysErrorBox
+seg1:9325 for no icon / MB_ICONHAND - TODO, libw16 shows the dialog box; DS_SYSMODAL has no
+SetSysModalWindow), the International Help buttons, error box 808 and the validation boxes other than
+800, LZEXPAND-compressed INF files. libw16's commdlg.c asks "Replace existing file?" without
+MB_DEFBUTTON2 (real COMMDLG: No is the default, cdlg-save/07) - for the COMMDLG port. Rig: the recorder
+(WinCap) sometimes hangs - run captures one per call in the foreground; Git Bash's grep hides CRs,
+check line endings in WSL.
