@@ -1,0 +1,19 @@
+# Minesweeper: Esc (the boss key) minimizes it; Alt and R on the active icon change nothing. Same keys
+# as g.scn, run on real 3.11 as winmine-g (01 the start, 02 the icon; no frame after it).
+# The icon and its title are left out of the comparison: they need USER's icon windows (36 x 36 at the
+# slot of USER seg4:0000) and icon titles in libw16, which this branch does not have - UNTESTED here.
+# regress: sh apps/winmine/tests/run.sh "$TEST" "$OUT"
+# compare: winmine-g/02.png 01.png ignore 320 240 332 260 ignore 4 404 76 462
+# compare: winmine-g/02.png 02.png ignore 320 240 332 260 ignore 4 404 76 462
+# compare: winmine-g/02.png 03.png ignore 320 240 332 260 ignore 4 404 76 462
+sleep 400
+key esc
+sleep 400
+shot shots/01.png
+key alt
+sleep 400
+shot shots/02.png
+key r
+sleep 400
+shot shots/03.png
+quit

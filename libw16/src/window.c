@@ -272,11 +272,16 @@ HWND w16_next_to_paint(HWND root)
 
 int w16_any_paint_pending(void) { return w16_next_to_paint(NULL) != NULL; }
 
+/* A minimized window whose class has an icon gets WM_PAINTICON instead of WM_PAINT: USER draws the
+ * class icon itself (DefWindowProc), so a program that paints its client area in WM_PAINT (WINMINE)
+ * still shows its icon. Without a class icon the program paints the icon in WM_PAINT. */
+UINT w16_paint_msg(HWND h) { return IsIconic(h) && h->cls && h->cls->wc.hIcon ? WM_PAINTICON : WM_PAINT; }
+
 void w16_send_paint_cascade(HWND h)
 {
     if (!w16_valid(h)) return;
     if (needs_paint(h)) {
-        if (!rgn_empty(&h->upd) || h->internal_paint) SendMessage(h, WM_PAINT, 0, 0);
+        if (!rgn_empty(&h->upd) || h->internal_paint) SendMessage(h, w16_paint_msg(h), 0, 0);
         else if (h->need_ncpaint) {
             h->need_ncpaint = 0;
             SendMessage(h, WM_NCPAINT, 1, 0);
@@ -330,7 +335,10 @@ HDC BeginPaint(HWND h, LPPAINTSTRUCT ps)
     ps->hdc = dc;
     if (h->need_erase) {
         h->need_erase = 0;
-        if (IsIconic(h) && !h->cls->wc.hIcon) ps->fErase = !SendMessage(h, WM_ICONERASEBKGND, (WPARAM)dc, 0);
+        /* 3.1 SDK: a minimized window gets WM_ICONERASEBKGND only if its class has an icon (the icon
+         * USER draws for it, WM_PAINTICON); otherwise WM_ERASEBKGND. UNTESTED against real 3.11 with a
+         * desktop colour other than the class brush. */
+        if (IsIconic(h) && h->cls->wc.hIcon) ps->fErase = !SendMessage(h, WM_ICONERASEBKGND, (WPARAM)dc, 0);
         else ps->fErase = !SendMessage(h, WM_ERASEBKGND, (WPARAM)dc, 0);
     }
     return dc;

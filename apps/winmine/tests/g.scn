@@ -1,0 +1,8 @@
+# Minesweeper: Esc (the boss key) minimizes it; then Alt and R with the icon active (real 3.11 shows
+# no new frame after the icon's: the icon stays)
+key esc
+shot
+key alt
+shot
+key r
+shot

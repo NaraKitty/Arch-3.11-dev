@@ -885,7 +885,7 @@ LRESULT DispatchMessage(const MSG *m)
     }
     if (m->message == WM_PAINT) {
         HWND h = m->hwnd;
-        LRESULT r = SendMessage(h, WM_PAINT, 0, 0);
+        LRESULT r = SendMessage(h, w16_paint_msg(h), 0, 0);
         /* an app that does not call BeginPaint must not loop forever */
         if (w16_valid(h) && (!rgn_empty(&h->upd) || h->need_ncpaint)) {
             if (h->need_ncpaint) { h->need_ncpaint = 0; SendMessage(h, WM_NCPAINT, 1, 0); }
@@ -985,6 +985,7 @@ LRESULT DefWindowProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         return strlen((char *)lp);
     }
     case WM_GETTEXTLENGTH: return strlen(h->text);
+    case WM_PAINTICON:
     case WM_PAINT: {
         PAINTSTRUCT ps;
         BeginPaint(h, &ps);

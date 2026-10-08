@@ -517,11 +517,13 @@ void w16_maximize(HWND h)
     SendMessage(h, WM_MOVE, 0, MAKELPARAM(h->rc.left, h->rc.top));
 }
 
+/* Restoring does not make the icon's place stick: USER's MinMaximize (seg6:1BC2) forgets the icon
+ * position and takes a free slot (seg4:0000) on the next minimize unless the checkpoint says the icon
+ * was moved (flag set at seg6:123B when a move ends on an icon: track_rect below). */
 void w16_restore(HWND h)
 {
     RECT old = h->rw;
     int was_min = (h->style & WS_MINIMIZE) != 0;
-    if (was_min) h->iconpos = (POINT){h->rw.left, h->rw.top}, h->has_iconpos = 1;
     h->style &= ~(WS_MINIMIZE | WS_MAXIMIZE);
     w16_invalidate_screen_rect(&old);
     if (was_min) w16_invalidate_screen_rect(&(RECT){old.left - 24, old.top, old.right + 24, old.top + 64});
@@ -606,6 +608,8 @@ static void track_rect(HWND h, int hit, POINT start)
         if (h->parent && h->parent != w16_desktop) pr = h->parent->rc;
         SetWindowPos(h, NULL, r.left - pr.left, r.top - pr.top, r.right - r.left, r.bottom - r.top,
                      SWP_NOZORDER | SWP_NOACTIVATE);
+        /* an icon moved by the user keeps its place (USER seg6:123B sets the checkpoint flag) */
+        if (IsIconic(h)) h->iconpos = (POINT){r.left, r.top}, h->has_iconpos = 1;
     }
 }
 

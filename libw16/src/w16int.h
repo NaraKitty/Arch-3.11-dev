@@ -223,6 +223,7 @@ HWND w16_top_level(HWND h);
 int w16_window_visible(HWND h); /* visible including ancestors */
 void w16_activate(HWND h, int how);
 void w16_send_paint_cascade(HWND h); /* UpdateWindow semantics */
+UINT w16_paint_msg(HWND h);          /* WM_PAINT, or WM_PAINTICON for an icon with a class icon */
 void w16_destroy_children(HWND h);
 
 /* non-client */
