@@ -1,3 +1,12 @@
+# Minesweeper with WINMINE.INI Menu=1 (no menu bar), Intermediate, Xpos=10, Ypos=30 (f.ini): F6 shows
+# the menu bar (the window stays, its client moves down), F5 hides it. Same keys as f.scn, run on
+# real 3.11 as arch311-ref/scn/winmine-f.scn. No setting changes, so WINMINE.INI is not written.
+# regress: WINMINE_INI=apps/winmine/tests/f.ini sh apps/winmine/tests/run.sh "$TEST" "$OUT"
+# compare: winmine-f/01.png 01.png ignore 320 240 332 260
+# compare: winmine-f/02.png 02.png ignore 320 240 332 260
+# compare: winmine-f/03.png 03.png ignore 320 240 332 260
+# ini: WINMINE.INI Minesweeper Menu=1
+# ini: WINMINE.INI Minesweeper Ypos=30
 sleep 400
 sleep 400
 shot shots/01.png

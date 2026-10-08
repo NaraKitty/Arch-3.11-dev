@@ -1,5 +1,7 @@
 # Winning the beginner game of WINMINE_SEED=1 (32 clicks, all on boxes without mines): the name
 # prompt for the record, a typed name, Best Times, then Exit (WINMINE.INI gets Time1 and Name1).
+# No real-3.11 frames (the rig cannot click); the time is 1 or 2 seconds, as the clock ticks.
+# regress: sh apps/winmine/tests/run.sh "$TEST" "$OUT"
 sleep 500
 click 163 142
 click 99 238

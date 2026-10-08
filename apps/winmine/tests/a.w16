@@ -1,3 +1,10 @@
+# Minesweeper: the start screen (Beginner), the Game and Help menus. Same keys as a.scn
+# (tools/ref311/scenario.py w16 a.scn), run on real 3.11 as arch311-ref/scn/winmine-a.scn.
+# regress: sh apps/winmine/tests/run.sh "$TEST" "$OUT"
+# compare: winmine-a/01.png 01.png ignore 320 240 332 260
+# compare: winmine-a/02.png 02.png ignore 320 240 332 260
+# compare: winmine-a/03.png 03.png ignore 320 240 332 260
+# compare: winmine-a/04.png 04.png ignore 320 240 332 260
 sleep 400
 sleep 400
 shot shots/01.png

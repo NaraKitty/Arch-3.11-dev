@@ -1,3 +1,23 @@
+# Minesweeper: Intermediate, Expert, Beginner, then Exit, which writes WINMINE.INI (a new file).
+# Same keys as b.scn, run on real 3.11 as arch311-ref/scn/winmine-b.scn.
+# regress: sh apps/winmine/tests/run.sh "$TEST" "$OUT"
+# compare: winmine-b/02.png 01.png ignore 320 240 332 260
+# compare: winmine-b/03.png 02.png ignore 320 240 332 260
+# compare: winmine-b/04.png 03.png ignore 320 240 332 260
+# ini: WINMINE.INI Minesweeper Difficulty=0
+# ini: WINMINE.INI Minesweeper Height=8
+# ini: WINMINE.INI Minesweeper Width=8
+# ini: WINMINE.INI Minesweeper Mines=10
+# ini: WINMINE.INI Minesweeper Mark=1
+# ini: WINMINE.INI Minesweeper Color=1
+# ini: WINMINE.INI Minesweeper Xpos=80
+# ini: WINMINE.INI Minesweeper Ypos=80
+# ini: WINMINE.INI Minesweeper Time1=999
+# ini: WINMINE.INI Minesweeper Time2=999
+# ini: WINMINE.INI Minesweeper Time3=999
+# ini: WINMINE.INI Minesweeper Name1=Anonymous
+# ini: WINMINE.INI Minesweeper Name2=Anonymous
+# ini: WINMINE.INI Minesweeper Name3=Anonymous
 sleep 400
 key alt
 key g
