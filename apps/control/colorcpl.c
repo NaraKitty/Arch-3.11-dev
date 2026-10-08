@@ -7,7 +7,16 @@
  * is applied before OK, which calls SetSysColors and writes WIN.INI [colors] and CONTROL.INI
  * [current] (and [Custom Colors] once a custom colour was added). "Windows Default" and the 48 basic
  * colours come from the display driver's OEMBIN resources #1 and #2 (the user's ripped VGA.DRV),
- * read at run time. Original bugs that only corrupt memory are not reproduced (see the notes). */
+ * read at run time. Original bugs that only corrupt memory are not reproduced (see the notes).
+ *
+ * Verified against real 3.11 on VGA (tests/color*.w16 in 16 colours, tools/regress.sh): the dialog
+ * as opened, all 22 schemes in the sample, the palette (element combo, basic grid focus and
+ * selection), the Custom Color Selector (typed hue/sat/lum, Add Color, Close), Save Scheme, Remove
+ * Scheme with its confirmation, OK (the repaint in the new colours, WIN.INI [colors], CONTROL.INI
+ * [current] and [Custom Colors]). UNTESTED (the rig types keys only): every mouse path - clicks in
+ * the sample, on colour boxes (also Ctrl/Shift with the selector open), the crosshair and the
+ * luminosity arrow, the cpArrow spin buttons; the selector's own arrow keys; Color|Solid (Alt+O);
+ * Help; Save Scheme over an existing name; true-colour drawing. */
 #include "maincpl.h"
 #include <stdlib.h>
 #include <string.h>

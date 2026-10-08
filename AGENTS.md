@@ -385,3 +385,38 @@ KEY=VALUE`. `shot`/`shotcaret` now also append the active window's rectangle to 
 pointer, which sits at 320,240, stay out). First run: 30 checks in 30 s, all PASS (Ports both
 scenarios, Sound with and without a wave device, Keyboard, Mouse, Notepad hello; INI values for Ports
 and Sound). New applet tests should carry these lines; I merge branches only with the run green.
+
+### Session 7 (Oct 8, Color applet worktree) - MAIN.CPL Color, VGA colour matching, MessageBox
+Color applet (apps/control/colorcpl.c = MAIN.CPL seg6/seg7 with seg1:191B, seg4:00E5, seg23:07E1;
+seg3:0756 runs it with the private loop seg3:06AE): dialog 100 with the sample screen and the palette
+half, Save Scheme (27), the modeless Custom Color Selector (26). Windows Default and the basic colours
+come from VGA.DRV's OEMBIN #1/#2, MAIN.CPL's fallback colours from its own data segment (ds:02CE) - all
+read at run time. Color is the first icon, so its tests open it with Enter like the real scenarios.
+Verified in 16 colours (W16_COLORS=16) with tools/regress.sh, tests apps/control/tests/color*.w16 vs
+arch311-ref/scn/color-*.scn: opened, every scheme (23 frames), palette, custom colour, OK (Control
+Panel repainted in Arizona; WIN.INI [colors] and CONTROL.INI [current]/[Custom Colors] equal to real
+3.11's), Save Scheme (CONTROL.INI), Remove Scheme and three confirmation boxes - all PASS, as do the
+other applets' and Notepad's tests. UNTESTED: every mouse path (the rig types keys only), Help, the
+selector's own arrow keys, Color|Solid, Save over an existing name, true-colour drawing.
+libw16 (each from the 3.1 code named):
+- 16-colour mode matches VGA.DRV, tables read from the user's VGA.DRV: nearest colour seg1:1956,
+  dither seg1:24A1, RealizeObject seg1:292A (white/black and driver colours solid, E0E0E0+0x10 = the
+  scroll bar's 50% pattern, others dithered); brush patterns start at the DC origin + brush origin.
+- SetSysColors (seg41:0C06) and USER's start-up (seg3:0748, its reader 06D7) make the text-like colours
+  solid (GetNearestColor) and flag E0E0E0 scroll bars; SetSysColors broadcasts WM_SYSCOLORCHANGE and
+  redraws everything. nc.c fills frames and captions with brushes, so e.g. Arizona's caption dithers.
+- Dialog manager: CheckDefPushButton (seg25:0B5B), ClearDefaults (0AB2), Save/RestoreDlgFocus
+  (03A8/03E3), DlgSetFocus (0000); the default button changes only on the focus moves IsDialogMessage
+  makes (Tab, arrows, mnemonics, clicks), activation and DM_SETDEFID; a disabled default push button
+  draws plain (seg25:18BC).
+- MessageBox = USER seg42:04F5 + MB_DlgProc seg42:0101: an in-memory template in system-font units,
+  buttons 2 x "0" wider than the longest label (seg3:23BE), CS_BYTEALIGNWINDOW then places it (that
+  explains real boxes 1 px right of the arithmetic). No MessageBeep - 3.1's MessageBox plays none.
+- DrawText = USER seg6:0571 (wrapped lines keep their trailing blank for centring and for
+  DT_CALCRECT); GrayString's stipple follows the text origin; owner-draw drop-down lists (seg33/34);
+  CombineRgn/PtInRegion/FillRgn, ClipCursor, w16_module_data (a module's segment bytes).
+- tools/regress.sh: `# ini:` takes a bracketed section with spaces ([Custom Colors]).
+Rig notes: the frame recorder drops a shot identical to the previous one, so count frames by what
+changed; a letter typed while a control wants characters (the colour grids) is no mnemonic; after a
+message box closed with "n", real 3.11 leaves one black pixel at the Color dialog's client origin
+(both runs, not understood; ignored in color-mbox.w16).
