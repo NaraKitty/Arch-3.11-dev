@@ -145,6 +145,7 @@ void w16_track_sb(HWND h, HWND notifywin, int bar, int x, int y, int ctl)
     int code = w16_sb_hit(&r, vert, s, x, y, &part);
     if (code == 0) { ReleaseDC(h, dc); return; }
     HWND nctl = ctl ? h : NULL;
+    HWND bgw = ctl ? h->parent : h; /* whose background fills a disabled trough */
     int sb_code = code == 1 ? SB_LINEUP : code == 2 ? SB_PAGEUP : code == 4 ? SB_PAGEDOWN : SB_LINEDOWN;
     SetCapture(h);
     MSG m;
@@ -171,7 +172,7 @@ void w16_track_sb(HWND h, HWND notifywin, int bar, int x, int y, int ctl)
                 if (far) np = s->pos;
                 if (np != ts.pos || m.message == WM_LBUTTONUP) {
                     ts.pos = np;
-                    w16_draw_sb_ctl(dc, &local, vert, &ts, 0, 1);
+                    w16_draw_sb_ctl(dc, &local, vert, &ts, 0, 1, bgw);
                     if (np != lastpos) notify(notifywin, nctl, vert, SB_THUMBTRACK, np);
                     lastpos = np;
                 }
@@ -182,7 +183,7 @@ void w16_track_sb(HWND h, HWND notifywin, int bar, int x, int y, int ctl)
             } else if (m.message == WM_PAINT || m.message == WM_TIMER) DispatchMessage(&m);
         }
     } else {
-        w16_draw_sb_ctl(dc, &local, vert, s, code, 1);
+        w16_draw_sb_ctl(dc, &local, vert, s, code, 1, bgw);
         notify(notifywin, nctl, vert, sb_code, s->pos);
         DWORD next = GetTickCount() + 400;
         int inside = 1;
@@ -195,7 +196,7 @@ void w16_track_sb(HWND h, HWND notifywin, int bar, int x, int y, int ctl)
                     RECT p2;
                     int c2 = w16_sb_hit(&r, vert, s, mm.pt.x, mm.pt.y, &p2);
                     inside = c2 == code && PtInRect(&r, mm.pt);
-                    w16_draw_sb_ctl(dc, &local, vert, s, inside ? code : 0, 1);
+                    w16_draw_sb_ctl(dc, &local, vert, s, inside ? code : 0, 1, bgw);
                 } else if (mm.message == WM_PAINT) DispatchMessage(&mm);
                 continue;
             }
@@ -209,12 +210,12 @@ void w16_track_sb(HWND h, HWND notifywin, int bar, int x, int y, int ctl)
                         if (c2 != code) continue;
                     }
                     notify(notifywin, nctl, vert, sb_code, s->pos);
-                    w16_draw_sb_ctl(dc, &local, vert, s, code, 1);
+                    w16_draw_sb_ctl(dc, &local, vert, s, code, 1, bgw);
                 }
             }
             w16_pump(10);
         }
-        w16_draw_sb_ctl(dc, &local, vert, s, 0, 1);
+        w16_draw_sb_ctl(dc, &local, vert, s, 0, 1, bgw);
     }
     ReleaseCapture();
     notify(notifywin, nctl, vert, SB_ENDSCROLL, s->pos);
@@ -236,7 +237,7 @@ LRESULT w16_scrollbar_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         RECT r;
         GetClientRect(h, &r);
         if (h->style & SBS_SIZEBOX) FillRect(dc, &r, w16_sys_brush(COLOR_SCROLLBAR));
-        else w16_draw_sb_ctl(dc, &r, (h->style & SBS_VERT) != 0, bar_of(h, SB_CTL), 0, !(h->style & WS_DISABLED));
+        else w16_draw_sb_ctl(dc, &r, (h->style & SBS_VERT) != 0, bar_of(h, SB_CTL), 0, !(h->style & WS_DISABLED), h->parent);
         EndPaint(h, &ps);
         if (GetFocus() == h) place_focus_caret(h);
         return 0;

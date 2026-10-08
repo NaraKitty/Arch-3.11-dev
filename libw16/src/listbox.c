@@ -4,7 +4,7 @@
 
 WORD w16_cmd_slot(HWND h);
 
-typedef struct { char *s; DWORD data; int sel; int h; } LbItem;
+typedef struct { char *s; ULONG_PTR data; int sel; int h; } LbItem;
 typedef struct {
     LbItem *it;
     int n, cap;
@@ -17,6 +17,8 @@ typedef struct {
     int tabs[32];
     HWND combo;       /* owning combobox, if any */
     int redraw_off;
+    int want_h;       /* height asked for inside the border; whole items of it are shown */
+    int fitting;      /* fit_height is resizing the window */
 } Lb;
 
 static Lb *lbd(HWND h) { return (Lb *)h->ctl; }
@@ -52,6 +54,9 @@ static void update_sb(HWND h)
         if (h->sb[1].max != 0 || h->sb[1].min != 0) SetScrollRange(h, SB_VERT, 0, 0, TRUE);
         return;
     }
+    /* LBS_DISABLENOSCROLL keeps the bar, with both arrows disabled while everything fits */
+    if ((h->style & LBS_DISABLENOSCROLL) && h->sb[1].disabled != (mx ? ESB_ENABLE_BOTH : ESB_DISABLE_BOTH))
+        EnableScrollBar(h, SB_VERT, mx ? ESB_ENABLE_BOTH : ESB_DISABLE_BOTH);
     SetScrollRange(h, SB_VERT, 0, max(mx, 1), FALSE);
     SetScrollPos(h, SB_VERT, l->top, TRUE);
 }
@@ -75,7 +80,8 @@ static void draw_item(HWND h, HDC dc, int i, HBRUSH bg)
     FillRect(dc, &ir, sel ? w16_sys_brush(COLOR_HIGHLIGHT) : bg);
     if (i >= l->n) return;
     SetBkMode(dc, TRANSPARENT);
-    COLORREF old = SetTextColor(dc, sel ? GetSysColor(COLOR_HIGHLIGHTTEXT) : (h->style & WS_DISABLED) ? GetSysColor(COLOR_GRAYTEXT) : GetTextColor(dc));
+    /* a disabled list grays every item, the selected one too (on the highlight) */
+    COLORREF old = SetTextColor(dc, (h->style & WS_DISABLED) ? GetSysColor(COLOR_GRAYTEXT) : sel ? GetSysColor(COLOR_HIGHLIGHTTEXT) : GetTextColor(dc));
     const char *s = l->it[i].s ? l->it[i].s : "";
     if (h->style & LBS_USETABSTOPS) TabbedTextOut(dc, 2, y, s, strlen(s), l->ntabs, l->ntabs ? l->tabs : NULL, 2);
     else TextOut(dc, 2, y, s, strlen(s));
@@ -119,7 +125,7 @@ static void ensure_visible(HWND h, int i)
     update_sb(h);
 }
 
-static int insert(HWND h, int pos, const char *s, DWORD data)
+static int insert(HWND h, int pos, const char *s, ULONG_PTR data)
 {
     Lb *l = lbd(h);
     if (l->n == l->cap) {
@@ -140,7 +146,7 @@ static int insert(HWND h, int pos, const char *s, DWORD data)
     return pos;
 }
 
-static int sorted_pos(HWND h, const char *s, DWORD data)
+static int sorted_pos(HWND h, const char *s, ULONG_PTR data)
 {
     Lb *l = lbd(h);
     for (int i = 0; i < l->n; i++) {
@@ -189,6 +195,24 @@ static int item_at(HWND h, int y)
     return i;
 }
 
+/* unless LBS_NOINTEGRALHEIGHT, a list box shows whole items only: the height it was given is cut
+ * down to whole items of the current font, again whenever the font or item height changes (on
+ * 3.11, SND.CPL's lists come out 8 items of 13 px high from a 114 px template height) */
+static void fit_height(HWND h)
+{
+    Lb *l = lbd(h);
+    if ((h->style & (LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWVARIABLE)) || l->combo || l->ih <= 0) return;
+    RECT r;
+    GetClientRect(h, &r);
+    int want = l->want_h / l->ih * l->ih;
+    if (want <= 0 || want == r.bottom) return;
+    RECT pr = h->parent && h->parent != w16_desktop ? h->parent->rc : (RECT){0, 0, 0, 0};
+    l->fitting = 1;
+    SetWindowPos(h, NULL, h->rw.left - pr.left, h->rw.top - pr.top, h->rw.right - h->rw.left,
+                 h->rw.bottom - h->rw.top - (r.bottom - want), SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+    l->fitting = 0;
+}
+
 LRESULT w16_listbox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
 {
     Lb *l = lbd(h);
@@ -213,16 +237,23 @@ LRESULT w16_listbox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
             SendMessage(l->combo ? l->combo->parent : h->parent, WM_MEASUREITEM, h->id, (LPARAM)&mi);
             if (mi.itemHeight) l->ih = mi.itemHeight;
         }
-        if (!(h->style & LBS_NOINTEGRALHEIGHT) && !l->combo) {
+        if ((h->style & WS_BORDER) && !l->combo) {
+            /* 3.1 puts a list box's border around the rectangle it was given, which stays the area
+             * inside (measured on 3.11: SND.CPL's lists are a border wider on every side than
+             * their template rectangles) */
+            RECT pr = h->parent && h->parent != w16_desktop ? h->parent->rc : (RECT){0, 0, 0, 0};
+            int bx = GetSystemMetrics(SM_CXBORDER), by = GetSystemMetrics(SM_CYBORDER);
+            l->fitting = 1;
+            SetWindowPos(h, NULL, h->rw.left - pr.left - bx, h->rw.top - pr.top - by, h->rw.right - h->rw.left + 2 * bx,
+                         h->rw.bottom - h->rw.top + 2 * by, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+            l->fitting = 0;
+        }
+        {
             RECT r;
             GetClientRect(h, &r);
-            int want = (r.bottom / l->ih) * l->ih;
-            if (want != r.bottom && want > 0) {
-                RECT pr = h->parent && h->parent != w16_desktop ? h->parent->rc : (RECT){0, 0, 0, 0};
-                SetWindowPos(h, NULL, h->rw.left - pr.left, h->rw.top - pr.top, h->rw.right - h->rw.left,
-                             h->rw.bottom - h->rw.top - (r.bottom - want), SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
-            }
+            l->want_h = r.bottom;
         }
+        fit_height(h);
         if (h->style & WS_VSCROLL) {
             if (h->style & LBS_DISABLENOSCROLL) SetScrollRange(h, SB_VERT, 0, 1, FALSE);
             else SetScrollRange(h, SB_VERT, 0, 0, FALSE);
@@ -252,11 +283,21 @@ LRESULT w16_listbox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         GetTextMetrics(dc, &tm);
         ReleaseDC(h, dc);
         if (!ownerdraw(h)) l->ih = tm.tmHeight;
+        fit_height(h);
         if (lp) InvalidateRect(h, NULL, TRUE);
         return 0;
     }
     case WM_GETFONT: return (LRESULT)h->font;
-    case WM_SIZE: update_sb(h); return 0;
+    case WM_SIZE:
+        if (!l->fitting) {
+            /* resized from outside: that height is the one to fit */
+            RECT r;
+            GetClientRect(h, &r);
+            l->want_h = r.bottom;
+            fit_height(h);
+        }
+        update_sb(h);
+        return 0;
     case WM_SETREDRAW: l->redraw_off = !wp; if (wp) { update_sb(h); InvalidateRect(h, NULL, TRUE); } return 0;
     case WM_GETDLGCODE: return DLGC_WANTARROWS | DLGC_WANTCHARS;
     case WM_SETFOCUS: l->focus = 1; redraw(h); lb_notify(h, LBN_SETFOCUS); return 0;
@@ -379,10 +420,10 @@ LRESULT w16_listbox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     }
     case LB_ADDSTRING: {
         const char *s = (const char *)lp;
-        int pos = (h->style & LBS_SORT) ? sorted_pos(h, has_strings(h) ? s : "", (DWORD)lp) : l->n;
-        return insert(h, pos, has_strings(h) ? s : NULL, (DWORD)lp);
+        int pos = (h->style & LBS_SORT) ? sorted_pos(h, has_strings(h) ? s : "", (ULONG_PTR)lp) : l->n;
+        return insert(h, pos, has_strings(h) ? s : NULL, (ULONG_PTR)lp);
     }
-    case LB_INSERTSTRING: return insert(h, (int)(SHORT)wp, has_strings(h) ? (const char *)lp : NULL, (DWORD)lp);
+    case LB_INSERTSTRING: return insert(h, (int)(SHORT)wp, has_strings(h) ? (const char *)lp : NULL, (ULONG_PTR)lp);
     case LB_DELETESTRING: {
         int i = (int)wp;
         if (i < 0 || i >= l->n) return LB_ERR;
@@ -434,13 +475,13 @@ LRESULT w16_listbox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     case LB_GETTEXT: {
         int i = (int)wp;
         if (i < 0 || i >= l->n) return LB_ERR;
-        if (!has_strings(h)) { *(DWORD *)lp = l->it[i].data; return 4; }
+        if (!has_strings(h)) { *(DWORD *)lp = (DWORD)l->it[i].data; return 4; }
         strcpy((char *)lp, l->it[i].s ? l->it[i].s : "");
         return strlen((char *)lp);
     }
     case LB_GETTEXTLEN: { int i = (int)wp; if (i < 0 || i >= l->n) return LB_ERR; return has_strings(h) ? (int)strlen(l->it[i].s ? l->it[i].s : "") : 4; }
     case LB_GETITEMDATA: { int i = (int)wp; if (i < 0 || i >= l->n) return LB_ERR; return l->it[i].data; }
-    case LB_SETITEMDATA: { int i = (int)wp; if (i < 0 || i >= l->n) return LB_ERR; l->it[i].data = (DWORD)lp; return 0; }
+    case LB_SETITEMDATA: { int i = (int)wp; if (i < 0 || i >= l->n) return LB_ERR; l->it[i].data = (ULONG_PTR)lp; return 0; }
     case LB_FINDSTRING: return find_string(h, (int)(SHORT)wp, (const char *)lp, 0);
     case LB_FINDSTRINGEXACT: return find_string(h, (int)(SHORT)wp, (const char *)lp, 1);
     case LB_SELECTSTRING: {
@@ -457,7 +498,7 @@ LRESULT w16_listbox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         SetRect((RECT *)lp, 0, (i - l->top) * l->ih, r.right, (i - l->top + 1) * l->ih);
         return 1;
     }
-    case LB_SETITEMHEIGHT: l->ih = max(1, (int)LOWORD(lp)); update_sb(h); InvalidateRect(h, NULL, TRUE); return 0;
+    case LB_SETITEMHEIGHT: l->ih = max(1, (int)LOWORD(lp)); fit_height(h); update_sb(h); InvalidateRect(h, NULL, TRUE); return 0;
     case LB_GETITEMHEIGHT: return l->ih;
     case LB_SETTABSTOPS: {
         W16Dialog *d = w16_dlg(h->parent);
@@ -471,13 +512,7 @@ LRESULT w16_listbox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     case LB_SETCOLUMNWIDTH: l->colw = (int)wp; return 0;
     case LB_GETHORIZONTALEXTENT: return l->hext;
     case LB_SETHORIZONTALEXTENT: l->hext = (int)wp; return 0;
-    case LB_DIR: {
-        extern int w16_wildmatch(const char *p, const char *s);
-        char path[260];
-        snprintf(path, sizeof path, "%s", (const char *)lp);
-        /* reuse the dialog helper by temporarily acting as an item of our parent */
-        return 0;
-    }
+    case LB_DIR: return w16_dir_add(h, (UINT)wp, (LPCSTR)lp, 0);
     }
     return DefWindowProc(h, m, wp, lp);
 }

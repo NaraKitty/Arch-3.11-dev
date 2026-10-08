@@ -871,15 +871,6 @@ int w16_modal_loop_step(MSG *m)
     return 1;
 }
 
-void MessageBeep(UINT t)
-{
-    (void)t;
-    if (GetProfileString("windows", "Beep", "yes", (char[8]){0}, 8) && !headless) {
-        /* TODO(T-SND-01): play through the system sound (SDL audio / canberra) */
-        fputc('\a', stderr);
-    }
-}
-
 /* ------------------------------------------------------------------ DefWindowProc */
 static HCURSOR size_cursor(int hit)
 {

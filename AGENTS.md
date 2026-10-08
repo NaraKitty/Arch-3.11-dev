@@ -264,3 +264,53 @@ seg9:0CBC), Ports (4, seg19:062E), Printers (1, seg20:1302); Internet applet; CE
 Scroll-bar controls now show USER's focus caret (seg18:0A48/06F4: a gray caret, 2 px inside the thumb,
 following it); gray carets (CreateCaret bitmap 1) invert odd x + y. The Mouse dialog's first frame with
 the focused, blinking thumb matches real 3.11. Test scripts: `shotcaret` keeps the caret in the shot.
+
+### Session 6 (Oct 8) - Sound applet, MMSYSTEM sounds, LB_DIR, C:\WINDOWS, list box geometry
+Sound applet (apps/control/sndcpl.c = SND.CPL seg1 CPlApplet + seg2 dialog 42), registered after
+MAIN.CPL. Verified against real 3.11 in two configurations (scn/sound.scn, scn/sound2.scn vs
+apps/control/tests/sound.sh + sound.w16 / sound2.w16):
+- no wave device (the rig's default, ARCH311_WAVEDEVS=0): lists and Test disabled, focus OK -> Cancel ->
+  Help -> check box: all four dialog frames pixel-identical (only the mouse pointer differs);
+- Sound Blaster 1.5 (sndblst2.drv + vsbd.386 from the rip, DOSBox-X sbtype=sb2, nosound): open, Critical
+  Stop, Files focused, chimes.wav picked: all pixel-identical; after OK, WIN.INI [sounds] is exactly what
+  real 3.11 wrote ([Sounds] removed, "[sounds]" appended at the end in Events-list order, the changed
+  event as "SystemHand=C:\WINDOWS\CHIMES.WAV,Critical Stop", the others re-written without the blank).
+- Test passes the selected file to sndPlaySound (tests/sound3.w16, headless log). UNTESTED: real audio
+  (WSL has no sound server; pw-play/paplay/aplay are found in PATH on Arch).
+libw16:
+- mmsystem.c: sndPlaySound with MMSYSTEM's rules (seg3:0000/0090/0229/05B1: [sounds] name or file name,
+  OpenFile search, RIFF WAVE check, SystemDefault fallback unless SND_NODEFAULT, NULL stops, "" succeeds,
+  SND_NOSTOP/LOOP/MEMORY); one player process (pw-play, paplay or aplay via posix_spawnp, no shell) at a
+  time. waveOutGetNumDevs = 1 when a player exists (ARCH311_WAVEDEVS overrides). Headless runs log the
+  file instead of playing. MessageBeep plays SystemDefault/Hand/Question/Exclamation/Asterisk as
+  MMSOUND.DRV's DoBeep (seg1:000A) does, only while WIN.INI Beep is on (SPI_GET/SETBEEP, w16_beep).
+- C:\WINDOWS and C:\WINDOWS\SYSTEM are mounted on the ripped files (unless the C: folder has a WINDOWS
+  directory or the drives file has a "C:\WINDOWS=/path" line); listings show mount points as directories.
+  DOS paths resolve "." / ".." and trailing dots in DOS terms; OpenFile searches the current, Windows and
+  system directories for bare names and returns the full upper-case path; OemToAnsi/AnsiToOem copy;
+  SetErrorMode; DDL_* constants.
+- LB_DIR (was a stub) and DlgDirList share w16_dir_add: sorted lists keep USER's directory order (files,
+  then [dirs] with [..] first, then [-x-] drives - as on 3.11); DlgDirList makes the path's directory
+  current; DlgDirSelect appends "." to extensionless names.
+- List boxes: a WS_BORDER list's border goes around the rectangle it was given (measured: SND.CPL's lists
+  are 1 px larger on every side than their template rects); whole-item height is redone when the font
+  changes (8 x 13 px from a 114 px template); a disabled list grays the selected item too; its own scroll
+  bar stays live (3.11 keeps the Files list's arrows and thumb); LBS_DISABLENOSCROLL uses ESB_DISABLE_BOTH.
+- A scroll bar with both arrows disabled fills its trough with the window's class background / COLOR_WINDOW
+  (USER seg18:02DA + seg1:6355), not COLOR_SCROLLBAR.
+- The gray halftone (DrawFocusRect, gray carets) follows the DC origin: SND.CPL's OK button at (380,85)
+  settles the screen-vs-window question left open in session 5.
+- Dialogs whose WM_INITDIALOG returns FALSE without setting focus get it on the first tab stop enabled by
+  then (Sound disables its lists there; OK gets the focus on 3.11).
+- List/combo item data is pointer-sized (ULONG_PTR, as Win32) - ports keep pointers there.
+- Note: LocalAlloc returns a MemH handle even for LMEM_FIXED, not the memory: ports that rely on fixed
+  local handles being pointers must LocalLock (SND.CPL's item strings use malloc instead).
+Regression: Keyboard, Mouse (0 differing pixels) and Date/Time dialogs unchanged.
+Rig: ref-run.ps1 -SysIni (and '+section/key=value' to add a line), -Files (copied into WINDOWS\SYSTEM),
+-Dosbox (extra DOSBox-X lines); each -Name runs in its own run-<Name> folder, so captures can run in
+parallel and the drive is kept for checking INI files. Run the captures with pwsh 7 (WinCap.cs needs
+.NET 6); a pwsh started from the PowerShell tool's background mode hung once - use Bash + pwsh.exe.
+Decodes of the remaining MAIN.CPL applets (Desktop, International, Ports + Fonts, Printers, Color) were
+written to the session scratchpad (derived from the disassembly: never commit them).
+NEXT: port Desktop, Color, International, Ports, Fonts, Printers from those decodes; then DRIVERS.CPL,
+CPWIN386.CPL and the Internet applet; CEF spike (download still needs the owner's OK).

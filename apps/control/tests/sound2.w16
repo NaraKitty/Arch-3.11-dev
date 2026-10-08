@@ -1,0 +1,26 @@
+# Sound applet with a wave device: ARCH311_WAVEDEVS=1 sh tests/sound.sh tests/sound2.w16
+# Same keys as arch311-ref/scn/sound2.scn: Critical Stop gets chimes.wav, then OK
+sleep 600
+key right
+key right
+key right
+key right
+key enter
+sleep 600
+shot shots/01-open.png
+key down
+sleep 200
+shot shots/02-critical.png
+key tab
+sleep 200
+shot shots/03-files.png
+key up
+sleep 200
+shot shots/04-chimes.png
+key tab
+sleep 200
+shot shots/05-ok.png
+key enter
+sleep 400
+shot shots/06-closed.png
+quit

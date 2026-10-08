@@ -24,6 +24,10 @@ param(
     [string]$Scenario = '',    # a .scn file (scenario.py); replaces -Keys
     [string[]]$Dos = @(),      # DOS commands run before Windows starts (e.g. 'date 11-08-1993')
     [string[]]$WinIni = @(),   # WIN.INI settings, 'section/key=value' (e.g. 'intl/sDate=-')
+    [string[]]$SysIni = @(),   # SYSTEM.INI settings, the same; '+section/key=value' adds a line
+                               # even if the key exists (e.g. '+386Enh/device=vsbd.386')
+    [string[]]$Files = @(),    # files copied into C:\WINDOWS\SYSTEM (drivers from the rip)
+    [string[]]$Dosbox = @(),   # extra DOSBox-X config lines (e.g. '[sblaster]','sbtype=sb2')
     [int]$Tolerance = 80       # pixels that may change in a 'stable' frame (caret 80; focused
                                # scroll bar, whose thumb blinks, needs about 300)
 )
@@ -31,7 +35,9 @@ $ErrorActionPreference = 'Stop'
 if ($Scenario) { $Keys = @(python -I (Join-Path $PSScriptRoot 'scenario.py') autotype $Scenario) }
 if (-not ('WinCap' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'WinCap.cs') }
 
-$drive = Join-Path $RefDir 'run'
+# each -Name gets its own drive and config, so several runs can go at once; the drive stays
+# after the run for checking what the program wrote (WIN.INI etc.)
+$drive = Join-Path $RefDir "run-$Name"
 if (Test-Path $drive) { Remove-Item -Recurse -Force $drive }
 Copy-Item -Recurse (Join-Path $RefDir 'c-pristine') $drive
 $ini = Join-Path $drive 'WINDOWS\SYSTEM.INI'
@@ -42,27 +48,31 @@ if ($Run) {
     $text = [IO.File]::ReadAllText($wini) -replace '(?m)^run=.*$', "run=$Run"
     [IO.File]::WriteAllText($wini, $text, [Text.Encoding]::ASCII)
 }
-foreach ($kv in $WinIni) {
-    # one WIN.INI key: replaced in its section, or added at the section's top (CRLF kept)
-    if ($kv -notmatch '^([^/]+)/([^=]+)=(.*)$') { throw "bad -WinIni entry: $kv" }
-    $sec = $Matches[1]; $key = $Matches[2]; $val = $Matches[3]
-    $wini = Join-Path $drive 'WINDOWS\WIN.INI'
-    $lines = [Collections.Generic.List[string]]([IO.File]::ReadAllLines($wini))
+function Set-IniKey([string]$file, [string]$kv) {
+    # one key: replaced in its section, or added at the section's top (CRLF kept); a leading '+'
+    # always adds
+    if ($kv -notmatch '^(\+?)([^/]+)/([^=]+)=(.*)$') { throw "bad INI entry: $kv" }
+    $add = $Matches[1] -eq '+'; $sec = $Matches[2]; $key = $Matches[3]; $val = $Matches[4]
+    $lines = [Collections.Generic.List[string]]([IO.File]::ReadAllLines($file))
     $at = -1; $in = $false; $done = $false
     for ($i = 0; $i -lt $lines.Count; $i++) {
         if ($lines[$i] -match '^\[(.*)\]') { $in = $Matches[1] -eq $sec; if ($in) { $at = $i } ; continue }
-        if ($in -and $lines[$i] -match "^$([regex]::Escape($key))=") { $lines[$i] = "$key=$val"; $done = $true; break }
+        if ($in -and -not $add -and $lines[$i] -match "^$([regex]::Escape($key))\s*=") { $lines[$i] = "$key=$val"; $done = $true; break }
     }
     if (-not $done) {
         if ($at -lt 0) { $lines.Add("[$sec]"); $at = $lines.Count - 1 }
         $lines.Insert($at + 1, "$key=$val")
     }
-    [IO.File]::WriteAllLines($wini, $lines, [Text.Encoding]::ASCII)
+    [IO.File]::WriteAllLines($file, $lines, [Text.Encoding]::ASCII)
 }
+foreach ($kv in $WinIni) { Set-IniKey (Join-Path $drive 'WINDOWS\WIN.INI') $kv }
+foreach ($kv in $SysIni) { Set-IniKey (Join-Path $drive 'WINDOWS\SYSTEM.INI') $kv }
+foreach ($f in $Files) { Copy-Item $f (Join-Path $drive 'WINDOWS\SYSTEM') }
 
-$conf = Join-Path $RefDir 'run.conf'
+$conf = Join-Path $RefDir "run-$Name.conf"
 $auto = if ($Keys.Count) { "autotype -w $Wait -p $Pace " + ($Keys -join ' ') } else { 'rem no keys' }
 @"
+$($Dosbox -join "`r`n")
 [autoexec]
 mount c "$drive"
 c:

@@ -298,7 +298,17 @@ static void bevel_box(HDC dc, int l, int t, int r, int b)
     fill(dc, l + 1, b - 3, l + 2, b - 2, hi);
 }
 
-void w16_draw_sb_ctl(HDC dc, const RECT *r, int vert, W16Scroll *s, int pressed, int enabled_win)
+/* USER seg18:02DA: a bar with both arrows disabled fills its trough with the class background of
+ * its window (of the parent, for a scroll bar control), else the window colour, instead of the
+ * scroll bar colour (the empty Events list of SND.CPL shows a white trough) */
+static HBRUSH disabled_trough(HWND bg)
+{
+    HBRUSH b = w16_valid(bg) && bg->cls ? bg->cls->wc.hbrBackground : NULL;
+    if ((uintptr_t)b > 0 && (uintptr_t)b <= COLOR_BTNHIGHLIGHT + 1) return w16_sys_brush((int)(uintptr_t)b - 1);
+    return b ? b : w16_sys_brush(COLOR_WINDOW);
+}
+
+void w16_draw_sb_ctl(HDC dc, const RECT *r, int vert, W16Scroll *s, int pressed, int enabled_win, HWND bg)
 {
     COLORREF black = GetSysColor(COLOR_WINDOWFRAME);
     int len = vert ? r->bottom - r->top : r->right - r->left;
@@ -309,7 +319,7 @@ void w16_draw_sb_ctl(HDC dc, const RECT *r, int vert, W16Scroll *s, int pressed,
     int track = len - 2 * a + 2;
     int enabled = enabled_win && s->max > s->min && !(s->disabled == ESB_DISABLE_BOTH);
     /* trough */
-    HBRUSH tb = w16_sys_brush(COLOR_SCROLLBAR);
+    HBRUSH tb = s->disabled == ESB_DISABLE_BOTH ? disabled_trough(bg) : w16_sys_brush(COLOR_SCROLLBAR);
     if (vert) {
         RECT t = {r->left, r->top + a, r->right, r->bottom - a};
         int L = t.left, T = t.top, R = t.right, B = t.bottom;
@@ -374,7 +384,8 @@ void w16_draw_sb(HWND h, HDC wdc, int bar, int pressed)
 {
     RECT r;
     w16_get_sb_rect(h, bar, &r);
-    w16_draw_sb_ctl(wdc, &r, bar == SB_VERT, &h->sb[bar], pressed, !(h->style & WS_DISABLED));
+    /* a disabled window keeps its own scroll bars live (SND.CPL's disabled Files list on 3.11) */
+    w16_draw_sb_ctl(wdc, &r, bar == SB_VERT, &h->sb[bar], pressed, 1, h);
 }
 
 /* ------------------------------------------------------------------ WM_NCPAINT */

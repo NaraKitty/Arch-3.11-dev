@@ -181,8 +181,12 @@ static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC 
             dd->focus = first;
             if (visible || modal) { /* focus is set when shown/activated */ }
         }
-    } else if (w16_valid(h) && w16_focus && IsChild(h, w16_focus))
-        dd->focus = w16_focus;
+    } else if (w16_valid(h)) {
+        /* FALSE: the proc placed the focus itself. If it did not, activation gives the focus to the
+         * first tab stop enabled by then (Sound disables its lists there and OK gets it) */
+        if (w16_focus && IsChild(h, w16_focus)) dd->focus = w16_focus;
+        else if (dd->focus && !tabbable(dd->focus)) dd->focus = GetNextDlgTabItem(h, NULL, FALSE);
+    }
     if (!w16_valid(h)) return NULL;
     if (visible || modal) {
         ShowWindow(h, SW_SHOWNORMAL);
@@ -700,66 +704,136 @@ int MessageBox(HWND owner, LPCSTR text, LPCSTR caption, UINT type)
     return run_modal(h, parent);
 }
 
-/* ------------------------------------------------------------------ DlgDirList (simple) */
+/* ------------------------------------------------------------------ DlgDirList / LB_DIR */
 #include <dirent.h>
 #include <sys/stat.h>
+#include <unistd.h>
+static int cmp_name(const void *a, const void *b) { return strcasecmp(*(char *const *)a, *(char *const *)b); }
+
+/* a sorted list keeps directory entries in USER's order: file names, then "[dir]"s, then "[-x-]"
+ * drives, each group by lstrcmpi (as on real 3.11: "<none>", "chimes.wav", "[..]", "[system]",
+ * "[-a-]"); an unsorted one gets them in the order listed */
+static int dir_rank(const char *s) { return s[0] != '[' ? 0 : s[1] == '-' ? 2 : 1; }
+static int dir_insert(HWND lb, const char *s, int combo)
+{
+    BOOL sorted = combo ? (lb->style & CBS_SORT) != 0 : (lb->style & LBS_SORT) != 0;
+    if (!sorted) return (int)SendMessage(lb, combo ? CB_ADDSTRING : LB_ADDSTRING, 0, (LPARAM)s);
+    int n = (int)SendMessage(lb, combo ? CB_GETCOUNT : LB_GETCOUNT, 0, 0), i;
+    for (i = 0; i < n; i++) {
+        char t[300] = "";
+        SendMessage(lb, combo ? CB_GETLBTEXT : LB_GETTEXT, i, (LPARAM)t);
+        int a = dir_rank(s), b = dir_rank(t);
+        if (a < b || (a == b && lstrcmpi(s, t) < 0)) break;
+    }
+    return (int)SendMessage(lb, combo ? CB_INSERTSTRING : LB_INSERTSTRING, i, (LPARAM)s);
+}
+
+/* LB_DIR and CB_DIR: adds what DOS lists for `spec` ("*.WAV", "C:\WINDOWS\*.*"): file names in
+ * lower case, "[name]" for directories (DDL_DIRECTORY; "[..]" below a drive's root), "[-x-]" for
+ * drives (DDL_DRIVES). DDL_EXCLUSIVE leaves ordinary files out; Linux dot files count as hidden
+ * and need DDL_HIDDEN. Returns the index of the last entry added, or LB_ERR. */
+int w16_dir_add(HWND lb, UINT attr, LPCSTR spec, int combo)
+{
+    char dir[300] = "", pat[260] = "*.*", full[300], host[1024];
+    const char *bs = strrchr(spec, '\\');
+    if (!bs && spec[0] && spec[1] == ':') bs = spec + 1;
+    if (bs) {
+        snprintf(dir, sizeof dir, "%.*s", (int)(bs - spec + 1), spec);
+        if (bs[1]) snprintf(pat, sizeof pat, "%s", bs + 1);
+    } else if (*spec)
+        snprintf(pat, sizeof pat, "%s", spec);
+    w16_dos_fullpath(dir[0] ? dir : ".", full, sizeof full);
+    DIR *d = w16_dos_to_host(full, host, sizeof host) ? NULL : opendir(host);
+    if (!d) return LB_ERR;
+    char **names = NULL;
+    int n = 0;
+    for (struct dirent *e; (e = readdir(d));) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        char path[1400], name[300];
+        struct stat st;
+        snprintf(path, sizeof path, "%s/%s", host, e->d_name);
+        if (stat(path, &st) || (e->d_name[0] == '.' && !(attr & DDL_HIDDEN)) || !w16_wildmatch(pat, e->d_name))
+            continue;
+        if (S_ISDIR(st.st_mode)) {
+            if (!(attr & DDL_DIRECTORY)) continue;
+            snprintf(name, sizeof name, "[%s]", e->d_name);
+        } else {
+            /* every file carries the archive bit, as DOS sets it on each write */
+            int ro = access(path, W_OK) != 0;
+            if ((attr & DDL_EXCLUSIVE) && !((attr & DDL_ARCHIVE) || ((attr & DDL_READONLY) && ro) ||
+                                            ((attr & DDL_HIDDEN) && e->d_name[0] == '.')))
+                continue;
+            snprintf(name, sizeof name, "%s", e->d_name);
+        }
+        names = realloc(names, sizeof *names * (n + 1));
+        names[n++] = strdup(name);
+    }
+    closedir(d);
+    if (attr & DDL_DIRECTORY) {
+        /* directories mounted here from elsewhere (C:\WINDOWS) */
+        char sub[16][64];
+        int ns = w16_mount_children(full, sub, 16);
+        for (int i = 0; i < ns; i++) {
+            char name[80];
+            int dup = 0;
+            snprintf(name, sizeof name, "[%s]", sub[i]);
+            for (int k = 0; k < n && !dup; k++) dup = !strcasecmp(names[k], name);
+            if (dup || !w16_wildmatch(pat, sub[i])) continue;
+            names = realloc(names, sizeof *names * (n + 1));
+            names[n++] = strdup(name);
+        }
+    }
+    qsort(names, n, sizeof *names, cmp_name);
+    int last = LB_ERR;
+    if ((attr & DDL_DIRECTORY) && full[3] && w16_wildmatch(pat, ".."))
+        last = dir_insert(lb, "[..]", combo);
+    for (int i = 0; i < n; i++) {
+        AnsiLower(names[i]);
+        last = dir_insert(lb, names[i], combo);
+        free(names[i]);
+    }
+    free(names);
+    if (attr & DDL_DRIVES)
+        for (char c = 'a'; c <= 'z'; c++) {
+            if (w16_drive_root(c, NULL, 0)) continue;
+            char nm[8];
+            snprintf(nm, sizeof nm, "[-%c-]", c);
+            last = dir_insert(lb, nm, combo);
+        }
+    return last;
+}
+
 static int dir_fill(HWND dlg, LPSTR path, int idlist, int idstatic, UINT attr, int combo)
 {
     char spec[260] = "*.*", dir[260] = "";
     if (path && *path) {
         char *bs = strrchr(path, '\\');
+        if (!bs && path[0] && path[1] == ':') bs = path + 1;
         if (strchr(path, '*') || strchr(path, '?')) {
             if (bs) { snprintf(spec, sizeof spec, "%s", bs + 1); snprintf(dir, sizeof dir, "%.*s", (int)(bs - path + 1), path); }
             else snprintf(spec, sizeof spec, "%s", path);
         } else snprintf(dir, sizeof dir, "%s", path);
     }
-    char host[1024];
-    if (w16_dos_to_host(dir[0] ? dir : ".", host, sizeof host)) return 0;
+    /* as in 3.1, the directory named in the path becomes the current one */
+    if (dir[0] && w16_chdir(dir)) return 0;
     HWND lb = idlist ? GetDlgItem(dlg, idlist) : NULL;
-    UINT reset = combo ? CB_RESETCONTENT : LB_RESETCONTENT, add = combo ? CB_ADDSTRING : LB_ADDSTRING;
-    if (lb) SendMessage(lb, reset, 0, 0);
-    DIR *d = opendir(host);
-    if (!d) return 0;
-    struct dirent *e;
-    while ((e = readdir(d))) {
-        if (e->d_name[0] == '.' && strcmp(e->d_name, "..")) continue;
-        char full[1400];
-        snprintf(full, sizeof full, "%s/%s", host, e->d_name);
-        struct stat st;
-        if (stat(full, &st)) continue;
-        char name[300];
-        if (S_ISDIR(st.st_mode)) {
-            if (!(attr & 0x10)) continue;
-            snprintf(name, sizeof name, "[%s]", e->d_name);
-        } else {
-            if (attr & 0x8000) continue;
-            extern int w16_wildmatch(const char *pat, const char *s);
-            if (!w16_wildmatch(spec, e->d_name)) continue;
-            snprintf(name, sizeof name, "%s", e->d_name);
-        }
-        AnsiLower(name);
-        if (lb) SendMessage(lb, add, 0, (LPARAM)name);
-    }
-    closedir(d);
-    if (attr & 0x4000) { /* drives */
-        for (char c = 'a'; c <= 'z'; c++) {
-            char t[8] = {c, ':', '\\', 0}, hh[1024];
-            if (w16_dos_to_host(t, hh, sizeof hh) == 0) {
-                char nm[16];
-                snprintf(nm, sizeof nm, "[-%c-]", c);
-                if (lb) SendMessage(lb, add, 0, (LPARAM)nm);
-            }
-        }
+    if (lb) {
+        SendMessage(lb, combo ? CB_RESETCONTENT : LB_RESETCONTENT, 0, 0);
+        w16_dir_add(lb, attr, spec, combo);
     }
     if (idstatic) {
-        char dos[300];
-        if (w16_host_to_dos(host, dos, sizeof dos) == 0) { AnsiLower(dos); SetDlgItemText(dlg, idstatic, dos); }
+        char cwd[300];
+        w16_getcwd(cwd, sizeof cwd);
+        AnsiLower(cwd);
+        SetDlgItemText(dlg, idstatic, cwd);
     }
     if (path) snprintf(path, 260, "%s", spec);
     return 1;
 }
 int DlgDirList(HWND dlg, LPSTR path, int idlist, int idstatic, UINT attr) { return dir_fill(dlg, path, idlist, idstatic, attr, 0); }
 int DlgDirListComboBox(HWND dlg, LPSTR path, int idc, int ids, UINT attr) { return dir_fill(dlg, path, idc, ids, attr, 1); }
+/* the selection as a path: "[dir]" -> "dir\", "[-c-]" -> "c:", a file name without an extension
+ * gets the "." 3.1 appends; returns TRUE for a directory or drive */
 static BOOL dir_select(HWND dlg, LPSTR buf, int id, int combo)
 {
     char t[300] = "";
@@ -771,7 +845,7 @@ static BOOL dir_select(HWND dlg, LPSTR buf, int id, int combo)
         else { t[strlen(t) - 1] = 0; snprintf(buf, 260, "%s\\", t + 1); }
         return TRUE;
     }
-    snprintf(buf, 260, "%s", t);
+    snprintf(buf, 260, "%s%s", t, strchr(t, '.') ? "" : ".");
     return FALSE;
 }
 BOOL DlgDirSelect(HWND dlg, LPSTR buf, int id) { return dir_select(dlg, buf, id, 0); }

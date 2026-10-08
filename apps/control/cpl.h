@@ -43,6 +43,7 @@ extern const CplModuleDef cpl_modules[];
 
 /* applets */
 LRESULT Main_CPlApplet(HWND, UINT, LPARAM, LPARAM);
+LRESULT Sound_CPlApplet(HWND, UINT, LPARAM, LPARAM);
 LRESULT Volume_CPlApplet(HWND, UINT, LPARAM, LPARAM);
 
 #endif

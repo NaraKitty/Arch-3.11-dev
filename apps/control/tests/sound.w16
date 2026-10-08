@@ -1,0 +1,23 @@
+# Sound applet (SND.CPL dialog 42): fifth in the window, after MAIN.CPL's Mouse, Keyboard,
+# Date/Time and Network. Run through tests/sound.sh. Same keys as arch311-ref/scn/sound.scn
+sleep 600
+key right
+key right
+key right
+key right
+key enter
+sleep 600
+shot shots/01-sound.png
+key down
+sleep 200
+shot shots/02-cancel.png
+key tab
+sleep 200
+shot shots/03-help.png
+key down
+sleep 200
+shot shots/04-enable.png
+key esc
+sleep 300
+shot shots/05-closed.png
+quit

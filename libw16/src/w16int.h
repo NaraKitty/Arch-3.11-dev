@@ -234,7 +234,7 @@ int w16_has_caption(DWORD style);
 void w16_draw_sb(HWND h, HDC dc, int bar, int pressed_part);
 void w16_get_sb_rect(HWND h, int bar, RECT *r); /* window-relative */
 void w16_track_sb(HWND h, HWND notify, int bar, int x, int y, int ctl);
-void w16_draw_sb_ctl(HDC dc, const RECT *r, int vert, W16Scroll *s, int pressed, int enabled_win);
+void w16_draw_sb_ctl(HDC dc, const RECT *r, int vert, W16Scroll *s, int pressed, int enabled_win, HWND bg);
 int w16_sb_hit(const RECT *r, int vert, W16Scroll *s, int x, int y, RECT *part);
 void w16_iconic_paint(HWND h);
 void w16_minimize(HWND h);
@@ -330,4 +330,7 @@ int w16_trails_escape(int n);
 uint32_t w16_invert_display_px(uint32_t d);
 void w16_invert_dev_gray(HDC dc, const RECT *r);
 int w16_sb_thumb(const RECT *r, int vert, W16Scroll *s);  /* thumb offset in the bar, -1 if none (nc.c) */
+int w16_dir_add(HWND lb, UINT attr, LPCSTR spec, int combo); /* LB_DIR / CB_DIR (dialog.c) */
+int w16_mount_children(LPCSTR dosdir, char names[][64], int max); /* mount points inside a DOS dir (sys.c) */
+extern BOOL w16_beep; /* WIN.INI Beep (sys.c), SPI_GETBEEP/SETBEEP */
 #endif

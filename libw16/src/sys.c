@@ -15,6 +15,7 @@ int w16_kbd_speed = 31, w16_kbd_delay = 2;
 UINT w16_dblclk_time = 500;
 int w16_swap_buttons;
 int w16_mouse_params[3] = {2, 10, 1};
+BOOL w16_beep = TRUE; /* WIN.INI Beep: MessageBeep plays the system sounds */
 
 /* Windows 3.1 "Windows Default" colours (USER defaults; overridable from [colors] in WIN.INI) */
 COLORREF w16_syscolor[W16_NUM_SYSCOLORS] = {
@@ -382,6 +383,8 @@ void w16_sys_init(void)
     SetDoubleClickTime(GetProfileInt("windows", "DoubleClickSpeed", 0));
     GetProfileString("windows", "SwapMouseButtons", "no", b, sizeof b);
     w16_swap_buttons = !strcasecmp(b, "yes") || !strcasecmp(b, "true") || !strcasecmp(b, "on") || atoi(b) != 0;
+    GetProfileString("windows", "Beep", "yes", b, sizeof b);
+    w16_beep = !strcasecmp(b, "yes") || !strcasecmp(b, "true") || !strcasecmp(b, "on") || atoi(b) != 0;
     w16_mouse_params[0] = GetProfileInt("windows", "MouseThreshold1", 2);
     w16_mouse_params[2] = GetProfileInt("windows", "MouseSpeed", 1);
     if (w16_mouse_params[2] == 2) w16_mouse_params[1] = GetProfileInt("windows", "MouseThreshold2", 10);
@@ -496,6 +499,11 @@ LPSTR AnsiLower(LPSTR s)
 }
 LPSTR AnsiNext(LPCSTR s) { return (LPSTR)(*s ? s + 1 : s); }
 LPSTR AnsiPrev(LPCSTR start, LPCSTR s) { return (LPSTR)(s > start ? s - 1 : s); }
+/* the DOS layer here already speaks ANSI (see w16.h) */
+void OemToAnsi(LPCSTR oem, LPSTR ansi) { if (oem != ansi) memmove(ansi, oem, strlen(oem) + 1); }
+void AnsiToOem(LPCSTR ansi, LPSTR oem) { if (oem != ansi) memmove(oem, ansi, strlen(ansi) + 1); }
+static UINT error_mode;
+UINT SetErrorMode(UINT mode) { UINT was = error_mode; error_mode = mode; return was; }
 BOOL IsCharAlpha(char c) { unsigned char u = c; return isalpha(u) || (u >= 0xC0 && u != 0xD7 && u != 0xF7); }
 BOOL IsCharAlphaNumeric(char c) { return IsCharAlpha(c) || isdigit((unsigned char)c); }
 BOOL IsCharUpper(char c) { return IsCharAlpha(c) && up1252(c) == (unsigned char)c; }
@@ -557,9 +565,48 @@ void FreeProcInstance(FARPROC p) { (void)p; }
 BOOL Yield(void) { w16_pump(0); return TRUE; }
 
 /* ------------------------------------------------------------------ drives & files */
+/* A drive maps a letter onto a Linux folder ("C=/home/user" in the drives file). A mount maps one
+ * DOS directory inside a drive onto another folder ("C:\WINDOWS=/path"). Unless the C: folder has
+ * a WINDOWS directory of its own, C:\WINDOWS and C:\WINDOWS\SYSTEM are the user's ripped 3.11
+ * files, so programs find their sounds, bitmaps and help files where 3.11 kept them. */
 typedef struct { char letter; char root[1024]; } Drive;
+typedef struct { char letter; char dir[260]; char root[1024]; } Mount; /* dir "\\WINDOWS", upper case */
 static Drive drives[26];
 static int ndrives;
+static Mount mounts[16];
+static int nmounts;
+static void norm_dos(LPCSTR in, char *out, size_t cb);
+
+static void add_mount(char letter, const char *dir, const char *root)
+{
+    if (nmounts == 16) return;
+    Mount *m = &mounts[nmounts++];
+    m->letter = toupper((unsigned char)letter);
+    snprintf(m->dir, sizeof m->dir, "%s", dir);
+    size_t l = strlen(m->dir);
+    while (l > 1 && m->dir[l - 1] == '\\') m->dir[--l] = 0;
+    AnsiUpper(m->dir);
+    snprintf(m->root, sizeof m->root, "%s", root);
+    l = strlen(m->root);
+    while (l > 1 && m->root[l - 1] == '/') m->root[--l] = 0;
+}
+
+static int has_mount(char letter, const char *dir)
+{
+    for (int i = 0; i < nmounts; i++)
+        if (mounts[i].letter == letter && !strcasecmp(mounts[i].dir, dir)) return 1;
+    return 0;
+}
+
+/* `name` exists in Linux folder `dir`, in any letter case */
+static int ci_exists(const char *dir, const char *name)
+{
+    DIR *d = opendir(dir);
+    int found = 0;
+    for (struct dirent *e; d && !found && (e = readdir(d));) found = !strcasecmp(e->d_name, name);
+    if (d) closedir(d);
+    return found;
+}
 
 static void load_drives(void)
 {
@@ -572,10 +619,14 @@ static void load_drives(void)
         char l[1100];
         while (fgets(l, sizeof l, f) && ndrives < 26) {
             trim(l);
+            char *eq = strchr(l, '=');
             if (strlen(l) > 2 && isalpha((unsigned char)l[0]) && l[1] == '=') {
                 drives[ndrives].letter = toupper((unsigned char)l[0]);
                 snprintf(drives[ndrives].root, sizeof drives[0].root, "%s", l + 2);
                 ndrives++;
+            } else if (eq && isalpha((unsigned char)l[0]) && l[1] == ':' && l[2] == '\\') {
+                *eq = 0;
+                add_mount(l[0], l + 2, eq + 1);
             }
         }
         fclose(f);
@@ -588,10 +639,38 @@ static void load_drives(void)
         ndrives = 2;
         f = fopen(path, "w");
         if (f) {
-            fprintf(f, "# DOS drive letters seen by 3.11 apps -> Linux folders\nC=%s\nZ=/\n", drives[0].root);
+            fprintf(f, "# DOS drive letters seen by 3.11 apps -> Linux folders\nC=%s\nZ=/\n"
+                       "# a DOS directory can be placed on another folder, e.g. C:\\WINDOWS=/path\n", drives[0].root);
             fclose(f);
         }
     }
+    char croot[1024];
+    int c = -1;
+    for (int i = 0; i < ndrives; i++)
+        if (drives[i].letter == 'C') c = i;
+    if (c >= 0 && !has_mount('C', "\\WINDOWS") && !ci_exists(drives[c].root, "WINDOWS")) {
+        snprintf(croot, sizeof croot, "%s/files", w16_assets_dir());
+        add_mount('C', "\\WINDOWS", croot);
+        if (!has_mount('C', "\\WINDOWS\\SYSTEM")) add_mount('C', "\\WINDOWS\\SYSTEM", croot);
+    }
+}
+
+/* the mount points directly inside DOS directory `dosdir` ("C:\" -> "WINDOWS"), for directory listings */
+int w16_mount_children(LPCSTR dosdir, char names[][64], int max)
+{
+    load_drives();
+    char n[300];
+    int k = 0;
+    norm_dos(dosdir, n, sizeof n);
+    const char *in = n[3] ? n + 2 : ""; /* "\\WINDOWS", or "" for the root */
+    for (int i = 0; i < nmounts && k < max; i++) {
+        const char *bs = strrchr(mounts[i].dir, '\\');
+        if (mounts[i].letter != n[0] || !bs || (size_t)(bs - mounts[i].dir) != strlen(in) ||
+            strncasecmp(mounts[i].dir, in, bs - mounts[i].dir))
+            continue;
+        snprintf(names[k++], 64, "%s", bs + 1);
+    }
+    return k;
 }
 
 static char cur_drive = 'C';
@@ -637,24 +716,60 @@ static void ci_resolve(char *host)
     strcpy(host, out);
 }
 
+/* DOS keeps one current directory per drive */
+static char drive_dir[26][260];
+
+/* "x:\a\..\b\." -> "X:\a\b" with the letter case kept: the full DOS path, "." and ".." resolved,
+ * trailing dots dropped ("NAME." is NAME), no trailing backslash except at the root */
+static void dos_resolve(LPCSTR in, char *out, size_t cb)
+{
+    char full[520], *parts[64];
+    int n = 0;
+    char drv = cur_drive;
+    const char *p = in;
+    if (p[0] && p[1] == ':') { drv = toupper((unsigned char)p[0]); p += 2; }
+    const char *base = drv == cur_drive ? cur_dir : drv >= 'A' && drv <= 'Z' && drive_dir[drv - 'A'][0] ? drive_dir[drv - 'A'] : "\\";
+    if (*p == '\\' || *p == '/')
+        snprintf(full, sizeof full, "%s", p);
+    else
+        snprintf(full, sizeof full, "%s\\%s", base, p);
+    char *save;
+    for (char *c = strtok_r(full, "\\/", &save); c && n < 64; c = strtok_r(NULL, "\\/", &save)) {
+        size_t l = strlen(c);
+        if (!strcmp(c, "..")) { if (n) n--; continue; }
+        while (l && c[l - 1] == '.') c[--l] = 0;
+        if (!l) continue; /* ".", "..." */
+        parts[n++] = c;
+    }
+    size_t o = snprintf(out, cb, "%c:", drv);
+    if (!n) snprintf(out + o, cb - o, "\\");
+    for (int i = 0; i < n && o < cb; i++) o += snprintf(out + o, cb - o, "\\%s", parts[i]);
+}
+
 int w16_dos_to_host(LPCSTR dos, char *host, size_t cb)
 {
     load_drives();
     char full[520];
-    char drv = cur_drive;
-    const char *p = dos;
-    if (p[0] && p[1] == ':') { drv = toupper((unsigned char)p[0]); p += 2; }
-    if (*p == '\\' || *p == '/')
-        snprintf(full, sizeof full, "%s", p);
-    else
-        snprintf(full, sizeof full, "%s%s%s", cur_dir, (cur_dir[strlen(cur_dir) - 1] == '\\') ? "" : "\\", p);
-    const char *root = NULL;
+    dos_resolve(dos, full, sizeof full);
+    char drv = full[0];
+    const char *root = NULL, *rest = full + 2;
     for (int i = 0; i < ndrives; i++)
         if (drives[i].letter == drv) root = drives[i].root;
     if (!root)
         return -1;
+    /* a mounted directory takes over its part of the drive */
+    size_t best = 0;
+    for (int i = 0; i < nmounts; i++) {
+        size_t l = strlen(mounts[i].dir);
+        if (mounts[i].letter == drv && l > best && !strncasecmp(full + 2, mounts[i].dir, l) &&
+            (full[2 + l] == '\\' || !full[2 + l])) {
+            root = mounts[i].root;
+            rest = full + 2 + l;
+            best = l;
+        }
+    }
     char tmp[2048];
-    snprintf(tmp, sizeof tmp, "%s/%s", root, full);
+    snprintf(tmp, sizeof tmp, "%s/%s", root, rest);
     for (char *c = tmp; *c; c++) if (*c == '\\') *c = '/';
     /* collapse // */
     char *w = tmp;
@@ -668,7 +783,7 @@ int w16_dos_to_host(LPCSTR dos, char *host, size_t cb)
 int w16_host_to_dos(const char *host, LPSTR dos, size_t cb)
 {
     load_drives();
-    int best = -1;
+    int best = -1, mount = 0;
     size_t bl = 0;
     for (int i = 0; i < ndrives; i++) {
         size_t l = strlen(drives[i].root);
@@ -677,9 +792,21 @@ int w16_host_to_dos(const char *host, LPSTR dos, size_t cb)
             bl = l;
         }
     }
+    /* the deepest folder wins: a mount inside the C: folder maps back to its DOS directory */
+    for (int i = 0; i < nmounts; i++) {
+        size_t l = strlen(mounts[i].root);
+        if (l > 1 && !strncmp(host, mounts[i].root, l) && (host[l] == '/' || !host[l]) && l > bl) {
+            best = i;
+            bl = l;
+            mount = 1;
+        }
+    }
     if (best < 0) return -1;
     const char *rest = host + (bl == 1 ? 0 : bl);
-    snprintf(dos, cb, "%c:%s", drives[best].letter, *rest ? rest : "\\");
+    if (mount)
+        snprintf(dos, cb, "%c:%s%s", mounts[best].letter, mounts[best].dir, rest);
+    else
+        snprintf(dos, cb, "%c:%s", drives[best].letter, *rest ? rest : "\\");
     for (char *c = dos; *c; c++) if (*c == '/') *c = '\\';
     return 0;
 }
@@ -710,30 +837,46 @@ UINT _lwrite(HFILE f, const void *b, UINT n)
 LONG _llseek(HFILE f, LONG off, int o) { return (LONG)lseek(f, off, o == 0 ? SEEK_SET : o == 1 ? SEEK_CUR : SEEK_END); }
 HFILE _lclose(HFILE f) { return close(f) ? HFILE_ERROR : 0; }
 
-static void full_dos_path(LPCSTR name, char *out, size_t cb)
+/* OpenFile's search for a file named without a directory: the current directory, the Windows
+ * directory, then the system directory (3.1 goes on to the program's directory and PATH; the
+ * programs live in the Windows directory here and PATH holds Linux folders) */
+static int search_file(LPCSTR name, char *dos, size_t cb)
 {
-    char drv = cur_drive;
-    const char *p = name;
-    if (p[0] && p[1] == ':') { drv = toupper((unsigned char)p[0]); p += 2; }
-    if (*p == '\\')
-        snprintf(out, cb, "%c:%s", drv, p);
-    else
-        snprintf(out, cb, "%c:%s%s%s", drv, cur_dir, cur_dir[strlen(cur_dir) - 1] == '\\' ? "" : "\\", p);
-    AnsiUpper(out);
+    char dirs[3][260] = {""};
+    GetWindowsDirectory(dirs[1], sizeof dirs[1]);
+    GetSystemDirectory(dirs[2], sizeof dirs[2]);
+    for (int i = 0; i < 3; i++) {
+        char t[600], h[2048];
+        struct stat st;
+        snprintf(t, sizeof t, "%s%s%s", dirs[i], i ? "\\" : "", name);
+        if (w16_dos_to_host(t, h, sizeof h) == 0 && stat(h, &st) == 0 && !S_ISDIR(st.st_mode)) {
+            norm_dos(t, dos, cb);
+            return 0;
+        }
+    }
+    return -1;
 }
 
 HFILE OpenFile(LPCSTR name, OFSTRUCT *of, UINT style)
 {
-    char h[2048];
+    char h[2048], given[300], path[300];
+    snprintf(given, sizeof given, "%s", (style & OF_REOPEN) && of ? of->szPathName : name);
+    const char *base = given;
+    for (const char *c = given; *c; c++)
+        if (*c == '\\' || *c == '/' || *c == ':') base = c + 1;
+    /* szPathName gets the full upper-case path where the file was found */
+    if ((style & (OF_CREATE | OF_PARSE)) || !(base == given || (style & (OF_SEARCH | OF_REOPEN)) == OF_SEARCH) ||
+        search_file(base, path, sizeof path))
+        norm_dos(given, path, sizeof path);
     if (of) {
         memset(of, 0, sizeof *of);
         of->cBytes = sizeof *of > 255 ? 255 : sizeof *of; /* BYTE field; our szPathName is 260 */
         of->fFixedDisk = 1;
-        full_dos_path(name, of->szPathName, sizeof of->szPathName);
+        snprintf(of->szPathName, sizeof of->szPathName, "%s", path);
     }
     if (style & OF_PARSE)
         return 0;
-    if (w16_dos_to_host(name, h, sizeof h)) {
+    if (w16_dos_to_host(path, h, sizeof h)) {
         if (of) of->nErrCode = 3;
         return HFILE_ERROR;
     }
@@ -761,26 +904,13 @@ HFILE OpenFile(LPCSTR name, OFSTRUCT *of, UINT style)
 }
 
 /* ------------------------------------------------------------------ current drive / directory (INT 21h 0Eh/19h/3Bh/47h) */
-static char drive_dir[26][260]; /* DOS keeps one current directory per drive */
-
 /* "X:\A\..\B\." -> "X:\B" (upper case, no trailing backslash except the root) */
 static void norm_dos(LPCSTR in, char *out, size_t cb)
 {
-    char full[520], *parts[64];
-    int n = 0;
-    full_dos_path(in, full, sizeof full);
-    char drv = toupper((unsigned char)full[0]);
-    char *save;
-    for (char *c = strtok_r(full + 2, "\\/", &save); c && n < 64; c = strtok_r(NULL, "\\/", &save)) {
-        if (!strcmp(c, ".")) continue;
-        if (!strcmp(c, "..")) { if (n) n--; continue; }
-        parts[n++] = c;
-    }
-    size_t o = snprintf(out, cb, "%c:", drv);
-    if (!n) snprintf(out + o, cb - o, "\\");
-    for (int i = 0; i < n && o < cb; i++) o += snprintf(out + o, cb - o, "\\%s", parts[i]);
+    dos_resolve(in, out, cb);
     AnsiUpper(out);
 }
+void w16_dos_fullpath(LPCSTR dos, LPSTR out, size_t cb) { norm_dos(dos, out, cb); }
 
 int w16_drive_root(char letter, char *root, size_t cb)
 {

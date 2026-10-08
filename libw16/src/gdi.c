@@ -852,7 +852,12 @@ void w16_invert_dev(HDC dc, const RECT *r)
     mark_dirty(dc);
 }
 
-/* a gray caret (CreateCaret with bitmap 1): the halftone inverts every other pixel, odd x + y */
+/* the gray halftone brush covers the pixels with an odd x + y counted from the DC's origin and
+ * brush origin: a focus rectangle in SND.CPL's OK button, whose window starts at (380, 85), has its
+ * dots where screen x + y is even */
+static int gray_px(HDC dc, int x, int y) { return (x - dc->ox - dc->brushorgx + y - dc->oy - dc->brushorgy) & 1; }
+
+/* a gray caret (CreateCaret with bitmap 1): the halftone inverts every other pixel */
 void w16_invert_dev_gray(HDC dc, const RECT *r)
 {
     Region e;
@@ -862,7 +867,7 @@ void w16_invert_dev_gray(HDC dc, const RECT *r)
     for (int i = 0; i < e.n; i++)
         for (int y = max(e.r[i].top, 0); y < min(e.r[i].bottom, t->h); y++)
             for (int x = max(e.r[i].left, 0); x < min(e.r[i].right, t->w); x++)
-                if ((x + y) & 1) t->px[y * t->w + x] = w16_invert_px(t->px[y * t->w + x]);
+                if (gray_px(dc, x, y)) t->px[y * t->w + x] = w16_invert_px(t->px[y * t->w + x]);
     rgn_free(&e);
     mark_dirty(dc);
 }
@@ -914,16 +919,14 @@ void InvertRect(HDC dc, LPCRECT r)
     w16_invert_dev(dc, &d);
 }
 /* USER seg1:2069 / seg1:1FAA: the gray brush PATINVERTed as four full-length one-pixel strips (top,
- * bottom, left, right), so each corner is inverted twice and stays as it was. The halftone inverts
- * pixels with an odd x + y (measured on a 3.11 check box; screen vs window alignment of the brush
- * untested - the samples so far sit at an even window origin) */
+ * bottom, left, right), so each corner is inverted twice and stays as it was (gray_px: the brush
+ * follows the DC origin) */
 static void focus_strip(HDC dc, W16Bitmap *t, Region *e, int x0, int y0, int w, int h)
 {
     for (int y = y0; y < y0 + h; y++)
         for (int x = x0; x < x0 + w; x++)
-            if (((x + y) & 1) && x >= 0 && y >= 0 && x < t->w && y < t->h && rgn_contains(e, x, y))
+            if (gray_px(dc, x, y) && x >= 0 && y >= 0 && x < t->w && y < t->h && rgn_contains(e, x, y))
                 t->px[y * t->w + x] = w16_invert_px(t->px[y * t->w + x]);
-    (void)dc;
 }
 
 void DrawFocusRect(HDC dc, LPCRECT r)

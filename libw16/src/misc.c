@@ -209,7 +209,12 @@ BOOL SystemParametersInfo(UINT action, UINT param, void *pv, UINT winini)
 {
     switch (action) {
     case SPI_GETBEEP:
-        if (pv) { char b[8]; GetProfileString("windows", "Beep", "yes", b, sizeof b); *(BOOL *)pv = !strcasecmp(b, "yes"); }
+        if (pv) *(BOOL *)pv = w16_beep;
+        return TRUE;
+    case SPI_SETBEEP:
+        w16_beep = param != 0;
+        if (winini & SPIF_UPDATEINIFILE) WriteProfileString("windows", "Beep", w16_beep ? "yes" : "no");
+        if (winini & SPIF_SENDWININICHANGE) SendMessage(HWND_BROADCAST, WM_WININICHANGE, 0, (LPARAM) "windows");
         return TRUE;
     case SPI_GETBORDER:
         if (pv) *(int *)pv = w16_border_width;

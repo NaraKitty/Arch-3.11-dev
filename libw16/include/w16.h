@@ -31,6 +31,9 @@ typedef int32_t LONG;
 typedef uintptr_t WPARAM;
 typedef intptr_t LPARAM;
 typedef intptr_t LRESULT;
+/* list and combo box item data: a DWORD in 3.1, pointer-sized here (Win32's ULONG_PTR) so ports can
+ * keep pointers there as 3.1 programs kept near pointers and handles */
+typedef uintptr_t ULONG_PTR;
 typedef uint32_t COLORREF;
 typedef char *LPSTR;
 typedef const char *LPCSTR;
@@ -1195,24 +1198,24 @@ typedef struct {
     HWND hwndItem;
     HDC hDC;
     RECT rcItem;
-    DWORD itemData;
+    ULONG_PTR itemData;
 } DRAWITEMSTRUCT, *LPDRAWITEMSTRUCT;
 typedef struct {
     UINT CtlType, CtlID, itemID, itemWidth, itemHeight;
-    DWORD itemData;
+    ULONG_PTR itemData;
 } MEASUREITEMSTRUCT, *LPMEASUREITEMSTRUCT;
 typedef struct {
     UINT CtlType, CtlID, itemID;
     HWND hwndItem;
-    DWORD itemData;
+    ULONG_PTR itemData;
 } DELETEITEMSTRUCT;
 typedef struct {
     UINT CtlType, CtlID;
     HWND hwndItem;
     UINT itemID1;
-    DWORD itemData1;
+    ULONG_PTR itemData1;
     UINT itemID2;
-    DWORD itemData2;
+    ULONG_PTR itemData2;
 } COMPAREITEMSTRUCT;
 
 /* ------------------------------------------------------------------ functions */
@@ -1255,6 +1258,10 @@ LPSTR AnsiUpper(LPSTR s);
 LPSTR AnsiLower(LPSTR s);
 LPSTR AnsiNext(LPCSTR s);
 LPSTR AnsiPrev(LPCSTR start, LPCSTR s);
+/* KEYBOARD: OEM <-> ANSI. libw16's DOS layer already hands out ANSI names (OpenFile, DlgDirList),
+ * so these copy the string */
+void OemToAnsi(LPCSTR oem, LPSTR ansi);
+void AnsiToOem(LPCSTR ansi, LPSTR oem);
 BOOL IsCharAlpha(char c);
 BOOL IsCharAlphaNumeric(char c);
 BOOL IsCharUpper(char c);
@@ -1299,8 +1306,14 @@ HFILE _lclose(HFILE f);
 int w16_dos_to_host(LPCSTR dos, char *host, size_t cb);
 int w16_host_to_dos(const char *host, LPSTR dos, size_t cb);
 int w16_drive_root(char letter, char *root, size_t cb); /* 0 if the drive letter is mapped */
+void w16_dos_fullpath(LPCSTR dos, LPSTR out, size_t cb); /* "..\\X" -> "C:\\X": full, upper case, dots resolved */
 void w16_getcwd(LPSTR dos, size_t cb);                  /* "C:\\WINDOWS" */
 int w16_chdir(LPCSTR dos);                              /* "X:", "..", "X:\\DIR": 0, -1 no path, -2 no drive */
+/* there are no critical-error boxes to suppress; the mode is kept for callers that restore it */
+#define SEM_FAILCRITICALERRORS 0x0001
+#define SEM_NOGPFAULTERRORBOX 0x0002
+#define SEM_NOOPENFILEERRORBOX 0x8000
+UINT SetErrorMode(UINT mode);
 
 /* USER: classes / windows */
 ATOM RegisterClass(const WNDCLASS *wc);
@@ -1397,6 +1410,15 @@ void SetCursorPos(int x, int y);
 HCURSOR SetCursor(HCURSOR c);
 int ShowCursor(BOOL show);
 void MessageBeep(UINT t);
+/* MMSYSTEM: waveform sounds, played by the Linux sound server (mmsystem.c) */
+#define SND_SYNC 0x0000
+#define SND_ASYNC 0x0001
+#define SND_NODEFAULT 0x0002
+#define SND_MEMORY 0x0004
+#define SND_LOOP 0x0008
+#define SND_NOSTOP 0x0010
+BOOL sndPlaySound(LPCSTR sound, UINT flags);
+UINT waveOutGetNumDevs(void);
 BOOL Yield(void);
 BOOL GetInputState(void);
 
@@ -1552,6 +1574,15 @@ int DlgDirList(HWND dlg, LPSTR path, int idlist, int idstatic, UINT attr);
 BOOL DlgDirSelect(HWND dlg, LPSTR buf, int idlist);
 int DlgDirListComboBox(HWND dlg, LPSTR path, int idcombo, int idstatic, UINT attr);
 BOOL DlgDirSelectComboBox(HWND dlg, LPSTR buf, int idcombo);
+#define DDL_READWRITE 0x0000
+#define DDL_READONLY 0x0001
+#define DDL_HIDDEN 0x0002
+#define DDL_SYSTEM 0x0004
+#define DDL_DIRECTORY 0x0010
+#define DDL_ARCHIVE 0x0020
+#define DDL_POSTMSGS 0x2000
+#define DDL_DRIVES 0x4000
+#define DDL_EXCLUSIVE 0x8000
 
 /* USER: scroll bars */
 int SetScrollPos(HWND h, int bar, int pos, BOOL redraw);
