@@ -1,6 +1,30 @@
 # Color applet: every scheme of CONTROL.INI in turn (Down in the Color Schemes combo; the sample
 # repaints with dithered colours). Same keys as arch311-ref/scn/color-schemes.scn; compare in 16
-# colours (tests/color.sh): frame NN = real frame NN.
+# colours (W16_COLORS=16): frame NN = real frame NN.
+# regress: W16_COLORS=16 sh tools/run-cp-test.sh "$TEST" "$OUT"
+# compare: color-schemes/02.png 02.png active
+# compare: color-schemes/03.png 03.png active
+# compare: color-schemes/04.png 04.png active
+# compare: color-schemes/05.png 05.png active
+# compare: color-schemes/06.png 06.png active
+# compare: color-schemes/07.png 07.png active
+# compare: color-schemes/08.png 08.png active
+# compare: color-schemes/09.png 09.png active
+# compare: color-schemes/10.png 10.png active
+# compare: color-schemes/11.png 11.png active
+# compare: color-schemes/12.png 12.png active
+# compare: color-schemes/13.png 13.png active
+# compare: color-schemes/14.png 14.png active
+# compare: color-schemes/15.png 15.png active
+# compare: color-schemes/16.png 16.png active
+# compare: color-schemes/17.png 17.png active
+# compare: color-schemes/18.png 18.png active
+# compare: color-schemes/19.png 19.png active
+# compare: color-schemes/20.png 20.png active
+# compare: color-schemes/21.png 21.png active
+# compare: color-schemes/22.png 22.png active
+# compare: color-schemes/23.png 23.png active
+# compare: color-schemes/24.png 24.png active
 sleep 400
 shot shots/01.png
 key enter

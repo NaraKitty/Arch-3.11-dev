@@ -1,7 +1,13 @@
 # Color applet: Arizona, then Remove Scheme (Tab: Save Scheme is disabled for an unchanged scheme)
 # and Enter (Yes) in the confirmation box: Arizona leaves CONTROL.INI [color schemes] and the combo,
 # and the next scheme is selected. Same keys as arch311-ref/scn/color-remove.scn; compare in
-# 16 colours (tests/color.sh) and compare OUT/ini/CONTROL.INI with arch311-ref/run-color-remove.
+# 16 colours (W16_COLORS=16).
+# regress: W16_COLORS=16 sh tools/run-cp-test.sh "$TEST" "$OUT"
+# compare: color-remove/02.png 02.png active ignore 320 240 332 260
+# compare: color-remove/03.png 03.png active
+# ini: CONTROL.INI current color schemes=Windows Default
+# ini: CONTROL.INI [color schemes] Arizona=
+# ini: CONTROL.INI [color schemes] Black Leather Jacket=0,C0C0C0,FFFFFF,0,C0C0C0,0,800040,808080,FFFFFF,808080,808080,0,10E0E0E0,C0C0C0,808080,0,808080,0,FFFFFF,0,FFFFFF
 sleep 400
 shot shots/01.png
 key enter

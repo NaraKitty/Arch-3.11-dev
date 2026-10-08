@@ -1,0 +1,36 @@
+# Color applet: Remove Scheme for Bordeaux and, after No ("n"), for Black Leather Jacket - two more
+# layouts of USER's MessageBox (seg42:04F5). Same keys as arch311-ref/scn/color-mbox1.scn and
+# color-mbox2.scn (one rig run each, so the second box is reached by Esc and a fresh Color dialog
+# here); compare in 16 colours. After No, real 3.11 leaves one black pixel at the Color dialog's
+# client origin (5,42), in both runs - not understood, so it is left out.
+# regress: W16_COLORS=16 sh tools/run-cp-test.sh "$TEST" "$OUT"
+# compare: color-mbox1/02.png 02.png active ignore 320 240 332 260
+# compare: color-mbox1/03.png 03.png active ignore 5 42 6 43
+# compare: color-mbox2/02.png 05.png active ignore 320 240 332 260
+# compare: color-mbox2/03.png 06.png active ignore 5 42 6 43
+sleep 400
+shot shots/01.png
+key enter
+key down
+key down
+key down
+key tab
+key space
+sleep 400
+shot shots/02.png
+key n
+sleep 400
+shot shots/03.png
+key esc
+sleep 400
+key enter
+key down
+key down
+key tab
+key space
+sleep 400
+shot shots/05.png
+key n
+sleep 400
+shot shots/06.png
+quit
