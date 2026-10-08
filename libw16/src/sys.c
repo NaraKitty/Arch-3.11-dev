@@ -11,6 +11,7 @@
 
 int w16_debug;
 int w16_border_width = 3;
+int w16_icon_spacing = 75, w16_icon_title_wrap = 1, w16_grid = 1, w16_fast_switch = 1, w16_screen_save;
 int w16_kbd_speed = 31, w16_kbd_delay = 2;
 UINT w16_dblclk_time = 500;
 int w16_swap_buttons;
@@ -268,9 +269,12 @@ static void ini_insert(char *out, size_t at, const char *key, const char *val)
     memcpy(out + at, line, n);
 }
 
-/* KERNEL seg1:6CEC: an existing key keeps its line up to the '=' (its spelling too: USER's
- * "LANGUAGE.DLL" rewrote SYSTEM.INI's "language.dll=" line as "language.dll=langger.dll") and
- * gets the new value; a new key goes after the last non-blank line of its section */
+/* KERNEL's WriteProfileString (seg1:6CEC), as measured on 3.11: a key that is there keeps its line up
+ * to the '=' - its own spelling too ("Wallpaper=" stays when MAIN.CPL writes "WallPaper", USER's
+ * "LANGUAGE.DLL" rewrote SYSTEM.INI's "language.dll=" line) - and only the value changes; a new key
+ * goes after the last line of its section that is not blank; a new section goes at the end after an
+ * empty line (at the top of an empty file without one: Clock's CLOCK.INI). key NULL removes the
+ * section, val NULL the key. */
 static int ini_set(const char *path, LPCSTR app0, LPCSTR key0, LPCSTR val0)
 {
     char *d = read_all(path);
@@ -298,7 +302,7 @@ static int ini_set(const char *path, LPCSTR app0, LPCSTR key0, LPCSTR val0)
             }
             char *e = strchr(t, ']');
             if (e) *e = 0;
-            in = !strcasecmp(t + 1, app);
+            in = !done && !strcasecmp(t + 1, app);
             if (in) sawsec = 1;
             if (in && !key) { p += n; continue; } /* delete whole section */
         } else if (in) {
@@ -333,10 +337,9 @@ static int ini_set(const char *path, LPCSTR app0, LPCSTR key0, LPCSTR val0)
         done = 1;
     }
     if (!done && key && val && !sawsec) {
-        /* a new section at the end, after a blank line */
         size_t L = strlen(out);
         if (L && out[L - 1] != '\n') strcat(out, "\r\n");
-        strcat(out, "\r\n["); strcat(out, app); strcat(out, "]\r\n");
+        strcat(out, L ? "\r\n[" : "["); strcat(out, app); strcat(out, "]\r\n");
         strcat(out, key); strcat(out, "="); strcat(out, val); strcat(out, "\r\n");
     }
     FILE *f = fopen(path, "wb");
@@ -391,9 +394,19 @@ void w16_sys_init(void)
     char b[64];
     const char *dbg = getenv("W16_DEBUG");
     w16_debug = dbg && *dbg && *dbg != '0';
+    /* USER's start (seg3:1290, 1E09-1E95, 20FC, 226C) */
     w16_border_width = GetProfileInt("windows", "BorderWidth", 3);
     if (w16_border_width < 1) w16_border_width = 1;
-    if (w16_border_width > 49) w16_border_width = 49;
+    if (w16_border_width > 50) w16_border_width = 50;
+    w16_fast_switch = GetProfileInt("windows", "CoolSwitch", 1);
+    w16_grid = (SHORT)(GetProfileInt("Desktop", "GridGranularity", 0) << 3);
+    if (!w16_grid) w16_grid = 1;
+    w16_icon_spacing = GetProfileInt("Desktop", "IconSpacing", 96 * 75 / 96);   /* LOGPIXELSX * 75 / 96 */
+    if ((UINT)32 > (UINT)w16_icon_spacing) w16_icon_spacing = 32;           /* SM_CXICON */
+    w16_icon_title_wrap = GetProfileInt("Desktop", "IconTitleWrap", 1);
+    w16_screen_save = GetProfileInt("windows", "ScreenSaveTimeOut", 0);
+    if (!GetProfileInt("windows", "ScreenSaveActive", 0) && w16_screen_save > 0) w16_screen_save = -w16_screen_save;
+    SetCaretBlinkTime(GetProfileInt("windows", "CursorBlinkRate", 500));   /* seg3:1182 */
     w16_kbd_speed = GetProfileInt("windows", "KeyboardSpeed", 31);
     w16_kbd_delay = GetProfileInt("windows", "KeyboardDelay", 2);
     if (w16_kbd_speed < 0 || w16_kbd_speed > 31) w16_kbd_speed = 31;
@@ -963,4 +976,101 @@ int w16_chdir(LPCSTR dos)
     snprintf(cur_dir, sizeof cur_dir, "%s", n + 2);
     snprintf(drive_dir[cur_drive - 'A'], sizeof drive_dir[0], "%s", cur_dir);
     return 0;
+}
+
+/* ------------------------------------------------------------------ DOS find first / next (INT 21h 4Eh/4Fh) */
+typedef struct { int n, i; W16FINDDATA *e; } FindState;
+
+static int find_cmp(const void *a, const void *b)
+{
+    const W16FINDDATA *x = a, *y = b;
+    int dx = !strcmp(x->name, ".") ? 0 : !strcmp(x->name, "..") ? 1 : 2;
+    int dy = !strcmp(y->name, ".") ? 0 : !strcmp(y->name, "..") ? 1 : 2;
+    return dx != dy ? dx - dy : strcmp(x->name, y->name);
+}
+
+static void find_add(FindState *s, const char *name, BYTE attrib, DWORD size)
+{
+    W16FINDDATA *e = realloc(s->e, sizeof *e * (s->n + 1));
+    if (!e) return;
+    s->e = e;
+    e = &s->e[s->n++];
+    memset(e, 0, sizeof *e);
+    snprintf(e->name, sizeof e->name, "%s", name);
+    AnsiUpper(e->name);
+    e->attrib = attrib;
+    e->size = size;
+}
+
+/* Linux keeps no DOS directory order: the names come sorted, "." and ".." first */
+int w16_find_first(LPCSTR spec, UINT attr, W16FINDDATA *f)
+{
+    char dir[300] = "", pat[260] = "*.*", full[300], host[1024];
+    memset(f, 0, sizeof *f);
+    const char *bs = strrchr(spec, '\\');
+    if (!bs && spec[0] && spec[1] == ':') bs = spec + 1;
+    if (bs) {
+        snprintf(dir, sizeof dir, "%.*s", (int)(bs - spec + 1), spec);
+        snprintf(pat, sizeof pat, "%s", bs + 1);
+    } else
+        snprintf(pat, sizeof pat, "%s", spec);
+    norm_dos(dir[0] ? dir : ".", full, sizeof full);
+    DIR *d = w16_dos_to_host(full, host, sizeof host) ? NULL : opendir(host);
+    if (!d) return -1;
+    FindState *s = calloc(1, sizeof *s);
+    if (!s) { closedir(d); return -1; }
+    if ((attr & 0x10) && full[3]) {
+        if (w16_wildmatch(pat, ".")) find_add(s, ".", 0x10, 0);
+        if (w16_wildmatch(pat, "..")) find_add(s, "..", 0x10, 0);
+    }
+    for (struct dirent *e; (e = readdir(d));) {
+        char path[1400];
+        struct stat st;
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        snprintf(path, sizeof path, "%s/%s", host, e->d_name);
+        int hidden = e->d_name[0] == '.';
+        if (stat(path, &st) || (hidden && !(attr & 0x02)) || !w16_wildmatch(pat, e->d_name)) continue;
+        if (S_ISDIR(st.st_mode)) {
+            if (attr & 0x10) find_add(s, e->d_name, 0x10 | (hidden ? 0x02 : 0), 0);
+        } else
+            find_add(s, e->d_name, 0x20 | (access(path, W_OK) ? 0x01 : 0) | (hidden ? 0x02 : 0), (DWORD)st.st_size);
+    }
+    closedir(d);
+    if (attr & 0x10) {
+        /* directories mounted here from elsewhere (C:\WINDOWS) */
+        char sub[16][64];
+        int ns = w16_mount_children(full, sub, 16);
+        for (int i = 0; i < ns; i++) {
+            int dup = 0;
+            for (int k = 0; k < s->n && !dup; k++) dup = !strcasecmp(s->e[k].name, sub[i]);
+            if (!dup && w16_wildmatch(pat, sub[i])) find_add(s, sub[i], 0x10, 0);
+        }
+    }
+    if (s->n) qsort(s->e, s->n, sizeof *s->e, find_cmp);
+    f->search = s;
+    return w16_find_next(f);
+}
+
+int w16_find_next(W16FINDDATA *f)
+{
+    FindState *s = f->search;
+    if (!s) return -1;
+    if (s->i >= s->n) {
+        w16_find_close(f);
+        return -1;
+    }
+    void *keep = f->search;
+    *f = s->e[s->i++];
+    f->search = keep;
+    return 0;
+}
+
+void w16_find_close(W16FINDDATA *f)
+{
+    FindState *s = f->search;
+    if (s) {
+        free(s->e);
+        free(s);
+    }
+    f->search = NULL;
 }

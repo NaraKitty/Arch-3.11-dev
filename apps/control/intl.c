@@ -257,7 +257,7 @@ static char *StrStrOrEnd(const char *s, const char *sub)
 }
 
 /* seg1:061C: a trailing '\' unless there is one; returns the end of the string */
-static char *AddBackslash(char *path)
+static char *AddBackslashEnd(char *path)
 {
     char *e = path + lstrlen(path);
     if (!*path || e[-1] != '\\') {
@@ -1634,7 +1634,7 @@ static void IntlInitPaths(void)
     if (fDone) return;
     fDone = TRUE;
     GetWindowsDirectory(win, sizeof win);
-    AddBackslash(win);
+    AddBackslashEnd(win);
     wsprintf(g_szSystemIni, "%s%s", win, "SYSTEM.INI");
     GetSystemDirectory(g_szSharedDir, sizeof g_szSharedDir);
     if (OpenFile("SETUP.INF", &of, OF_EXIST) != HFILE_ERROR)
@@ -1653,7 +1653,7 @@ static BOOL IntlInitDialog(HWND hDlg)
 
     IntlInitPaths();
     ClockFromEnv();
-    p = AddBackslash(g_szSharedDir);
+    p = AddBackslashEnd(g_szSharedDir);
     if ((int)(p - g_szSharedDir) > 3) p[-1] = 0;
     w16_chdir(g_szSharedDir);   /* ChDirDrive seg9:0034 (LZOpenFile looks in the current directory first) */
     LoadString(hInstMain, 161, g_szSrcPathAlt, sizeof g_szSrcPathAlt);   /* "A:\" */
