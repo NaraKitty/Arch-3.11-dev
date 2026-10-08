@@ -34,7 +34,7 @@ static void frame_insets(HWND h, int *l, int *t, int *r, int *b)
 void w16_nc_calc(HWND h, const RECT *rw, RECT *rc)
 {
     *rc = *rw;
-    if (h->style & WS_MINIMIZE) { rc->right = rc->left; rc->bottom = rc->top; return; }
+    if (h->style & WS_MINIMIZE) return; /* an icon window is all client area */
     int l, t, r, b;
     frame_insets(h, &l, &t, &r, &b);
     rc->left += l; rc->top += t; rc->right -= r; rc->bottom -= b;
@@ -185,6 +185,8 @@ static void draw_frame(HWND h, HDC dc, int active)
     }
 }
 
+HWND w16_sysbox_inverted; /* the window whose system-menu box the menu loop has selected */
+
 void w16_draw_caption(HWND h, HDC dc, int active)
 {
     if (!w16_has_caption(h->style)) return;
@@ -204,6 +206,7 @@ void w16_draw_caption(HWND h, HDC dc, int active)
         /* left half of OBM_CLOSE: application system menu; right half: MDI child */
         int half = (h->style & WS_CHILD) ? 18 : 0;
         obm(dc, OBM_CLOSE, sm.left, sm.top, half, 18, 18);
+        if (h == w16_sysbox_inverted) InvertRect(dc, &sm);
         fill(dc, sm.right, c.top, sm.right + 1, c.bottom, black);
         tl = sm.right + 1;
     }
@@ -467,23 +470,126 @@ int w16_nc_hittest(HWND h, int x, int y)
 }
 
 /* ------------------------------------------------------------------ min / max / restore */
+/* An icon window is the icon and a 2-border margin around it (USER seg3:242F: 4 * cxBorder + cxIcon,
+ * 36 x 36 on VGA); the whole of it is the client area (real 3.11's Clock paints its minimised face
+ * from GetClientRect: a 36-pixel ring). */
+static int icon_wnd_cx(void) { return GetSystemMetrics(SM_CXICON) + 4 * GetSystemMetrics(SM_CXBORDER); }
+static int icon_wnd_cy(void) { return GetSystemMetrics(SM_CYICON) + 4 * GetSystemMetrics(SM_CYBORDER); }
+
+/* USER seg4:0000, the slot of a window minimised for the first time: slots of SM_CXICONSPACING x
+ * SM_CYICONSPACING fill the parent's client area from its bottom-left corner, left to right, then
+ * upwards; a slot is taken when it overlaps the slot of another visible icon. The icon window goes
+ * to the slot's top, centred across: spacing / 2 - cxIcon / 2 (measured on real 3.11: x 21 with the
+ * default spacing of 75, 34 with WIN.INI IconSpacing=100; y 408 = 480 - 72). */
+static void icon_slot_rect(int i, int cols, int ph, RECT *s)
+{
+    int sx = GetSystemMetrics(SM_CXICONSPACING), sy = GetSystemMetrics(SM_CYICONSPACING);
+    s->left = (i % cols) * sx;
+    s->right = s->left + sx;
+    s->top = ph - (i / cols + 1) * sy;
+    s->bottom = s->top + sy;
+}
+
 static void icon_slot(HWND h, POINT *pt)
 {
     if (h->has_iconpos) { *pt = h->iconpos; return; }
     int sx = GetSystemMetrics(SM_CXICONSPACING), sy = GetSystemMetrics(SM_CYICONSPACING);
+    int half = GetSystemMetrics(SM_CXICON) / 2;
     int cols = max(1, w16_screen.w / sx);
-    for (int i = 0;; i++) {
-        int col = i % cols, row = i / cols;
-        int x = col * sx + (sx - 32) / 2;
-        int y = w16_screen.h - (row + 1) * sy + (sy - 32 - 22) / 2 + 10;
+    RECT s;
+    for (int i = 0; i < 1000; i++) {
+        icon_slot_rect(i, cols, w16_screen.h, &s);
         int used = 0;
-        for (HWND c = w16_desktop->child; c; c = c->next)
-            if (c != h && (c->style & WS_MINIMIZE) && (c->style & WS_VISIBLE) && c->rw.left == x && c->rw.top == y) used = 1;
-        if (!used) { pt->x = x; pt->y = y; return; }
-        if (i > 400) { pt->x = x; pt->y = y; return; }
+        for (HWND c = w16_desktop->child; c && !used; c = c->next) {
+            if (c == h || !(c->style & WS_MINIMIZE) || !(c->style & WS_VISIBLE)) continue;
+            RECT o = {c->rw.left - sx / 2 + half, c->rw.top, 0, 0}, x;
+            o.right = o.left + sx;
+            o.bottom = o.top + sy;
+            used = IntersectRect(&x, &o, &s);
+        }
+        if (!used) break;
+    }
+    pt->x = s.left + sx / 2 - half;
+    pt->y = s.top;
+}
+
+/* USER seg1:6B43 / 6C14: an icon's title window. The text is measured with DrawText(DT_CALCRECT |
+ * DT_WORDBREAK | DT_CENTER | DT_NOPREFIX) in SM_CXICONSPACING - 2 cxBorder (one line when WIN.INI
+ * [desktop] IconTitleWrap=0) in the icon title font; the window is that wide plus 4 cxBorder, as high
+ * as the text, centred under the icon window: x = icon x + width/2 - text/2 - 2 cxBorder. */
+static HFONT icon_title_font(void)
+{
+    static HFONT f;
+    if (!f) {
+        LOGFONT lf;
+        SystemParametersInfo(SPI_GETICONTITLELOGFONT, sizeof lf, &lf, 0);
+        f = CreateFontIndirect(&lf);
+    }
+    return f;
+}
+
+static UINT icon_title_dt(void)
+{
+    return DT_WORDBREAK | DT_CENTER | DT_NOPREFIX | (GetProfileInt("desktop", "IconTitleWrap", 1) ? 0 : DT_SINGLELINE);
+}
+
+int w16_icon_title_rect(HWND h, RECT *r)
+{
+    SetRectEmpty(r);
+    if (!w16_valid(h) || !(h->style & WS_MINIMIZE) || h->parent != w16_desktop) return 0;
+    int cxb = GetSystemMetrics(SM_CXBORDER);
+    HDC dc = GetDC(NULL);
+    HGDIOBJ of = SelectObject(dc, icon_title_font());
+    RECT t = {0, 0, GetSystemMetrics(SM_CXICONSPACING) - 2 * cxb, 2};
+    char buf[80];
+    snprintf(buf, sizeof buf, "%s", h->text ? h->text : "");
+    int n = strlen(buf);
+    while (n > 0 && buf[n - 1] == ' ') buf[--n] = 0;
+    if (n) DrawText(dc, buf, n, &t, DT_CALCRECT | icon_title_dt());
+    else t.bottom = t.top + HIWORD(GetTextExtent(dc, " ", 1));
+    SelectObject(dc, of);
+    ReleaseDC(NULL, dc);
+    int w = t.right - t.left;
+    r->left = h->rw.left + icon_wnd_cx() / 2 - w / 2 - 2 * cxb;
+    r->top = h->rw.top + icon_wnd_cy();
+    r->right = r->left + w + 4 * cxb;
+    r->bottom = r->top + (t.bottom - t.top);
+    return 1;
+}
+
+void w16_invalidate_icon_title(HWND h)
+{
+    RECT r;
+    if (w16_icon_title_rect(h, &r)) w16_invalidate_screen_rect(&r);
+}
+
+/* USER seg1:6984, painting an icon title: the active icon's on the active caption colour in the
+ * caption text colour; an inactive one on the desktop's colour, its text black when that colour is
+ * light (R + G + B > 381), else white. Text in the title rectangle less cxBorder at the left and
+ * 2 cxBorder at the right. Called by the desktop's WM_PAINT for every visible icon. */
+void w16_paint_icon_titles(HDC dc)
+{
+    for (HWND c = w16_desktop->child; c; c = c->next) {
+        if (!(c->style & WS_VISIBLE) || !(c->style & WS_MINIMIZE)) continue;
+        RECT r;
+        if (!w16_icon_title_rect(c, &r) || !RectVisible(dc, &r)) continue;
+        int active = c == w16_active;
+        COLORREF bk = GetSysColor(active ? COLOR_ACTIVECAPTION : COLOR_BACKGROUND), fg;
+        if (active) fg = GetSysColor(COLOR_CAPTIONTEXT);
+        else fg = GetRValue(bk) + GetGValue(bk) + GetBValue(bk) > 0x17D ? RGB(0, 0, 0) : RGB(255, 255, 255);
+        FillRect(dc, &r, w16_sys_brush(active ? COLOR_ACTIVECAPTION : COLOR_BACKGROUND));
+        HGDIOBJ of = SelectObject(dc, icon_title_font());
+        SetTextColor(dc, fg);
+        SetBkMode(dc, TRANSPARENT);
+        int cxb = GetSystemMetrics(SM_CXBORDER);
+        RECT t = {r.left + cxb, r.top, r.right - 2 * cxb, r.bottom};
+        DrawText(dc, c->text ? c->text : "", -1, &t, icon_title_dt());
+        SelectObject(dc, of);
     }
 }
 
+/* USER seg6:1A72 (MinMaximize) with SW_MINIMIZE / SW_SHOWMINIMIZED: the window becomes an icon window
+ * at its icon slot and gets WM_SIZE with the icon window's size (its client area) */
 void w16_minimize(HWND h)
 {
     if (h->style & WS_MINIMIZE) return;
@@ -493,12 +599,13 @@ void w16_minimize(HWND h)
     icon_slot(h, &p);
     h->style |= WS_MINIMIZE;
     h->style &= ~WS_MAXIMIZE;
-    h->rw = (RECT){p.x, p.y, p.x + 32, p.y + 32};
+    h->rw = (RECT){p.x, p.y, p.x + icon_wnd_cx(), p.y + icon_wnd_cy()};
     w16_nc_calc(h, &h->rw, &h->rc);
     if (w16_focus && (w16_focus == h || IsChild(h, w16_focus))) SetFocus(h);
     w16_invalidate_screen_rect(&old);
-    w16_invalidate_screen_rect(&(RECT){p.x - 24, p.y, p.x + 56, p.y + 64});
-    SendMessage(h, WM_SIZE, SIZE_MINIMIZED, 0);
+    w16_invalidate_window(h, NULL, 1, 1);
+    w16_invalidate_icon_title(h);
+    SendMessage(h, WM_SIZE, SIZE_MINIMIZED, MAKELPARAM(h->rc.right - h->rc.left, h->rc.bottom - h->rc.top));
     SendMessage(h, WM_MOVE, 0, MAKELPARAM(h->rw.left, h->rw.top));
 }
 
@@ -519,12 +626,13 @@ void w16_maximize(HWND h)
 
 void w16_restore(HWND h)
 {
-    RECT old = h->rw;
+    RECT old = h->rw, title;
     int was_min = (h->style & WS_MINIMIZE) != 0;
     if (was_min) h->iconpos = (POINT){h->rw.left, h->rw.top}, h->has_iconpos = 1;
+    w16_icon_title_rect(h, &title);
     h->style &= ~(WS_MINIMIZE | WS_MAXIMIZE);
     w16_invalidate_screen_rect(&old);
-    if (was_min) w16_invalidate_screen_rect(&(RECT){old.left - 24, old.top, old.right + 24, old.top + 64});
+    if (was_min) w16_invalidate_screen_rect(&title);
     h->rw = (RECT){0, 0, 0, 0};
     w16_set_window_rect(h, &h->restore, 0);
     w16_invalidate_window(h, NULL, 1, 1);
@@ -532,13 +640,16 @@ void w16_restore(HWND h)
     SendMessage(h, WM_MOVE, 0, MAKELPARAM(h->rc.left, h->rc.top));
 }
 
-/* minimised window: icon (title drawn by the desktop) */
+/* a minimised window of a class with an icon shows the icon inside its 2-border margin (title drawn
+ * by the desktop, w16_paint_icon_titles); without a class icon the program paints its icon window
+ * itself (Clock) - WM_QUERYDRAGICON only gives the icon dragged with the mouse. UNTESTED against
+ * real 3.11: the class-icon position */
 void w16_iconic_paint(HWND h)
 {
-    HDC dc = GetWindowDC(h);
     HICON ic = h->cls->wc.hIcon;
-    if (!ic) ic = (HICON)SendMessage(h, WM_QUERYDRAGICON, 0, 0);
-    if (ic) DrawIcon(dc, 0, 0, ic);
+    if (!ic) return;
+    HDC dc = GetWindowDC(h);
+    DrawIcon(dc, 2 * GetSystemMetrics(SM_CXBORDER), 2 * GetSystemMetrics(SM_CYBORDER), ic);
     ReleaseDC(h, dc);
 }
 

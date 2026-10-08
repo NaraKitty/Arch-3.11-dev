@@ -87,8 +87,16 @@ static void init_metrics(int sw, int sh)
     m[SM_CYMINTRACK] = 27;
     m[SM_CXDOUBLECLK] = 4;
     m[SM_CYDOUBLECLK] = 4;
-    m[SM_CXICONSPACING] = 77;
-    m[SM_CYICONSPACING] = 77;
+    /* USER seg3:1DF5: LOGPIXELSX * 75 / 96 (75 on VGA) unless WIN.INI [desktop] IconSpacing says
+     * otherwise, never under cxIcon (measured: the first icon sits at 75 / 2 - 16 = 21, and at 34 with
+     * IconSpacing=100) */
+    m[SM_CXICONSPACING] = max(32, GetProfileInt("desktop", "IconSpacing", 96 * 75 / 96));
+    /* USER seg3:1E1C/1E98: cyIcon / 4 + the icon window (cyIcon + 4 cyBorder) + the title: with
+     * IconTitleWrap=1 two lines of the 13-pixel MS Sans Serif 8 icon title font plus cyBorder each
+     * (72 on VGA, the measured distance of the first icon row above the bottom of the screen), else
+     * one line plus 2 cyBorder */
+    m[SM_CYICONSPACING] = GetProfileInt("desktop", "IconTitleWrap", 1) ? 2 * (13 + 1) + 32 / 4 + 32 + 4
+                                                                         : 32 / 4 + 2 + 32 + 4 + 13;
     m[SM_MENUDROPALIGNMENT] = 0;
 }
 
@@ -292,9 +300,11 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
     }
     if (!done && key && val) {
         if (!sawsec) {
+            /* a new section follows a blank line, except at the top of an empty file (real 3.11's
+             * Clock created CLOCK.INI as "[Clock]\r\nMaximized=0\r\n...") */
             size_t L = strlen(out);
             if (L && out[L - 1] != '\n') strcat(out, "\r\n");
-            strcat(out, "\r\n["); strcat(out, app); strcat(out, "]\r\n");
+            strcat(out, L ? "\r\n[" : "["); strcat(out, app); strcat(out, "]\r\n");
         } else if (in) {
             size_t L = strlen(out);
             if (L && out[L - 1] != '\n') strcat(out, "\r\n");

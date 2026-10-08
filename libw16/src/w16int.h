@@ -232,6 +232,7 @@ int w16_nc_hittest(HWND h, int x, int y);
 LRESULT w16_nc_lbuttondown(HWND h, int hit, int x, int y);
 void w16_sys_command(HWND h, UINT cmd, int x, int y);
 void w16_draw_caption(HWND h, HDC dc, int active);
+extern HWND w16_sysbox_inverted; /* system-menu box selected by the menu loop: drawn inverted */
 int w16_has_caption(DWORD style);
 void w16_draw_sb(HWND h, HDC dc, int bar, int pressed_part);
 void w16_get_sb_rect(HWND h, int bar, RECT *r); /* window-relative */
@@ -239,6 +240,9 @@ void w16_track_sb(HWND h, HWND notify, int bar, int x, int y, int ctl);
 void w16_draw_sb_ctl(HDC dc, const RECT *r, int vert, W16Scroll *s, int pressed, int enabled_win, HWND bg);
 int w16_sb_hit(const RECT *r, int vert, W16Scroll *s, int x, int y, RECT *part);
 void w16_iconic_paint(HWND h);
+int w16_icon_title_rect(HWND h, RECT *r);   /* screen rectangle of an icon's title (0: not an icon) */
+void w16_invalidate_icon_title(HWND h);
+void w16_paint_icon_titles(HDC desktop_dc); /* the desktop's WM_PAINT draws the icon titles */
 void w16_minimize(HWND h);
 void w16_maximize(HWND h);
 void w16_restore(HWND h);
