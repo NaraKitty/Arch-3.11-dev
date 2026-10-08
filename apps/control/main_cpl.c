@@ -6,6 +6,8 @@
  * Network when WNetGetCaps reports no network. */
 #include "maincpl.h"
 #include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 HINSTANCE hInstMain;            /* [0x10] */
@@ -16,6 +18,9 @@ static BOOL fHourGlass;         /* [0x44] */
 static char szOutOfMem[256];    /* [0x18b0] string 0 */
 char szCaption[64];             /* [0x1f6a] string 1, "Control Panel" */
 char szClose[0x9E];             /* [0x1730] string 9, "Close" */
+char szWinDir[160];             /* [0x1fca] "C:\WINDOWS\" */
+char szSysDir[160];             /* [0x102a] "C:\WINDOWS\SYSTEM\" */
+char szControlIni[180];         /* [0xe7c] "C:\WINDOWS\control.ini" */
 
 static const char szHelpFile[] = "control.hlp";
 static const char *const szSections[] = {
@@ -35,7 +40,7 @@ static Applet applets[] = {
     {26, 50, 602, 2, TRUE, 5002, FALSE},   /* Fonts */
     {28, 52, 604, 4, TRUE, 5004, TRUE},    /* Ports */
     {30, 54, 606, 6, TRUE, 5006, TRUE},    /* Mouse */
-    {32, 56, 608, 8, TRUE, 5008, FALSE},   /* Desktop */
+    {32, 56, 608, 8, TRUE, 5008, TRUE},    /* Desktop */
     {29, 53, 605, 5, TRUE, 5005, TRUE},    /* Keyboard */
     {25, 49, 601, 1, TRUE, 5001, FALSE},   /* Printers */
     {27, 51, 603, 3, TRUE, 5003, FALSE},   /* International */
@@ -114,10 +119,146 @@ int DoDialogBoxParam(int id, HWND hwnd, DLGPROC proc, DWORD dwHelp, LPARAM lPara
     return r;
 }
 
+/* ------------------------------------------------------------------ seg4:0210
+ * the decimal digits of a number that is not negative */
+void IntToStr(int n, LPSTR p)
+{
+    LPSTR s = p;
+    do {
+        *p++ = (char)(n % 10 + '0');
+        n /= 10;
+    } while (n > 0);
+    *p = 0;
+    for (LPSTR e = p - 1; s < e; s++, e--) {
+        char c = *s;
+        *s = *e;
+        *e = c;
+    }
+}
+
+/* ------------------------------------------------------------------ seg4:019E
+ * blanks (not tabs) off both ends */
+void TrimSpaces(LPSTR s)
+{
+    LPSTR p = s;
+    while (*p == ' ') p++;
+    if (p != s) memmove(s, p, lstrlen(p) + 1);
+    p = s + lstrlen(s);
+    if (p != s) {
+        p--;
+        while (*p == ' ') p--;
+        p[1] = 0;
+    }
+}
+
+/* ------------------------------------------------------------------ seg4:02B4
+ * compares n characters, case-sensitive; the end of either string ends the comparison as equal */
+int StrNCmpPrefix(LPCSTR a, LPCSTR b, int n)
+{
+    for (int i = 0; i < n; i++) {
+        if (!a[i] || !b[i]) return 0;
+        if ((signed char)b[i] > (signed char)a[i]) return -1;
+        if ((signed char)b[i] < (signed char)a[i]) return 1;
+    }
+    return 0;
+}
+
+/* ------------------------------------------------------------------ seg4:031D: index of ch or -1 */
+int StrIndex(LPCSTR s, char ch)
+{
+    const char *p = strchr(s, ch);
+    return ch && p ? (int)(p - s) : -1;
+}
+
+/* ------------------------------------------------------------------ seg4:0341
+ * a backslash at the end unless there is one (MAIN.CPL looks at s[-1] for "": not done here) */
+void AddBackslash(LPSTR s)
+{
+    int n = lstrlen(s);
+    if (n == 0 || s[n - 1] != '\\') lstrcat(s, "\\");
+}
+
+/* ------------------------------------------------------------------ seg1:15C9
+ * case-insensitive substring search: each character that matches the first one (seg1:10B9) starts
+ * an lstrcmpi of n characters (seg1:1252) */
+LPSTR StrStrI(LPCSTR s, LPCSTR sub)
+{
+    int n = lstrlen(sub);
+    char a[260], b[260];
+    if (n >= (int)sizeof a) return NULL;
+    lstrcpy(b, sub);
+    for (; *s; s++) {
+        char c1[2] = {*s, 0}, c2[2] = {sub[0], 0};
+        if (lstrcmpi(c1, c2)) continue;
+        snprintf(a, sizeof a, "%.*s", n, s);
+        if (!lstrcmpi(a, b)) return (LPSTR)s;
+    }
+    return NULL;
+}
+
+/* ------------------------------------------------------------------ seg1:1C0B (with seg1:1A23)
+ * the first key of [section] whose value is `value` (lstrcmpi), as a malloc'd copy, or NULL */
+LPSTR FindIniKeyByValue(LPCSTR file, LPCSTR section, LPCSTR value)
+{
+    if (!value || !*value) return NULL;
+    /* seg1:1A23 reads the key list into a buffer that grows by 0x800 until it fits */
+    int cb = 0x1000, n;
+    char *keys = malloc(cb);
+    for (;;) {
+        if (!keys) return NULL;
+        n = GetPrivateProfileString(section, NULL, "", keys, cb, file);
+        if (cb - 10 >= n) break;
+        cb += 0x800;
+        char *more = realloc(keys, cb);
+        if (!more) free(keys);
+        keys = more;
+    }
+    LPSTR found = NULL;
+    for (char *p = keys; *p; p += lstrlen(p) + 1) {
+        char buf[0x100];
+        GetPrivateProfileString(section, p, "", buf, sizeof buf, file);
+        if (!lstrcmpi(buf, value)) {
+            found = strdup(p);
+            break;
+        }
+    }
+    free(keys);
+    return found;
+}
+
+/* ------------------------------------------------------------------ seg6:0000
+ * "Are you sure ... %s ...?" with Yes / No */
+BOOL ConfirmRemove(HWND hwnd, LPCSTR name, int idFormat)
+{
+    char fmt[0x9e], msg[0x200];
+    LoadString(hInstMain, idFormat, fmt, sizeof fmt);
+    wsprintf(msg, fmt, name);
+    return MessageBox(hwnd, msg, szCaption, MB_YESNO | MB_ICONQUESTION) == IDYES;
+}
+
+/* ------------------------------------------------------------------ seg9:005F
+ * OpenFile with the Windows directory current, unless the name starts "X:\" (seg9:0000 / seg9:0034
+ * keep and restore the DOS current directory; seg9:0122 tries OF_SHARE_DENY_NONE first) */
+HFILE OpenFileFromWinDir(LPCSTR file, OFSTRUCT *of, UINT style)
+{
+    char saved[260] = "", dir[260];
+    BOOL restore = !(file[0] && file[1] == ':' && file[2] == '\\');
+    if (restore) {
+        w16_getcwd(saved, sizeof saved);
+        lstrcpy(dir, szWinDir);
+        int n = lstrlen(dir);
+        if (n > 3 && dir[n - 1] == '\\') dir[n - 1] = 0;   /* not a root "X:\" */
+        w16_chdir(dir);
+    }
+    HFILE hf = OpenFile(file, of, style | OF_SHARE_DENY_NONE);
+    if (hf == HFILE_ERROR) hf = OpenFile(file, of, style);
+    if (restore) w16_chdir(saved);
+    return hf;
+}
+
 /* ------------------------------------------------------------------ seg3:0733: run applet <id>
  * Not ported yet: 1 Printers = dialog 1, seg20:1302 (activates the open one, [0x16], instead when
- * there is one); 2 Fonts = dialog 2, seg9:0CBC; 3 International = dialog 3, seg12:194D; 8 Desktop =
- * dialog 8, seg18:1419. */
+ * there is one); 2 Fonts = dialog 2, seg9:0CBC; 3 International = dialog 3, seg12:194D. */
 static void RunApplet(HWND hwnd, int id)
 {
     switch (id) {
@@ -136,6 +277,10 @@ static void RunApplet(HWND hwnd, int id)
     case 7:
         DialogBox(hInstMain, MAKEINTRESOURCE(7), hwnd, DateTimeDlgProc);
         break;
+    case 8:
+        /* seg3:0879: the return value is not looked at */
+        DialogBox(hInstMain, MAKEINTRESOURCE(8), hwnd, DesktopDlgProc);
+        break;
     case 10:
         NetworkDialog(hwnd);
         break;
@@ -152,6 +297,12 @@ static BOOL InitApplet(void)
     LoadString(hInstMain, 0, szOutOfMem, sizeof szOutOfMem);
     LoadString(hInstMain, 1, szCaption, sizeof szCaption);
     LoadString(hInstMain, 9, szClose, sizeof szClose); /* seg3:01D4 keeps a LocalAlloc copy */
+    /* seg3:022F-02E7: the directories with a backslash (seg1:061C), control.ini in the Windows one */
+    GetWindowsDirectory(szWinDir, sizeof szWinDir - 1);
+    AddBackslash(szWinDir);
+    GetSystemDirectory(szSysDir, sizeof szSysDir - 1);
+    AddBackslash(szSysDir);
+    wsprintf(szControlIni, "%s%s", szWinDir, "control.ini");
     return TRUE;
 }
 

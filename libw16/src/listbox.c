@@ -552,7 +552,12 @@ static void cb_text_from_list(HWND h)
     int i = (int)SendMessage(c->list, LB_GETCURSEL, 0, 0);
     char buf[512] = "";
     if (i >= 0) SendMessage(c->list, LB_GETTEXT, i, (LPARAM)buf);
-    if (c->edit) { SetWindowText(c->edit, buf); SendMessage(c->edit, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF)); }
+    if (c->edit) {
+        SetWindowText(c->edit, buf);
+        /* seg33:1053: the edit's text is selected only while the combo has the focus (on 3.11 the
+         * Edit Pattern dialog's Add, pressed from OK, leaves the name unselected) */
+        if (c->focus) SendMessage(c->edit, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
+    }
     else { free(h->text); h->text = strdup(buf); InvalidateRect(h, NULL, FALSE); }
 }
 
@@ -819,6 +824,12 @@ LRESULT w16_combobox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         if (c->edit && (HWND)W16_CMD_HWND(lp) == c->edit) {
             if (HIWORD(lp) == EN_CHANGE) w16_notify_parent(h, CBN_EDITCHANGE);
             else if (HIWORD(lp) == EN_UPDATE) w16_notify_parent(h, CBN_EDITUPDATE);
+            else if (HIWORD(lp) == EN_SETFOCUS && !c->focus) {
+                /* the focus went straight to the edit (a click): CBGetFocusHelper (seg33:115D) */
+                c->focus = 1;
+                SendMessage(c->edit, EM_SETSEL, 0, MAKELPARAM(0, 0x7FFF));
+                w16_notify_parent(h, CBN_SETFOCUS);
+            }
             else if (HIWORD(lp) == EN_KILLFOCUS && w16_focus != h && w16_focus != c->list) {
                 c->focus = 0;
                 SendMessage(c->edit, EM_SETSEL, 0, 0); /* CBKillFocusHelper (seg33) */
@@ -836,13 +847,13 @@ LRESULT w16_combobox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         return 0;
     case WM_USER + 0x501: cb_show(h, 0); return 0;
     case WM_SETTEXT:
-        if (c->edit) return SendMessage(c->edit, WM_SETTEXT, wp, lp);
-        return DefWindowProc(h, m, wp, lp);
+    case WM_GETTEXTLENGTH:
+        /* seg33:05AE: these go to the edit; a drop-down list has none and answers CB_ERR (the
+         * Desktop's "Unlisted" pattern name never shows on 3.11) */
+        if (c->edit) return SendMessage(c->edit, m, wp, lp);
+        return CB_ERR;
     case WM_GETTEXT:
         if (c->edit) return SendMessage(c->edit, WM_GETTEXT, wp, lp);
-        return DefWindowProc(h, m, wp, lp);
-    case WM_GETTEXTLENGTH:
-        if (c->edit) return SendMessage(c->edit, WM_GETTEXTLENGTH, wp, lp);
         return DefWindowProc(h, m, wp, lp);
     case WM_ENABLE:
         if (c->edit) EnableWindow(c->edit, wp != 0);
@@ -854,6 +865,7 @@ LRESULT w16_combobox_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     case CB_DELETESTRING: return SendMessage(c->list, LB_DELETESTRING, wp, lp);
     case CB_RESETCONTENT: SendMessage(c->list, LB_RESETCONTENT, 0, 0); if (!c->edit) { free(h->text); h->text = strdup(""); InvalidateRect(h, NULL, FALSE); } return 0;
     case CB_GETCOUNT: return SendMessage(c->list, LB_GETCOUNT, 0, 0);
+    case CB_DIR: return w16_dir_add(c->list, (UINT)wp, (LPCSTR)lp, 0);
     case CB_GETCURSEL: return SendMessage(c->list, LB_GETCURSEL, 0, 0);
     case CB_SETCURSEL: { LRESULT r = SendMessage(c->list, LB_SETCURSEL, wp, 0); cb_text_from_list(h); return r; }
     case CB_GETLBTEXT: return SendMessage(c->list, LB_GETTEXT, wp, lp);

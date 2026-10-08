@@ -386,7 +386,43 @@ pointer, which sits at 320,240, stay out). First run: 30 checks in 30 s, all PAS
 scenarios, Sound with and without a wave device, Keyboard, Mouse, Notepad hello; INI values for Ports
 and Sound). New applet tests should carry these lines; I merge branches only with the run green.
 
-### Session 7 (Oct 8, Color applet worktree) - MAIN.CPL Color, VGA colour matching, MessageBox
+### Session 7 (Oct 8) - Desktop applet (MAIN.CPL seg18), desktop pattern and wallpaper in libw16
+apps/control/desktop.c ports dialog 8 "Desktop" (seg18:1419) and dialog 34 "Edit Pattern" (seg18:03A0)
+with all their seg18 helpers; main_cpl.c gains the seg1/seg4/seg6/seg9 helpers they share (IntToStr,
+TrimSpaces, AddBackslash, StrStrI, FindIniKeyByValue, ConfirmRemove, ...); StepField (seg2:0664) moved
+to arrow.c for every cpArrow user. Settings go through SystemParametersInfo with 3.1's SPIF flags and
+land in WIN.INI / CONTROL.INI / SYSTEM.INI byte for byte as real 3.11 writes them (KERNEL's
+WriteProfileString rules: an existing key keeps its spelling, a new key goes after the section's last
+non-blank line). Screen savers are listed from their NE module description, read as data, never run:
+Test and Setup do nothing (TODO: native screen savers).
+libw16: SPI border width / icon spacing / title wrap / grid / screen saver / CoolSwitch / pattern /
+wallpaper as USER seg41:0ED6 (writes only when changed, WM_WININICHANGE only when written); the desktop
+paints its pattern brush (16 numbers, top-left 8x8, clear bits COLOR_BACKGROUND) and the wallpaper tiled
+or centred (USER seg21); a new border width resizes sizable windows; pattern brushes follow the DC origin;
+DrawText keeps a line's first word whole; gray text stipple from the text origin; SBS_TOPALIGN bars;
+CB_DIR; find-first/next for DOS listings; a radio group is entered at its checked button; push-button
+mnemonics click without taking the focus; a dialog without the activation shows no default button; group
+boxes are HTTRANSPARENT and the hit test goes on to the sibling below (spin arrows inside group boxes); a
+drop-down list answers WM_SETTEXT / WM_GETTEXTLENGTH with CB_ERR (seg33:05AE); a combo selects its edit's
+text on CB_SETCURSEL only while focused (seg33:1053); icons: the image nearest 32x32, then the colour
+count nearest 16 (VGA.DRV's "i" box icon is dark blue on 3.11); script shots left when the program ends
+are taken of the screen it leaves (the wallpaper after OK); regress.sh matches "[boot]   " headers.
+Verified (regress.sh, WSL): `ARCH311_REF=/mnt/c/Users/pikac/arch311-ref tools/regress.sh` -> 89 checks,
+all PASS, including 6 Desktop tests against reference runs desk-open, desk-pattern, desk-spin,
+desk-editpat, desk-nowall, desk-center (32 frame checks: every captured dialog frame 0 px apart, the
+desktop after OK 0 px apart outside the real Control Panel; 27 WIN.INI / SYSTEM.INI / CONTROL.INI
+values). Whole-file INI comparisons differ only in the rig's shell=control.exe and NumApps. Not compared:
+message box 215 (libw16's MessageBox is not USER's seg42:04F5 layout: the real box is wider/narrower,
+wraps at a 312 px text limit and centres differently); the rig dropped some frames (noted per test).
+UNTESTED against 3.11: the spin arrows by mouse (desktop-arrows.w16, port only), dropped files,
+Idle-Wild savers, 256-colour wallpapers, minimised windows on a border change, and every effect of the
+stored-only settings (icon spacing / wrap, sizing grid, Alt+Tab, starting a screen saver).
+NEXT: USER's MessageBox layout (seg42:04F5: text limit cxScreen/8*5 - 2*(cyBorder + cxSize) - icon
+space, sizes through dialog units; DrawText's CALCRECT width of a wrapped line includes its break space;
+open: two real boxes 384 and 388 px wide both have their left edge at x=128, client at 133, which the
+dialog-unit path (client x = 2 * units) cannot give); then the desktop settings' effects in the WM.
+
+### Session 8 (Oct 8, Color applet worktree) - MAIN.CPL Color, VGA colour matching
 Color applet (apps/control/colorcpl.c = MAIN.CPL seg6/seg7 with seg1:191B, seg4:00E5, seg23:07E1;
 seg3:0756 runs it with the private loop seg3:06AE): dialog 100 with the sample screen and the palette
 half, Save Scheme (27), the modeless Custom Color Selector (26). Windows Default and the basic colours
@@ -395,9 +431,12 @@ read at run time. Color is the first icon, so its tests open it with Enter like 
 Verified in 16 colours (W16_COLORS=16) with tools/regress.sh, tests apps/control/tests/color*.w16 vs
 arch311-ref/scn/color-*.scn: opened, every scheme (23 frames), palette, custom colour, OK (Control
 Panel repainted in Arizona; WIN.INI [colors] and CONTROL.INI [current]/[Custom Colors] equal to real
-3.11's), Save Scheme (CONTROL.INI), Remove Scheme and three confirmation boxes - all PASS, as do the
-other applets' and Notepad's tests. UNTESTED: every mouse path (the rig types keys only), Help, the
-selector's own arrow keys, Color|Solid, Save over an existing name, true-colour drawing.
+3.11's), Save Scheme (CONTROL.INI), Remove Scheme (CONTROL.INI and the dialog after it) - all PASS, as
+do the other applets' and Notepad's tests. The three confirmation-box frames (color-remove 02,
+color-mbox 02/05) are commented out "pending USER MessageBox (International branch)": a seg42:04F5 port
+of mine matched all three to the pixel but was dropped for the International agent's. UNTESTED: every
+mouse path (the rig types keys only), Help, the selector's own arrow keys, Color|Solid, Save over an
+existing name, true-colour drawing.
 libw16 (each from the 3.1 code named):
 - 16-colour mode matches VGA.DRV, tables read from the user's VGA.DRV: nearest colour seg1:1956,
   dither seg1:24A1, RealizeObject seg1:292A (white/black and driver colours solid, E0E0E0+0x10 = the
@@ -408,13 +447,18 @@ libw16 (each from the 3.1 code named):
 - Dialog manager: CheckDefPushButton (seg25:0B5B), ClearDefaults (0AB2), Save/RestoreDlgFocus
   (03A8/03E3), DlgSetFocus (0000); the default button changes only on the focus moves IsDialogMessage
   makes (Tab, arrows, mnemonics, clicks), activation and DM_SETDEFID; a disabled default push button
-  draws plain (seg25:18BC).
-- MessageBox = USER seg42:04F5 + MB_DlgProc seg42:0101: an in-memory template in system-font units,
-  buttons 2 x "0" wider than the longest label (seg3:23BE), CS_BYTEALIGNWINDOW then places it (that
-  explains real boxes 1 px right of the arithmetic). No MessageBeep - 3.1's MessageBox plays none.
+  draws plain (seg25:18BC). (This replaces session 7's set_default_button; its measurements hold.)
+- For whoever ports USER's MessageBox (seg42:04F5): the box is a DS_ABSALIGN template in system-font
+  units, and "#32770" has CS_BYTEALIGNWINDOW, so CreateWindow (seg13:0E34) rounds the window's left
+  edge to the nearest multiple of 8 on VGA - that is why real boxes sit at x=128 (client 133) where the
+  dialog-unit arithmetic gives 127/132 (libw16's window.c already does the rounding). Button width =
+  the longest label by length (OK, Cancel, Yes, No, Retry, Abort, Ignore, Close; "&Ignore") without
+  "&" + 2 x the width of "0" (seg3:23BE: 57 px); text limit (cxScreen/8)*5 - 2*(cyBorder + cxSize) -
+  icon area; margins cxSize/cySize = 18, frame cxBorder; 3.1's MessageBox calls no MessageBeep;
+  MB_DlgProc deletes SC_CLOSE without a Cancel button and turns a lone OK into IDCANCEL.
 - DrawText = USER seg6:0571 (wrapped lines keep their trailing blank for centring and for
-  DT_CALCRECT); GrayString's stipple follows the text origin; owner-draw drop-down lists (seg33/34);
-  CombineRgn/PtInRegion/FillRgn, ClipCursor, w16_module_data (a module's segment bytes).
+  DT_CALCRECT; a line's first word stays whole); GrayString's stipple follows the text origin;
+  owner-draw drop-down lists (seg33/34); CombineRgn/PtInRegion/FillRgn, ClipCursor, w16_module_data.
 - tools/regress.sh: `# ini:` takes a bracketed section with spaces ([Custom Colors]).
 Rig notes: the frame recorder drops a shot identical to the previous one, so count frames by what
 changed; a letter typed while a control wants characters (the colour grids) is no mnemonic; after a

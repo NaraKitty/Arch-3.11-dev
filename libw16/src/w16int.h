@@ -221,6 +221,7 @@ HWND w16_next_to_paint(HWND root);
 int w16_any_paint_pending(void);
 void w16_set_window_rect(HWND h, const RECT *rw, UINT swp);
 HWND w16_top_level(HWND h);
+HWND w16_window_under(HWND h, POINT pt); /* hit testing past an HTTRANSPARENT window */
 int w16_window_visible(HWND h); /* visible including ancestors */
 void w16_activate(HWND h, int how);
 void w16_send_paint_cascade(HWND h); /* UpdateWindow semantics */
@@ -308,6 +309,13 @@ LRESULT w16_listbox_proc(HWND, UINT, WPARAM, LPARAM);
 LRESULT w16_combobox_proc(HWND, UINT, WPARAM, LPARAM);
 LRESULT w16_scrollbar_proc(HWND, UINT, WPARAM, LPARAM);
 LRESULT w16_desktop_proc(HWND, UINT, WPARAM, LPARAM);
+/* the desktop (window.c): USER's SetDeskPattern / SetDeskWallpaper ((LPCSTR)-1 reads WIN.INI) */
+BOOL w16_set_desk_pattern(LPCSTR pattern);
+BOOL w16_set_desk_wallpaper(LPCSTR file);
+HBRUSH w16_desktop_pattern_brush(void);  /* COLOR_BACKGROUND's brush while there is a pattern */
+void w16_desktop_redraw(void);           /* the desktop and every window again */
+void w16_paint_desktop(HDC dc, const RECT *r); /* the desktop's picture behind a window */
+void w16_border_changed(int old);        /* SPI_SETBORDER: sizable frames grow or shrink */
 LRESULT w16_combolbox_proc(HWND, UINT, WPARAM, LPARAM);
 HBRUSH w16_ctl_color(HWND ctl, HDC dc, int type);
 void w16_draw_prefix_text(HDC dc, int x, int y, const char *s, int n, int noprefix);
@@ -323,6 +331,14 @@ extern int w16_metric[SM_CMETRICS];
 void w16_sys_init(void);
 const char *w16_config_dir(void);
 extern int w16_border_width;
+/* the next five are kept, reported and written as USER does; nothing acts on them yet (TODO,
+ * UNTESTED: icon arrangement and title wrapping, the sizing grid when moving and sizing, Alt+Tab
+ * switching, starting the screen saver after the timeout) */
+extern int w16_icon_spacing;            /* SPI_ICONHORIZONTALSPACING (USER [0xc0]) */
+extern int w16_icon_title_wrap;         /* SPI_GET/SETICONTITLEWRAP ([0x1b2]) */
+extern int w16_grid;                    /* sizing grid in pixels, 8 * GridGranularity, at least 1 ([0x6e8]) */
+extern int w16_fast_switch;             /* CoolSwitch ([0x1ae]) */
+extern int w16_screen_save;             /* ScreenSaveTimeOut in seconds, negative while not active ([0xe8]) */
 extern int w16_kbd_speed, w16_kbd_delay; /* typematic: speed 0..31, delay 0..3 (WIN.INI [windows]) */
 extern UINT w16_dblclk_time;            /* DoubleClickSpeed */
 extern int w16_swap_buttons;            /* SwapMouseButtons */

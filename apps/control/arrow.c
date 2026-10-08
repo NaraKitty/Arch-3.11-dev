@@ -43,6 +43,30 @@ int AdjustArrowWidth(HWND h)
     return odd;
 }
 
+/* ------------------------------------------------------------------ seg2:0664
+ * one step of a field: the step or jump for the scroll code, kept in range (flag 2 / 4 when it
+ * went past the top / bottom) */
+int StepField(int code, int v, ARROWSTEP *f)
+{
+    int d = 0;
+    switch (code) {
+    case SB_LINEUP: d = f->step[0]; break;
+    case SB_LINEDOWN: d = f->step[1]; break;
+    case SB_PAGEUP: d = f->step[2]; break;
+    case SB_PAGEDOWN: d = f->step[3]; break;
+    case SB_THUMBPOSITION: v = f->v4; break;
+    case SB_THUMBTRACK: v = f->v5; break;
+    case SB_TOP: v = f->max; break;
+    case SB_BOTTOM: v = f->min; break;
+    case SB_ENDSCROLL: break;
+    default: f->flag = 1; break;   /* (overwritten below) */
+    }
+    if (v + d > f->max) { f->flag = 2; return f->max; }
+    if (v + d < f->min) { f->flag = 4; return f->min; }
+    f->flag = 0;
+    return v + d;
+}
+
 /* ------------------------------------------------------------------ seg2:006F: 0 up, 1 down, -1 neither */
 static int HitArrow(void)
 {

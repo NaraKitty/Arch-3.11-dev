@@ -357,6 +357,10 @@ LRESULT w16_button_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         }
         redraw_part(h, ODA_FOCUS);
         return 0;
+    case WM_NCHITTEST:
+        /* a group box lets the mouse through to what lies under it */
+        if (btype(h) == BS_GROUPBOX) return HTTRANSPARENT;
+        return DefWindowProc(h, m, wp, lp);
     case WM_LBUTTONDOWN:
     case WM_LBUTTONDBLCLK:
         if (btype(h) == BS_GROUPBOX) return 0;
