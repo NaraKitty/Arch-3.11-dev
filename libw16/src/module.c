@@ -161,6 +161,28 @@ const W16Res *w16_find_res(HINSTANCE m, LPCSTR name, LPCSTR type)
 
 const uint8_t *w16_res_data(HINSTANCE m, const W16Res *r) { return m->data + r->off; }
 
+/* the file contents of an NE segment (seg 1..n; 0 = the automatic data segment): read-only tables
+ * that ports and libw16 take from the user's own files instead of carrying copies */
+const void *w16_module_data(HINSTANCE m, int seg, unsigned *len)
+{
+    if (len) *len = 0;
+    if (!m || m->size < 0x40) return NULL;
+    const uint8_t *d = m->data;
+    uint32_t ne = u32(d + 0x3C);
+    if (ne + 0x40 > m->size) return NULL;
+    int nseg = u16(d + ne + 0x1C), shift = u16(d + ne + 0x32);
+    if (!shift) shift = 9;
+    if (seg == 0) seg = u16(d + ne + 0x0E);
+    if (seg < 1 || seg > nseg) return NULL;
+    const uint8_t *e = d + ne + u16(d + ne + 0x22) + (seg - 1) * 8;
+    if (e + 8 > d + m->size) return NULL;
+    uint32_t off = (uint32_t)u16(e) << shift, n = u16(e + 2) ? u16(e + 2) : 0x10000;
+    if (!off || off >= m->size) return NULL;
+    if (off + n > m->size) n = m->size - off;
+    if (len) *len = n;
+    return d + off;
+}
+
 HANDLE FindResource(HINSTANCE h, LPCSTR name, LPCSTR type) { return (HANDLE)w16_find_res(h, name, type); }
 HGLOBAL LoadResource(HINSTANCE h, HANDLE res) { return res ? (HGLOBAL)w16_res_data(h, res) : NULL; }
 void *LockResource(HGLOBAL h) { return h; }

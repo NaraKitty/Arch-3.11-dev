@@ -1227,6 +1227,9 @@ extern const char *w16_app_module;
 /* KERNEL */
 HINSTANCE GetModuleHandle(LPCSTR name);
 HINSTANCE w16_load_module(LPCSTR filename);
+/* the file contents of segment seg (0 = the automatic data segment) of a loaded NE module, for
+ * read-only tables; NULL if absent */
+const void *w16_module_data(HINSTANCE m, int seg, unsigned *len);
 DWORD GetTickCount(void);
 DWORD GetCurrentTime(void);
 int GetProfileInt(LPCSTR app, LPCSTR key, int def);

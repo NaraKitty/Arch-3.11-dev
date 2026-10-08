@@ -1,0 +1,16 @@
+# Color applet: Arizona, then Remove Scheme (Tab: Save Scheme is disabled for an unchanged scheme)
+# and Enter (Yes) in the confirmation box: Arizona leaves CONTROL.INI [color schemes] and the combo,
+# and the next scheme is selected. Same keys as arch311-ref/scn/color-remove.scn; compare in
+# 16 colours (tests/color.sh) and compare OUT/ini/CONTROL.INI with arch311-ref/run-color-remove.
+sleep 400
+shot shots/01.png
+key enter
+key down
+key tab
+key space
+sleep 400
+shot shots/02.png
+key enter
+sleep 400
+shot shots/03.png
+quit

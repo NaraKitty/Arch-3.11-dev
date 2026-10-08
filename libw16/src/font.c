@@ -614,8 +614,10 @@ void w16_draw_gray_text(HDC dc, int x, int y, const char *s, int n, int noprefix
 }
 
 /* Grayed text where GRAYTEXT would vanish into the background (push buttons: GRAYTEXT ==
- * BTNFACE on VGA): like GrayString with the 50% gray brush, only every other text pixel is
- * drawn, in the normal text colour. MEASURE: checkerboard phase vs. real 3.11. */
+ * BTNFACE on VGA): USER GrayString (seg10:2F30) draws the text into a monochrome bitmap at (0,0),
+ * ORs USER's gray brush over it (rows 0x55, 0xAA from seg12:13E1: white where x + y is odd) and
+ * blits it to (x, y), so the pixels kept are those an even distance from the text origin (measured:
+ * MAIN.CPL Color's disabled Save Scheme / Remove Scheme buttons). */
 void w16_draw_stippled_text(HDC dc, int x, int y, const char *s, int n, int noprefix, COLORREF fg)
 {
     TEXTMETRIC tm;
@@ -630,9 +632,7 @@ void w16_draw_stippled_text(HDC dc, int x, int y, const char *s, int n, int nopr
     SetTextColor(dc, old);
     for (int j = 0; j < h; j++)
         for (int i = 0; i < w; i++) {
-            int dx = x + i, dy = y + j;
-            w16_lp_to_dp(dc, &dx, &dy);
-            if ((dx + dy) & 1) {
+            if ((i + j) & 1) {
                 COLORREF c = save[j * w + i];
                 if (c != (COLORREF)-1 && GetPixel(dc, x + i, y + j) != c) SetPixel(dc, x + i, y + j, c);
             }

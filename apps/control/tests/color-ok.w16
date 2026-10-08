@@ -1,0 +1,50 @@
+# Color applet: Arizona, the palette, a custom colour (hue 40, sat 200, lum 100) added and the
+# selector closed, Tab Tab Tab to OK and Space (SetSysColors: the Control Panel repaints in Arizona),
+# then Settings > Exit. Same keys as arch311-ref/scn/color-ok.scn; compare in 16 colours
+# (tests/color.sh) and compare OUT/ini/WIN.INI [colors], CONTROL.INI [current] and [Custom Colors]
+# with arch311-ref/run-color-ok/WINDOWS.
+sleep 400
+shot shots/01.png
+key enter
+key down
+key tab
+key tab
+key space
+key tab
+key tab
+key tab
+key space
+key 4
+key 0
+key tab
+key 2
+key 0
+key 0
+key tab
+key 1
+key 0
+key 0
+key tab
+key tab
+key tab
+key tab
+key space
+sleep 400
+shot shots/02.png
+key tab
+key space
+sleep 400
+shot shots/03.png
+key tab
+key tab
+key tab
+sleep 400
+shot shots/04.png
+key space
+sleep 600
+shot shots/05.png
+key alt
+key s
+key x
+sleep 400
+quit

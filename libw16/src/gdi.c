@@ -99,6 +99,159 @@ uint32_t w16_invert_display_px(uint32_t d)
     return a | (~d & 0xFFFFFF);
 }
 
+/* ------------------------------------------------------------------ VGA.DRV colour matching
+ * On the 16-colour display, colours are matched and brushes dithered the way VGA.DRV does it:
+ * ColorInfo / RealizeObject (seg1:1956) find the nearest of its 16 colours along a primary,
+ * secondary or gray line chosen from the sorted channels; a brush colour it does not have is
+ * dithered over the corners of the cube cell the colour lies in (seg1:24A1) with an 8x8 ordered
+ * matrix. The driver's tables (its colours, levels, cells, ranks, matrix) are read from the
+ * user's VGA.DRV, code segment 1, at run time; without it a rougher approximation is used. */
+static const uint8_t *vgacs;    /* VGA.DRV seg1, NULL until checked or if unusable */
+static int vgacs_tried;
+
+static const uint8_t *vga_tables(void)
+{
+    if (!vgacs_tried) {
+        vgacs_tried = 1;
+        unsigned len = 0;
+        HINSTANCE m = w16_system_module("VGA.DRV");
+        const uint8_t *d = m ? w16_module_data(m, 1, &len) : NULL;
+        /* the code that uses the tables (seg1:22A1 "sub ax,ax; mov ch,dl") and the matrix */
+        if (d && len >= 0x22A5 && d[0x22A1] == 0x2B && d[0x22A2] == 0xC0 && d[0x22A3] == 0x8A && d[0x22A4] == 0xEA) {
+            int seen[64] = {0}, ok = 1;
+            for (int i = 0; i < 64; i++) {
+                int v = d[0x2261 + i];
+                if (v > 63 || seen[v]++) ok = 0;
+            }
+            for (int i = 0; i < 16 && ok; i++) {
+                const uint8_t *e = d + 0x3C + 3 * i;
+                uint32_t p = (uint32_t)e[0] << 16 | e[1] << 8 | e[2];
+                int found = 0;
+                for (int k = 0; k < 16; k++) found |= vga16[k] == p;
+                ok = found;
+            }
+            if (ok) vgacs = d;
+        }
+    }
+    return vgacs;
+}
+
+/* seg1:22A1: sorts three channel values (largest first); returns the swaps as 3 bits */
+static int vga_sort3(int *a, int *b, int *c)
+{
+    int bits = 0, t, cf;
+    cf = *a < *c; if (cf) { t = *a; *a = *c; *c = t; } bits = bits << 1 | cf;
+    cf = *b < *c; if (cf) { t = *b; *b = *c; *c = t; } bits = bits << 1 | cf;
+    cf = *a < *b; if (cf) { t = *a; *a = *b; *b = t; } bits = bits << 1 | cf;
+    return bits;
+}
+
+/* seg1:2323: a colour index for sorted channels (bit 0 the largest, bit 2 the smallest, bit 3
+ * intensity) back to the driver's R, G, B bit order */
+static int vga_unsort(int code, int perm)
+{
+    int dl = code & 1, dh = (code >> 1) & 1, ah = (code >> 2) & 1, t;
+    if (perm & 1) { t = dh; dh = dl; dl = t; }
+    if (perm & 2) { t = ah; ah = dh; dh = t; }
+    if (perm & 4) { t = ah; ah = dl; dl = t; }
+    return (code & ~7) | ah << 2 | dh << 1 | dl;
+}
+
+/* seg1:1956: the driver colour index nearest to R, G, B; also the sorted channels for the dither */
+static int vga_nearest(int R, int G, int B, int *perm, int *mx, int *md, int *mn)
+{
+    const uint8_t *cs = vgacs;
+    int a = R, b = G, c = B;
+    *perm = vga_sort3(&a, &b, &c);
+    *mx = a; *md = b; *mn = c;
+    if (a == 0) return 0;
+    int x = a - b, y = b - c, z = c;
+    const uint8_t *e = cs + 0x1944 + 3 * cs[0x193C + vga_sort3(&x, &y, &z)];
+    const uint8_t *lv = cs + (e[0] | e[1] << 8), *co = cs + (e[2] | e[3] << 8);
+    int n = e[4], dl = 0xFF, dh = 0xFF;
+    for (int cl = n, i = 0; cl > 0; cl--, i++) {
+        int d = lv[i] - a;
+        if (d < 0) d = -d;
+        if (d == 0) { dl = cl; break; }
+        if (d < dh) { dl = cl; dh = d; }
+    }
+    return vga_unsort(co[(n - dl) & 0xFF], *perm);
+}
+
+static uint32_t vga_index_rgb(int i)
+{
+    const uint8_t *e = vgacs + 0x3C + 3 * (i & 15);
+    return (uint32_t)e[0] << 16 | e[1] << 8 | e[2];
+}
+
+/* the solid colour the display shows for p (0xRRGGBB) */
+static uint32_t nearest_rgb(uint32_t p)
+{
+    if (!vga_tables()) return vga16[nearest16(p)];
+    int perm, a, b, c;
+    return vga_index_rgb(vga_nearest((p >> 16) & 255, (p >> 8) & 255, p & 255, &perm, &a, &b, &c));
+}
+
+/* seg1:24A1: the 8x8 pattern of driver colour indices for sorted channels mx >= md >= mn */
+static void vga_dither(int perm, int mx, int md, int mn, uint8_t pat[64])
+{
+    const uint8_t *cs = vgacs;
+    int comp[3] = {mx, md, mn}, s, k;
+    /* seg1:22BE: the cell - the first of four planes the colour is on the positive side of */
+    for (s = 0; s < 3; s++) {
+        const uint8_t *p = cs + 0x21DA + 12 * s;
+        int16_t sum = 0;
+        for (k = 0; k < 3; k++)
+            sum += (int16_t)((comp[k] - (int16_t)(p[2 * k] | p[2 * k + 1] << 8)) * (int16_t)(p[6 + 2 * k] | p[7 + 2 * k] << 8));
+        if (sum >= 0) break;
+    }
+    const uint8_t *t = cs + 0x220A + 16 * s;
+    /* seg1:22EB: channels scaled to 0..64, less the cell's corner, times its matrix = weights */
+    int sc[3], w[3];
+    for (k = 0; k < 3; k++) sc[k] = (((comp[k] >> 1) + (comp[k] & 1)) >> 1) - t[k];
+    for (int r = 0; r < 3; r++) {
+        int16_t acc = 0;
+        for (k = 0; k < 3; k++) acc += (int16_t)((int8_t)t[3 + 3 * r + k] * (int8_t)sc[k]);
+        w[r] = acc;
+    }
+    /* seg1:2364: (weight, corner) pairs of the non-zero weights, the cell's first corner taking the
+     * rest of 64 */
+    uint8_t pw[4], pc[4];
+    int n = 0, rest = (int16_t)(64 - w[0] - w[1] - w[2]);
+    if (rest) { pw[n] = (uint8_t)rest; pc[n++] = t[12]; }
+    for (k = 0; k < 3; k++)
+        if ((uint8_t)w[k]) { pw[n] = (uint8_t)w[k]; pc[n++] = t[13 + k]; }
+    for (k = 0; k < n; k++) pc[k] = (uint8_t)vga_unsort(cs[0x224A + pc[k]], perm);
+    /* seg1:23A5: in the driver's colour order (rank table), an entry taken is marked colour 8 */
+    if (n > 1) {
+        uint8_t tw[4], tc[4];
+        for (int o = 0; o < n; o++) {
+            int best = 0, br = 0xFF;
+            for (k = 0; k < n; k++)
+                if (cs[0x2251 + (pc[k] & 15)] <= br) { br = cs[0x2251 + (pc[k] & 15)]; best = k; }
+            tw[o] = pw[best];
+            tc[o] = pc[best];
+            pc[best] = 8;
+        }
+        memcpy(pw, tw, n);
+        memcpy(pc, tc, n);
+    }
+    /* seg1:2404: a pixel takes the first colour whose running weight passes its matrix value */
+    uint8_t prev[8] = {0}, cum = 0;
+    memset(pat, 0, 64);
+    for (int i = 0; i < n; i++) {
+        cum = (uint8_t)(cum + pw[i]);
+        for (int row = 0; row < 8; row++) {
+            uint8_t m = 0;
+            for (k = 0; k < 8; k++) m = (uint8_t)(m << 1 | (cs[0x2261 + row * 8 + k] < cum));
+            uint8_t fresh = m ^ prev[row];
+            prev[row] = m;
+            for (k = 0; k < 8; k++)
+                if (fresh & (0x80 >> k)) pat[row * 8 + k] = pc[i];
+        }
+    }
+}
+
 /* the solid colour a 16-colour display shows for c */
 COLORREF GetNearestColor(HDC dc, COLORREF c)
 {
@@ -113,10 +266,13 @@ uint32_t w16_rgb(COLORREF c)
         return vga16[c & 15];
     uint32_t p = cref_to_rgb(c & 0xFFFFFF);
     if (ncolors > 16) return p;
-    return vga16[nearest16(p)];
+    return nearest_rgb(p);
 }
 
-/* brush colours on a 16-colour device are dithered with an 8x8 ordered matrix */
+/* brush colours on a 16-colour device: VGA.DRV RealizeObject (seg1:292A) - white and black are
+ * solid; E0E0E0 with the 0x10 flag (the scroll bar colour, see SetSysColors) is its 50% white /
+ * light gray pattern; a colour the driver has is solid; others are dithered (cached per colour).
+ * x, y: the pixel's position in the 8x8 pattern. */
 static const int bayer8[8][8] = {
     {0, 32, 8, 40, 2, 34, 10, 42}, {48, 16, 56, 24, 50, 18, 58, 26},
     {12, 44, 4, 36, 14, 46, 6, 38}, {60, 28, 52, 20, 62, 30, 54, 22},
@@ -127,9 +283,32 @@ uint32_t w16_dither(COLORREF c, int x, int y)
 {
     uint32_t p = cref_to_rgb(c & 0xFFFFFF);
     if (ncolors > 16) return p;
+    if (vga_tables()) {
+        static struct { COLORREF c; int used; uint32_t px[64]; } cache[64];
+        static int next;
+        x &= 7;
+        y &= 7;
+        if (p == 0xFFFFFF || p == 0) return p;
+        if ((c & 0x10000000) && p == 0xE0E0E0) return ((x + y) & 1) ? 0xFFFFFF : vga_index_rgb(8);
+        for (int i = 0; i < 64; i++)
+            if (cache[i].used && cache[i].c == c) return cache[i].px[y * 8 + x];
+        int perm, a, b, d, idx = vga_nearest((p >> 16) & 255, (p >> 8) & 255, p & 255, &perm, &a, &b, &d);
+        int slot = next;
+        next = (next + 1) & 63;
+        cache[slot].c = c;
+        cache[slot].used = 1;
+        if (vga_index_rgb(idx) == p) {
+            for (int i = 0; i < 64; i++) cache[slot].px[i] = p;
+        } else {
+            uint8_t pat[64];
+            vga_dither(perm, a, b, d, pat);
+            for (int i = 0; i < 64; i++) cache[slot].px[i] = vga_index_rgb(pat[i]);
+        }
+        return cache[slot].px[y * 8 + x];
+    }
     int i = nearest16(p);
     if (vga16[i] == p) return p;
-    /* dither between the two nearest grey/colour levels per channel (approximation of VGA.DRV) */
+    /* no VGA.DRV: dither between the two nearest grey/colour levels per channel */
     int t = bayer8[y & 7][x & 7];
     int r = (p >> 16) & 255, g = (p >> 8) & 255, b = p & 255;
     int ch[3] = {r, g, b}, out[3];
@@ -765,10 +944,12 @@ static void put_rop(HDC dc, Region *clip, int x, int y, uint32_t c, int rop)
     *p = to_target(dc, rop2_apply(rop, c, *p));
 }
 
-/* brush colour at device pixel x,y */
+/* brush colour at device pixel x,y. Patterns start at the DC's origin plus its brush origin, as GDI
+ * hands the driver's RealizeObject (VGA.DRV rotates the pattern by it, seg1:2B3C/2B63) - measured:
+ * MAIN.CPL Color's dithered sample in the dialog's client DC */
 static uint32_t brush_px(HDC dc, HBRUSH b, int x, int y)
 {
-    int bx = (x - dc->brushorgx) & 7, by = (y - dc->brushorgy) & 7;
+    int bx = (x - dc->ox - dc->brushorgx) & 7, by = (y - dc->oy - dc->brushorgy) & 7;
     switch (b->u.brush.style) {
     case BS_SOLID: return w16_dither(b->u.brush.color, bx, by);
     case BS_HATCHED: {
