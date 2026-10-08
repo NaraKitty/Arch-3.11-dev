@@ -1,0 +1,29 @@
+# Drivers > Remove, answered No: ARCH311_REF_INI=1 tools/run-cp-test.sh apps/control/tests/drivers-remno.w16 OUT Drivers
+# Same keys as arch311-ref/scn/drivers-remno.scn: [MCI] MIDI Sequencer selected, Remove (message 2037:
+# not user-installed), No; Cancel still becomes Close. Nothing is removed.
+# regress: ARCH311_REF_INI=1 sh tools/run-cp-test.sh "$TEST" "$OUT" Drivers
+# compare: drivers-remno/02.png 01-open.png active ignore 320 239 333 261
+# compare: drivers-remno/03.png 02-sequencer.png active ignore 320 239 333 261
+# pending-compare (MessageBox, see drivers-remmap.w16): drivers-remno/04.png 03-confirm.png active ignore 320 239 333 261
+# compare: drivers-remno/05.png 04-close.png active ignore 320 239 333 261
+# ini: SYSTEM.INI mci Sequencer=mciseq.drv
+# ini: CONTROL.INI drivers.desc mciseq.drv=[MCI] MIDI Sequencer
+sleep 900
+shot shots/01-open.png
+key down
+key down
+sleep 300
+shot shots/02-sequencer.png
+key tab
+key tab
+key tab
+key space
+sleep 500
+shot shots/03-confirm.png
+key n
+sleep 400
+shot shots/04-close.png
+key esc
+sleep 300
+shot shots/05-closed.png
+quit

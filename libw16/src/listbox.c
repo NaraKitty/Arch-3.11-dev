@@ -152,12 +152,24 @@ static int insert(HWND h, int pos, const char *s, ULONG_PTR data)
     return pos;
 }
 
+/* USER seg43:0614, the order of a sorted list: a string that starts with '[' (a directory or drive
+ * entry) goes after every string that does not; otherwise lstrcmpi decides (measured: Drivers lists
+ * "MIDI Mapper", "Timer", "[MCI] MIDI Sequencer", "[MCI] Sound") */
+static int sort_compare(const char *a, const char *b)
+{
+    if (*a == '[') {
+        if (*b != '[') return 1;
+    } else if (*b == '[')
+        return -1;
+    return lstrcmpi(a, b);
+}
+
 static int sorted_pos(HWND h, const char *s, ULONG_PTR data)
 {
     Lb *l = lbd(h);
     for (int i = 0; i < l->n; i++) {
         int c;
-        if (has_strings(h)) c = lstrcmpi(s, l->it[i].s ? l->it[i].s : "");
+        if (has_strings(h)) c = sort_compare(s, l->it[i].s ? l->it[i].s : "");
         else {
             COMPAREITEMSTRUCT ci = {ODT_LISTBOX, h->id, h, (UINT)-1, data, i, l->it[i].data};
             c = (int)SendMessage(h->parent, WM_COMPAREITEM, h->id, (LPARAM)&ci);

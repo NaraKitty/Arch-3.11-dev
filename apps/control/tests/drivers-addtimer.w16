@@ -1,0 +1,38 @@
+# Drivers > Add... > Timer: ARCH311_REF_INI=1 tools/run-cp-test.sh apps/control/tests/drivers-addtimer.w16 OUT Drivers
+# Same keys as arch311-ref/scn/drivers-addtimer.scn: TIMER.DRV is there already, Driver Exists ->
+# Current (no copy; VTDAPI.386 is in [386Enh] already), the listed Timer is replaced (key "timer"
+# removed, "Timer" written at the end of [drivers]), TIMER.DRV's DRV_INSTALL asks for a restart
+# (Don't Restart Now), close
+# regress: ARCH311_REF_INI=1 sh tools/run-cp-test.sh "$TEST" "$OUT" Drivers
+# compare: drivers-addtimer/03.png 01-add.png active ignore 320 239 333 261
+# compare: drivers-addtimer/04.png 02-timer.png active ignore 320 239 333 261
+# compare: drivers-addtimer/05.png 03-exists.png active ignore 320 239 333 261
+# compare: drivers-addtimer/06.png 04-restart.png active ignore 320 239 333 261
+# compare: drivers-addtimer/07.png 05-added.png active ignore 320 239 333 261
+# ini: SYSTEM.INI drivers Timer=timer.drv
+# ini: SYSTEM.INI drivers midimapper=midimap.drv
+# ini: CONTROL.INI Userinstallable.drivers Timer=timer.drv
+# ini: CONTROL.INI related.desc Timer=
+# ini: CONTROL.INI drivers.desc timer.drv=Timer
+sleep 900
+key tab
+key tab
+key space
+sleep 500
+shot shots/01-add.png
+type t
+sleep 300
+shot shots/02-timer.png
+key enter
+sleep 600
+shot shots/03-exists.png
+key r
+sleep 600
+shot shots/04-restart.png
+key esc
+sleep 500
+shot shots/05-added.png
+key esc
+sleep 300
+shot shots/06-closed.png
+quit

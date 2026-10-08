@@ -17,6 +17,7 @@
 # - ARCH311_WININI='section/key=value;...' changes the starting WIN.INI exactly as ref-run.ps1 -WinIni
 #   does (Set-IniKey: the key's line replaced in its section, else added at the section's top, a new
 #   section added at the end; a leading '+' always adds), so a run starts from a reference run's file.
+# - ARCH311_A_FILES="NAME ...": those ripped files are on drive A: (a driver disk for Drivers' Add).
 # ARCH311_SIMULATE (default 1), ARCH311_WAVEDEVS (default 0, the rig's DOSBox has no sound card),
 # ARCH311_CLOCK and the applets' ARCH311_SIM_* settings pass through.
 # ARCH311_APP runs another program the same way (a path from the repo, e.g.
@@ -33,6 +34,7 @@ fx=$(mktemp -d)
 trap 'rm -rf "$fx"' EXIT
 files=${ARCH311_ASSETS:-${XDG_DATA_HOME:-$HOME/.local/share}/arch311}/files
 mkdir -p "$fx/config/arch311" "$fx/a" "$fx/c/WINDOWS/SYSTEM" "$fx/c/WINDOWS/TEMP"
+for n in ${ARCH311_A_FILES:-}; do ln -s "$files/$n" "$fx/a/$n"; done
 ref=${ARCH311_REF:-}
 if [ -n "$ref" ] && [ -d "$ref/c-pristine/WINDOWS" ]; then
     for d in "$ref"/c-pristine/WINDOWS/*/; do mkdir -p "$fx/c/WINDOWS/$(basename "$d")"; done

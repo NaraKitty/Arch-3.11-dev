@@ -1825,6 +1825,95 @@ UINT DragQueryFile(HANDLE drop, UINT i, LPSTR buf, UINT cb);
 void DragFinish(HANDLE drop);
 HINSTANCE ShellExecute(HWND h, LPCSTR op, LPCSTR file, LPCSTR params, LPCSTR dir, int show);
 
+/* ------------------------------------------------------------------ installable drivers (driver.c) */
+/* USER's installable-driver interface. In 3.1 a driver is a 16-bit DLL exporting DriverProc; arch311
+ * runs none, so a driver file that exists is answered by a native stand-in that replies as that
+ * 3.11 driver does (see driver.c), or by a native driver registered for its file name. */
+typedef struct W16Drvr *HDRVR;
+#define DRV_LOAD 0x0001
+#define DRV_ENABLE 0x0002
+#define DRV_OPEN 0x0003
+#define DRV_CLOSE 0x0004
+#define DRV_DISABLE 0x0005
+#define DRV_FREE 0x0006
+#define DRV_CONFIGURE 0x0007
+#define DRV_QUERYCONFIGURE 0x0008
+#define DRV_INSTALL 0x0009
+#define DRV_REMOVE 0x000A
+#define DRV_EXITSESSION 0x000B
+#define DRV_EXITAPPLICATION 0x000C
+#define DRV_POWER 0x000F
+#define DRV_RESERVED 0x0800
+#define DRV_USER 0x4000
+#define DRVCNF_CANCEL 0x0000
+#define DRVCNF_OK 0x0001
+#define DRVCNF_RESTART 0x0002
+typedef struct {
+    DWORD dwDCISize;            /* sizeof(DRVCONFIGINFO); 3.1's 16-bit structure is 12 bytes */
+    LPCSTR lpszDCISectionName;
+    LPCSTR lpszDCIAliasName;
+} DRVCONFIGINFO, *LPDRVCONFIGINFO;
+typedef LRESULT (*DRIVERPROC)(ULONG_PTR dwDriverID, HDRVR hDriver, UINT msg, LPARAM lParam1, LPARAM lParam2);
+HDRVR OpenDriver(LPCSTR name, LPCSTR section, LPARAM lParam2);
+LRESULT CloseDriver(HDRVR h, LPARAM lParam1, LPARAM lParam2);
+LRESULT SendDriverMessage(HDRVR h, UINT msg, LPARAM lParam1, LPARAM lParam2);
+HINSTANCE GetDriverModuleHandle(HDRVR h);
+LRESULT DefDriverProc(ULONG_PTR dwDriverID, HDRVR h, UINT msg, LPARAM lParam1, LPARAM lParam2);
+/* a native DriverProc for driver file `file` ("MCIWAVE.DRV"), e.g. a port of its setup dialog; it
+ * replaces the stand-in for that file */
+BOOL w16_register_driver(LPCSTR file, DRIVERPROC proc);
+
+/* VER.DLL (ver.c) */
+#define VFFF_ISSHAREDFILE 0x0001
+#define VFF_CURNEDEST 0x0001
+#define VFF_FILEINUSE 0x0002
+#define VFF_BUFFTOOSMALL 0x0004
+#define VIFF_FORCEINSTALL 0x0001
+#define VIFF_DONTDELETEOLD 0x0002
+#define VIF_TEMPFILE 0x00000001L
+#define VIF_MISMATCH 0x00000002L
+#define VIF_SRCOLD 0x00000004L
+#define VIF_DIFFLANG 0x00000008L
+#define VIF_DIFFCODEPG 0x00000010L
+#define VIF_DIFFTYPE 0x00000020L
+#define VIF_WRITEPROT 0x00000040L
+#define VIF_FILEINUSE 0x00000080L
+#define VIF_OUTOFSPACE 0x00000100L
+#define VIF_ACCESSVIOLATION 0x00000200L
+#define VIF_SHARINGVIOLATION 0x00000400L
+#define VIF_CANNOTCREATE 0x00000800L
+#define VIF_CANNOTDELETE 0x00001000L
+#define VIF_CANNOTRENAME 0x00002000L
+#define VIF_CANNOTDELETECUR 0x00004000L
+#define VIF_OUTOFMEMORY 0x00008000L
+#define VIF_CANNOTREADSRC 0x00010000L
+#define VIF_CANNOTREADDST 0x00020000L
+#define VIF_BUFFTOOSMALL 0x00040000L
+UINT VerFindFile(UINT flags, LPCSTR file, LPCSTR windir, LPCSTR appdir, LPSTR curdir, UINT *curlen,
+                 LPSTR destdir, UINT *destlen);
+DWORD VerInstallFile(UINT flags, LPCSTR srcfile, LPCSTR destfile, LPCSTR srcdir, LPCSTR destdir,
+                     LPCSTR curdir, LPSTR tmpfile, UINT *tmplen);
+DWORD GetFileVersionInfoSize(LPCSTR file, DWORD *handle);
+BOOL GetFileVersionInfo(LPCSTR file, DWORD handle, DWORD len, void *data);
+BOOL VerQueryValue(const void *block, LPCSTR subblock, void **buf, UINT *len);
+
+/* KERNEL GetWinFlags */
+#define WF_PMODE 0x0001
+#define WF_CPU286 0x0002
+#define WF_CPU386 0x0004
+#define WF_CPU486 0x0008
+#define WF_STANDARD 0x0010
+#define WF_WIN286 0x0010
+#define WF_ENHANCED 0x0020
+#define WF_WIN386 0x0020
+#define WF_CPU086 0x0040
+#define WF_CPU186 0x0080
+#define WF_LARGEFRAME 0x0100
+#define WF_SMALLFRAME 0x0200
+#define WF_80x87 0x0400
+#define WF_PAGING 0x0800
+DWORD GetWinFlags(void);
+
 /* ------------------------------------------------------------------ libw16 specifics */
 /* where ripped assets live (default ~/.local/share/arch311, env ARCH311_ASSETS) */
 const char *w16_assets_dir(void);
