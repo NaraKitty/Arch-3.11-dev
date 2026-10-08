@@ -602,136 +602,259 @@ BOOL IsDialogMessage(HWND dlg, LPMSG m)
 }
 
 /* ------------------------------------------------------------------ MessageBox */
-typedef struct { const char *text; UINT type; HICON icon; int ids[3]; int nb; int def; } MbData;
+/* USER's MessageBox (seg1:9B91) and SoftModalMessageBox (seg42:04F5): the box is a dialog template
+ * that USER builds in memory from pixel sizes measured in the system font, run by
+ * DialogBoxIndirectParam with USER's own dialog procedure (seg42:0101). It does not beep: 3.1
+ * applications call MessageBeep themselves. The tables are USER's: buttons per MB_ type, where each
+ * type starts in the button list, and for each entry its label and command ID. */
+static const BYTE mb_count[6] = {1, 2, 3, 3, 2, 2};
+static const BYTE mb_first[6] = {0, 0, 2, 5, 5, 8};
+static const BYTE mb_label[10] = {1, 2, 6, 5, 7, 3, 4, 2, 5, 2};
+static const BYTE mb_cmd[10] = {IDOK, IDCANCEL, IDABORT, IDRETRY, IDIGNORE, IDYES, IDNO, IDCANCEL, IDRETRY, IDCANCEL};
+/* labels 1..8 are USER strings 84, 85, 89, 90, 87, 86, 88 and 114; the default caption is 78 */
+static char mb_labels[9][16] = {"", "OK", "Cancel", "&Yes", "&No", "&Retry", "&Abort", "&Ignore", "&Close"};
+static char mb_error[16] = "Error";
+static int mb_btnw;    /* button width (USER measures it at start-up, seg3:23BE) */
+static int mb_nesting; /* boxes up: each new one cascades below and right of the last */
 
+typedef struct {
+    UINT type;
+    HWND owner;
+    int def;           /* the default button's place in the list */
+    HWND task[64];     /* windows a task-modal box disabled */
+    int ntask;
+} MbState;
+
+/* USER's own MulDiv (seg1:39AB): a * b / c, adding half of c first */
+static int mb_muldiv(int a, int b, int c)
+{
+    if (!c) return a;
+    return (int)(((long)a * b + (long)((unsigned)c >> 1)) / c);
+}
+
+/* the extent of a label without its '&' prefix ("&&" is one '&'): PSMGetTextExtent, seg1:1292 */
+static int mb_label_extent(HDC dc, const char *s)
+{
+    char t[64];
+    int n = 0;
+    for (; *s && n < (int)sizeof t; s++) {
+        if (*s == '&' && *++s != '&') { s--; continue; }
+        t[n++] = *s;
+    }
+    return LOWORD(GetTextExtent(dc, t, n));
+}
+
+static void mb_init(void)
+{
+    static const int ids[9] = {0, 84, 85, 89, 90, 87, 86, 88, 114};
+    static const int cch[9] = {0, 10, 15, 10, 10, 15, 15, 15, 15};
+    HINSTANCE user = w16_system_module("USER.EXE");
+    char s[16];
+    if (user) {
+        for (int i = 1; i <= 8; i++)
+            if (LoadString(user, ids[i], s, cch[i])) strcpy(mb_labels[i], s);
+        if (LoadString(user, 78, s, 10)) strcpy(mb_error, s);
+    }
+    /* the longest label by length (the first of equals), measured without its prefix, plus the
+     * width of "0" on each side */
+    int longest = 1, len = 0;
+    for (int i = 1; i <= 8; i++)
+        if ((int)strlen(mb_labels[i]) > len) { len = (int)strlen(mb_labels[i]); longest = i; }
+    HDC dc = GetDC(NULL);
+    HGDIOBJ of = SelectObject(dc, GetStockObject(SYSTEM_FONT));
+    mb_btnw = mb_label_extent(dc, mb_labels[longest]) + 2 * LOWORD(GetTextExtent(dc, "0", 1));
+    SelectObject(dc, of);
+    ReleaseDC(NULL, dc);
+}
+
+/* template writers: the header (seg42:0299) takes the window rectangle in pixels and stores the
+ * client rectangle USER expects (one border and the caption inside it) in dialog units; an item
+ * (seg42:038E) converts its pixel rectangle, and a left-aligned static gets one unit more each way */
+static BYTE *mb_u16(BYTE *p, int v) { p[0] = (BYTE)v; p[1] = (BYTE)(v >> 8); return p + 2; }
+static BYTE *mb_u32(BYTE *p, DWORD v) { return mb_u16(mb_u16(p, LOWORD(v)), HIWORD(v)); }
+
+static BYTE *mb_header(BYTE *p, DWORD style, int count, int x, int y, int w, int h, const char *caption,
+                       int cxc, int cyc)
+{
+    RECT r;
+    SetRect(&r, x, y, x + w, y + h);
+    InflateRect(&r, -GetSystemMetrics(SM_CXBORDER), -GetSystemMetrics(SM_CYBORDER));
+    r.top += GetSystemMetrics(SM_CYCAPTION) - GetSystemMetrics(SM_CYBORDER);
+    p = mb_u32(p, style);
+    *p++ = (BYTE)count;
+    p = mb_u16(p, mb_muldiv(r.left, 4, cxc));
+    p = mb_u16(p, mb_muldiv(r.top, 8, cyc));
+    p = mb_u16(p, mb_muldiv(r.right - r.left, 4, cxc));
+    p = mb_u16(p, mb_muldiv(r.bottom - r.top, 8, cyc));
+    *p++ = 0; /* no menu */
+    *p++ = 0; /* the dialog class */
+    size_t n = strlen(caption);
+    memcpy(p, caption, n);
+    p += n;
+    *p++ = 0;
+    return p;
+}
+
+static BYTE *mb_item(BYTE *p, int cls, const char *text, int len, int x, int y, int cx, int cy, DWORD style,
+                     int id, int cxc, int cyc)
+{
+    int dcx = mb_muldiv(cx, 4, cxc), dcy = mb_muldiv(cy, 8, cyc);
+    if (cls == 0x82 && !(style & 0xF)) { dcx++; dcy++; } /* SS_LEFT */
+    p = mb_u16(p, mb_muldiv(x, 4, cxc));
+    p = mb_u16(p, mb_muldiv(y, 8, cyc));
+    p = mb_u16(p, dcx);
+    p = mb_u16(p, dcy);
+    p = mb_u16(p, id);
+    p = mb_u32(p, style);
+    *p++ = (BYTE)cls;
+    memcpy(p, text, len);
+    p += len;
+    if (!(len == 3 && (BYTE)text[0] == 0xFF)) *p++ = 0; /* an icon's 0xFF + ordinal has no NUL */
+    *p++ = 0;                                            /* no creation data */
+    return p;
+}
+
+/* seg42:0101 */
 static BOOL mb_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
 {
+    MbState *st = (MbState *)GetProp(h, "W16MBOX");
     if (m == WM_INITDIALOG) {
-        MbData *mb = (MbData *)lp;
-        HWND def = GetDlgItem(h, mb->ids[mb->def]);
-        if (def) { SetFocus(def); SendMessage(def, BM_SETSTYLE, BS_DEFPUSHBUTTON, TRUE); w16_dlg(h)->defid = mb->ids[mb->def]; }
+        st = (MbState *)lp;
+        SetProp(h, "W16MBOX", st);
+        /* TODO: a DS_SYSMODAL box becomes the system-modal window (SetSysModalWindow), which libw16
+         * lacks (UNTESTED) */
+        if (!st->owner && (st->type & 0x3000) == MB_TASKMODAL) {
+            /* seg42:0000: with no owner, the task's enabled top-level windows are disabled */
+            for (HWND c = w16_desktop->child; c && st->ntask < 64; c = c->next)
+                if (c != h && !(c->style & WS_DISABLED)) st->task[st->ntask++] = c;
+            for (int i = 0; i < st->ntask; i++) EnableWindow(st->task[i], FALSE);
+        }
+        /* the buttons are the first controls: the default one takes the focus */
+        HWND c = h->child;
+        for (int i = st->def; i > 0 && c; i--) c = c->next;
+        if (c) SetFocus(c);
+        if (!GetDlgItem(h, IDCANCEL)) {
+            HMENU sm = GetSystemMenu(h, FALSE);
+            if (sm) DeleteMenu(sm, SC_CLOSE, MF_BYCOMMAND);
+        }
+        if (!(st->type & MB_TYPEMASK)) {
+            /* a lone OK also answers Esc: it takes IDCANCEL's ID (MessageBox still returns IDOK) */
+            HWND ok = GetDlgItem(h, IDOK);
+            if (ok) ok->id = IDCANCEL;
+        }
         return FALSE;
     }
     if (m == WM_COMMAND) {
         int id = (int)wp;
-        if (id == IDCANCEL && !GetDlgItem(h, IDCANCEL)) {
-            /* Esc only works when there is a Cancel (or a lone OK) button */
-            if (GetDlgItem(h, IDOK) && !GetDlgItem(h, IDYES)) { EndDialog(h, IDOK); return TRUE; }
-            return TRUE;
+        if (id < IDOK || id > IDNO) return FALSE;
+        if (id <= IDCANCEL && !GetDlgItem(h, id)) return FALSE;
+        if (st) {
+            for (int i = 0; i < st->ntask; i++)
+                if (w16_valid(st->task[i])) EnableWindow(st->task[i], TRUE);
+            st->ntask = 0;
         }
-        if (id >= IDOK && id <= IDNO) EndDialog(h, id);
+        RemoveProp(h, "W16MBOX");
+        EndDialog(h, id);
         return TRUE;
     }
     return FALSE;
 }
 
-static LRESULT mb_icon_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
-{
-    if (m == WM_PAINT) {
-        PAINTSTRUCT ps;
-        HDC dc = BeginPaint(h, &ps);
-        HICON ic = (HICON)GetProp(h, "W16ICON");
-        if (ic) DrawIcon(dc, 0, 0, ic);
-        EndPaint(h, &ps);
-        return 0;
-    }
-    return DefWindowProc(h, m, wp, lp);
-}
-
 int MessageBox(HWND owner, LPCSTR text, LPCSTR caption, UINT type)
 {
-    HINSTANCE user = w16_system_module("USER.EXE");
-    char sOK[16] = "OK", sCancel[16] = "Cancel", sAbort[16] = "&Abort", sRetry[16] = "&Retry",
-         sIgnore[16] = "&Ignore", sYes[16] = "&Yes", sNo[16] = "&No", sErr[16] = "Error";
-    if (user) {
-        LoadString(user, 84, sOK, 16); LoadString(user, 85, sCancel, 16); LoadString(user, 86, sAbort, 16);
-        LoadString(user, 87, sRetry, 16); LoadString(user, 88, sIgnore, 16); LoadString(user, 89, sYes, 16);
-        LoadString(user, 90, sNo, 16); LoadString(user, 78, sErr, 16);
-    }
-    if (!caption) caption = sErr;
-    MbData mb = {text, type, NULL, {0}, 0, 0};
-    const char *labels[3];
-    switch (type & MB_TYPEMASK) {
-    case MB_OKCANCEL: mb.ids[0] = IDOK; mb.ids[1] = IDCANCEL; labels[0] = sOK; labels[1] = sCancel; mb.nb = 2; break;
-    case MB_ABORTRETRYIGNORE: mb.ids[0] = IDABORT; mb.ids[1] = IDRETRY; mb.ids[2] = IDIGNORE; labels[0] = sAbort; labels[1] = sRetry; labels[2] = sIgnore; mb.nb = 3; break;
-    case MB_YESNOCANCEL: mb.ids[0] = IDYES; mb.ids[1] = IDNO; mb.ids[2] = IDCANCEL; labels[0] = sYes; labels[1] = sNo; labels[2] = sCancel; mb.nb = 3; break;
-    case MB_YESNO: mb.ids[0] = IDYES; mb.ids[1] = IDNO; labels[0] = sYes; labels[1] = sNo; mb.nb = 2; break;
-    case MB_RETRYCANCEL: mb.ids[0] = IDRETRY; mb.ids[1] = IDCANCEL; labels[0] = sRetry; labels[1] = sCancel; mb.nb = 2; break;
-    default: mb.ids[0] = IDOK; labels[0] = sOK; mb.nb = 1; break;
-    }
-    mb.def = ((type & MB_DEFMASK) >> 8);
-    if (mb.def >= mb.nb) mb.def = 0;
+    static int inited;
+    if (!inited) { mb_init(); inited = 1; }
+    if (!caption) caption = mb_error;
+    int kind = type & MB_TYPEMASK;
+    if (kind > MB_RETRYCANCEL) kind = MB_OK; /* USER reads past its tables there */
+    int nb = mb_count[kind];
+    int def = (type & MB_DEFMASK) >> 8;
+    if (def >= nb) def = 0;
+    /* TODO: a system-modal box with no icon or the stop icon is USER's hard error box (seg1:9A86),
+     * painted without a dialog; libw16 shows the dialog box instead (UNTESTED) */
+    int icon = 0;
     switch (type & MB_ICONMASK) {
-    case MB_ICONHAND: mb.icon = LoadIcon(NULL, IDI_HAND); break;
-    case MB_ICONQUESTION: mb.icon = LoadIcon(NULL, IDI_QUESTION); break;
-    case MB_ICONEXCLAMATION: mb.icon = LoadIcon(NULL, IDI_EXCLAMATION); break;
-    case MB_ICONASTERISK: mb.icon = LoadIcon(NULL, IDI_ASTERISK); break;
+    case MB_ICONHAND: icon = 32513; break;        /* IDI_HAND */
+    case MB_ICONQUESTION: icon = 32514; break;    /* IDI_QUESTION */
+    case MB_ICONEXCLAMATION: icon = 32515; break; /* IDI_EXCLAMATION */
+    case MB_ICONASTERISK: icon = 32516; break;    /* IDI_ASTERISK */
     }
-    /* layout in pixels with the system font (3.1 message boxes use it) */
-    W16Font *f = w16_font_system();
-    int cxc = f->avgw, cyc = f->height;
+    DWORD units = GetDialogBaseUnits();
+    int cxc = LOWORD(units), cyc = HIWORD(units);
+    int cxb = GetSystemMetrics(SM_CXBORDER), cyb = GetSystemMetrics(SM_CYBORDER);
+    int gap = GetSystemMetrics(SM_CXSIZE), cap = GetSystemMetrics(SM_CYCAPTION);
+    int cxs = GetSystemMetrics(SM_CXSCREEN), cys = GetSystemMetrics(SM_CYSCREEN);
+    int iconw = 0, iconh = 0;
+    if (icon) { iconw = GetSystemMetrics(SM_CXICON) + gap; iconh = GetSystemMetrics(SM_CYICON); }
+
+    /* the width wanted by the buttons or the caption, and the text wrapped to that less the margins
+     * and icon, but to no less than 5/8 of the screen less them */
     HDC dc = GetDC(NULL);
-    SelectObject(dc, GetStockObject(SYSTEM_FONT));
-    RECT tr = {0, 0, w16_screen.w * 5 / 8, 0};
-    DrawText(dc, text, -1, &tr, DT_CALCRECT | DT_WORDBREAK | DT_EXPANDTABS | DT_NOPREFIX);
-    int capw = LOWORD(GetTextExtent(dc, caption, strlen(caption)));
+    HGDIOBJ of = SelectObject(dc, GetStockObject(SYSTEM_FONT));
+    int caplen = (int)strlen(caption);
+    int capw = LOWORD(GetTextExtent(dc, caption, caplen));
+    int btnsw = mb_btnw * nb + (nb - 1) * gap;
+    int minw = max(btnsw, 2 * gap + capw);
+    int margins = 2 * (cyb + gap);
+    int tw = max(minw - margins - iconw, (cxs >> 3) * 5 - margins - iconw);
+    RECT r;
+    SetRect(&r, 0, 0, tw, tw);
+    int texth = DrawText(dc, text ? text : "", -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_EXPANDTABS | DT_NOPREFIX);
+    SelectObject(dc, of);
     ReleaseDC(NULL, dc);
-    int bw = cxc * 9 + 2, bh = cyc * 7 / 4, gap = cxc * 2;
-    int iconw = mb.icon ? 32 + cxc * 2 : 0;
-    int textw = tr.right - tr.left, texth = tr.bottom - tr.top;
-    int contentw = max(iconw + textw, mb.nb * bw + (mb.nb - 1) * gap);
-    contentw = max(contentw, capw + 40);
-    int cw = contentw + cxc * 4;
-    int toph = max(texth, mb.icon ? 32 : 0);
-    int ch = cyc + toph + cyc + bh + cyc * 3 / 4;
-    /* build an in-memory dialog */
-    HWND parent = owner && w16_valid(owner) ? w16_top_level(owner) : NULL;
-    static int cls_done;
-    if (!cls_done) {
-        WNDCLASS wc = {0};
-        wc.lpfnWndProc = mb_icon_proc;
-        wc.lpszClassName = "W16MBICON";
-        wc.style = CS_GLOBALCLASS;
-        RegisterClass(&wc);
-        cls_done = 1;
+    int textw = r.right - r.left;
+
+    /* the box: centred (each open box moves it on by a system-menu box), kept on the screen */
+    int w = max(textw, minw) + 2 * gap + iconw;
+    int bodyh = max(iconh, texth);
+    int h = bodyh + 6 * cyc;
+    int x = ((cxs - w) >> 1) + gap * mb_nesting;
+    int y = ((cys - h) >> 1) + GetSystemMetrics(SM_CYSIZE) * mb_nesting;
+    if (x + w > cxs) x = cxs - 2 * cxb - w;
+    if (y + h > cys) y = cys - 2 * cyb - h;
+    int bx = ((w - btnsw) >> 1) - cxb;           /* first button, client coordinates */
+    int bottom = h - 2 * cyb - (cyc >> 1) - cap; /* where the buttons end */
+    int texty = ((bodyh - texth) >> 1) + cyc;
+
+    /* the template: buttons first, then the icon and the text */
+    size_t size = 16 + caplen + (icon ? 19 : 0) + (text ? 17 + strlen(text) : 0);
+    for (int i = 0; i < nb; i++) size += 17 + strlen(mb_labels[mb_label[mb_first[kind] + i]]);
+    BYTE *tmpl = malloc(size), *p;
+    if (!tmpl) return 0;
+    DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_NOIDLEMSG | DS_ABSALIGN |
+                  ((type & 0x3000) == MB_SYSTEMMODAL ? DS_SYSMODAL : DS_MODALFRAME);
+    p = mb_header(tmpl, style, nb + (icon != 0) + (text != NULL), x, y, w, h, caption, cxc, cyc);
+    int btnh = (cyc * 14) >> 3;
+    for (int i = 0; i < nb; i++) {
+        int k = mb_first[kind] + i;
+        const char *s = mb_labels[mb_label[k]];
+        DWORD bs = WS_CHILD | WS_VISIBLE | WS_TABSTOP | (i == 0 ? WS_GROUP : 0) | (i == def ? BS_DEFPUSHBUTTON : 0);
+        p = mb_item(p, 0x80, s, (int)strlen(s), bx + i * (mb_btnw + gap), bottom - btnh, mb_btnw, btnh, bs,
+                    mb_cmd[k], cxc, cyc);
     }
-    W16Dialog *dd = calloc(1, sizeof *dd);
-    dd->proc = mb_proc;
-    dd->cxchar = cxc;
-    dd->cychar = cyc;
-    dd->defid = mb.ids[mb.def];
-    struct W16Window fake;
-    memset(&fake, 0, sizeof fake);
-    fake.style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_DLGFRAME;
-    fake.exstyle = WS_EX_DLGMODALFRAME;
-    fake.parent = w16_desktop;
-    RECT big = {0, 0, 1000, 1000}, inner;
-    w16_nc_calc(&fake, &big, &inner);
-    int ww = cw + inner.left + (1000 - inner.right), wh = ch + inner.top + (1000 - inner.bottom);
-    int wx = (w16_screen.w - ww) / 2, wy = (w16_screen.h - wh) / 2;
-    HWND h = CreateWindowEx(WS_EX_DLGMODALFRAME, "#32770", caption, WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_DLGFRAME,
-                            wx, wy, ww, wh, parent, NULL, NULL, NULL);
-    h->is_dialog = 1;
-    h->ctl = dd;
-    int tx = cxc * 2 + iconw;
-    if (mb.icon) {
-        HWND ic = CreateWindow("W16MBICON", "", WS_CHILD | WS_VISIBLE, cxc * 2, cyc, 32, 32, h, (HMENU)(uintptr_t)0xFFFF, NULL, NULL);
-        SetProp(ic, "W16ICON", mb.icon);
+    if (icon) {
+        char ord[3] = {(char)0xFF, (char)(icon & 0xFF), (char)(icon >> 8)};
+        p = mb_item(p, 0x82, ord, 3, gap, ((texth - iconh) >> 1) + texty, 0, 0,
+                    WS_CHILD | WS_VISIBLE | WS_GROUP | SS_ICON, -1, cxc, cyc);
     }
-    CreateWindow("STATIC", text, WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX, tx, cyc + (toph - texth) / 2, textw + 2, texth, h,
-                 (HMENU)(uintptr_t)0xFFFF, NULL, NULL);
-    int total = mb.nb * bw + (mb.nb - 1) * gap;
-    int bx = (cw - total) / 2, by = cyc + toph + cyc;
-    for (int i = 0; i < mb.nb; i++) {
-        HWND b = CreateWindow("BUTTON", labels[i], WS_CHILD | WS_VISIBLE | WS_TABSTOP | (i == mb.def ? BS_DEFPUSHBUTTON : BS_PUSHBUTTON),
-                              bx + i * (bw + gap), by, bw, bh, h, (HMENU)(uintptr_t)mb.ids[i], NULL, NULL);
-        (void)b;
-    }
-    SendMessage(h, WM_INITDIALOG, 0, (LPARAM)&mb);
-    dd->focus = GetDlgItem(h, mb.ids[mb.def]);
-    ShowWindow(h, SW_SHOWNORMAL);
-    MessageBeep(type & MB_ICONMASK);
-    return run_modal(h, parent);
+    if (text)
+        p = mb_item(p, 0x82, text, (int)strlen(text), gap + iconw, texty, textw, texth,
+                    WS_CHILD | WS_VISIBLE | WS_GROUP | SS_NOPREFIX | SS_LEFT, -1, cxc, cyc);
+
+    MbState st;
+    memset(&st, 0, sizeof st);
+    st.type = type;
+    st.owner = owner;
+    st.def = def;
+    mb_nesting++;
+    HCURSOR oldcur = SetCursor(LoadCursor(NULL, IDC_ARROW));
+    int ret = DialogBoxIndirectParam(NULL, tmpl, owner, mb_proc, (LPARAM)&st);
+    if (ret == -1) ret = 0;
+    if (!(type & MB_TYPEMASK) && ret) ret = IDOK;
+    if (mb_nesting) mb_nesting--;
+    free(tmpl);
+    if (oldcur) SetCursor(oldcur);
+    return ret;
 }
 
 /* ------------------------------------------------------------------ DlgDirList / LB_DIR */
