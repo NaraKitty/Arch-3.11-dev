@@ -1,0 +1,48 @@
+# Calculator, scientific view: powers and roots, Int, dms, pi, F-E, Exp and precedence
+# (continued from calc-sci)
+# ini: WIN.INI SciCalc layout=0
+shot
+key alt
+type vs
+shot
+type 2y10=
+shot
+type 27iy3=
+shot
+type 10.75;
+shot
+type 10.75i;
+shot
+type 12.5m
+shot
+type 12.3im
+shot
+type p
+shot
+type ip
+shot
+type 1234v
+shot
+type v
+shot
+type 1.5x10
+shot
+key kp_plus
+type 2x
+key f9
+type 5=
+shot
+type 2
+key kp_plus
+type 3
+key kp_multiply
+type 4=
+shot
+type 2
+key kp_multiply
+type 3
+key kp_plus
+type 4
+key kp_multiply
+type 5=
+shot
