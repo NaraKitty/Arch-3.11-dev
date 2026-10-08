@@ -3,12 +3,7 @@
 # resets it to 1 (invalid text: the field's value for code 4); Granularity 99 fails OK's check with
 # message 208; 1 and OK. WIN.INI after: ScreenSaveTimeOut=240, IconSpacing=74, GridGranularity=1,
 # BorderWidth=1. UNTESTED against real 3.11 (no mouse in the rig); the arrow positions are the port's.
-# Desktop is the third icon here (Ports, Mouse, Desktop, ...).
-# Run: ARCH311_REF=<rig> ARCH311_REF_INI=1 tools/run-cp-test.sh apps/control/tests/desktop-arrows.w16 OUT
-sleep 600
-key right
-key right
-key enter
+# Run: ARCH311_REF=<rig> ARCH311_REF_INI=1 tools/run-cp-test.sh apps/control/tests/desktop-arrows.w16 OUT Desktop
 sleep 600
 shot shots/01-desktop.png
 click 169 216

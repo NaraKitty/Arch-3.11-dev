@@ -811,6 +811,28 @@ static int fetch(LPMSG out, HWND h, UINT first, UINT last, int remove, int *wait
     return 0;
 }
 
+/* the program ended with script lines left (the Control Panel closes after an applet opened by
+ * name): what its windows uncovered is painted and the remaining shots are taken of the screen it
+ * leaves (a wallpaper the applet set); input lines have nothing left to go to */
+void w16_script_finish(void)
+{
+    if (!script) return;
+    char line[512];
+    while (fgets(line, sizeof line, script)) {
+        char *c = line, cmd[32], arg[480] = "";
+        while (*c == ' ' || *c == '\t') c++;
+        c[strcspn(c, "\r\n")] = 0;
+        if (!*c || *c == '#' || sscanf(c, "%31s %479[^\n]", cmd, arg) < 1) continue;
+        if (strcmp(cmd, "shot") && strcmp(cmd, "shotcaret")) continue;
+        MSG m;
+        int wait = 0;
+        for (int i = 0; i < 1000 && fetch(&m, NULL, WM_PAINT, WM_PAINT, 1, &wait); i++) DispatchMessage(&m);
+        w16_screenshot(arg);
+    }
+    fclose(script);
+    script = NULL;
+}
+
 BOOL GetMessage(LPMSG m, HWND h, UINT first, UINT last)
 {
     for (;;) {

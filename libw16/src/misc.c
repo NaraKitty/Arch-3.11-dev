@@ -168,6 +168,7 @@ void DragFinish(HANDLE drop) { free(drop); }
 void w16_video_init(void);
 void w16_desktop_create(void);
 void w16_script_init(void);
+void w16_script_finish(void);
 
 int main(int argc, char **argv)
 {
@@ -195,7 +196,9 @@ int main(int argc, char **argv)
         fprintf(stderr, "arch311: %s was not found among your ripped files\n", w16_app_module);
         return 2;
     }
-    return WinMain(inst, NULL, cmd, SW_SHOWNORMAL);
+    int r = WinMain(inst, NULL, cmd, SW_SHOWNORMAL);
+    w16_script_finish(); /* test scripts: shots of the screen the program left */
+    return r;
 }
 
 /* ------------------------------------------------------------------ SystemParametersInfo */
