@@ -1190,27 +1190,206 @@ BOOL ScrollDC(HDC dc, int dx, int dy, LPCRECT scroll, LPCRECT clip, HRGN upd, LP
 }
 
 /* ------------------------------------------------------------------ desktop window */
-static HBITMAP wallpaper;
-static int wallpaper_tile = 1;
+/* The desktop as USER 3.1 paints it: the desktop brush - COLOR_BACKGROUND's, which the WIN.INI
+ * [Desktop] Pattern= replaces (SetDeskPattern, USER seg41:0A61) - and the wallpaper (SetDeskWallpaper
+ * seg21:04D2, PaintDesktop seg21:086E): tiled from WallpaperOriginX/Y, or centred with the desktop
+ * brush around it. */
+static WORD desk_bits[16];          /* [0x5ec]: the pattern's rows, a 16 x 16 bitmap */
+static int desk_has_pattern;
+static HBRUSH desk_brush;           /* [0x52e] made from desk_bits in these colours */
+static COLORREF desk_bg, desk_fg;
+static HBITMAP wallpaper;           /* [0x89a] */
+static int wallpaper_style;         /* [0x9a6]: TileWallpaper | WallpaperStyle, bit 0 tiles */
+static int wallpaper_x, wallpaper_y; /* [0x996], [0x998] */
+
+/* the pattern brush, or NULL for the plain COLOR_BACKGROUND brush (seg41:090C makes it again when
+ * the colours change: clear bits in the desktop colour, set ones in the window text colour) */
+HBRUSH w16_desktop_pattern_brush(void)
+{
+    if (!desk_has_pattern) return NULL;
+    COLORREF bg = GetSysColor(COLOR_BACKGROUND), fg = GetSysColor(COLOR_WINDOWTEXT);
+    if (desk_brush && desk_bg == bg && desk_fg == fg) return desk_brush;
+    if (desk_brush) { desk_brush->stock = 0; DeleteObject(desk_brush); desk_brush = NULL; }
+    HBITMAP mono = CreateBitmap(16, 16, 1, 1, desk_bits);
+    HDC screen = GetDC(NULL);
+    HDC dmono = CreateCompatibleDC(screen), dcol = CreateCompatibleDC(screen);
+    HBITMAP col = CreateCompatibleBitmap(screen, 16, 16);
+    SelectObject(dmono, mono);
+    SelectObject(dcol, col);
+    SetTextColor(dcol, bg);
+    SetBkColor(dcol, fg);
+    BitBlt(dcol, 0, 0, 16, 16, dmono, 0, 0, SRCCOPY);
+    /* (3.1 GDI brushes use the top left 8 x 8 of the bitmap) */
+    desk_brush = CreatePatternBrush(col);
+    desk_brush->stock = 1;
+    desk_bg = bg;
+    desk_fg = fg;
+    DeleteDC(dcol);
+    DeleteDC(dmono);
+    ReleaseDC(NULL, screen);
+    DeleteObject(col);
+    DeleteObject(mono);
+    return desk_brush;
+}
+
+/* USER seg41:0A61: the pattern from a string of numbers, (LPCSTR)-1 for WIN.INI's; "(None)" or
+ * nothing is the plain colour. FALSE when WIN.INI has no Pattern= */
+BOOL w16_set_desk_pattern(LPCSTR pat)
+{
+    char buf[0x50];
+    desk_has_pattern = 0;
+    if (pat == (LPCSTR)-1) {
+        if (!GetProfileString("Desktop", "Pattern", "", buf, sizeof buf)) return FALSE;
+        pat = buf;
+    }
+    if (pat && *pat && lstrcmpi(pat, "(None)")) {
+        /* sixteen numbers, the missing ones 0 (each a row of 16 pixels, the low byte on the left) */
+        for (int i = 0; i < 16; i++) {
+            SHORT n = 0;
+            while (*pat && ((signed char)*pat < '0' || (signed char)*pat > '9')) pat++;
+            while ((signed char)*pat >= '0' && (signed char)*pat <= '9') n = (SHORT)(n * 10 + *pat++ - '0');
+            WORD w = (WORD)n;
+            /* CreateBitmap rows are bytes in memory order: the word's low byte first */
+            ((BYTE *)&desk_bits[i])[0] = LOBYTE(w);
+            ((BYTE *)&desk_bits[i])[1] = HIBYTE(w);
+        }
+        desk_has_pattern = 1;
+    }
+    if (desk_brush) { desk_brush->stock = 0; DeleteObject(desk_brush); desk_brush = NULL; }
+    SendMessage(HWND_BROADCAST, WM_SYSCOLORCHANGE, 0, 0);
+    w16_desktop_redraw();
+    return TRUE;
+}
+
+/* seg21:0131: a .BMP file (OpenFile's search) as a bitmap for the screen */
+static HBITMAP load_wallpaper(LPCSTR file)
+{
+    OFSTRUCT of;
+    HFILE f = OpenFile(file, &of, OF_READ);
+    if (f == HFILE_ERROR) return NULL;
+    HBITMAP bm = NULL;
+    LONG n = _llseek(f, 0, 2);
+    _llseek(f, 0, 0);
+    uint8_t *d = n > 14 ? malloc(n) : NULL;
+    if (d && (LONG)_lread(f, d, (UINT)n) == n && d[0] == 'B' && d[1] == 'M') {
+        HBITMAP w16_bitmap_from_dib(const uint8_t *d, int len, int force_color);
+        bm = w16_bitmap_from_dib(d + 14, (int)n - 14, 1);
+    }
+    free(d);
+    _lclose(f);
+    return bm;
+}
+
+/* USER seg21:04D2: the wallpaper from a file name, NULL or (LPCSTR)-1 for WIN.INI's; "(None)" is
+ * none. FALSE when the file cannot be loaded */
+BOOL w16_set_desk_wallpaper(LPCSTR file)
+{
+    char buf[0xa0];
+    if (wallpaper) { DeleteObject(wallpaper); wallpaper = NULL; }
+    if (!file || file == (LPCSTR)-1) {
+        if (!GetProfileString("Desktop", "Wallpaper", "", buf, 0x80)) return FALSE;
+    } else
+        snprintf(buf, sizeof buf, "%s", file);
+    if (!lstrcmpi(buf, "(None)")) return TRUE;
+    wallpaper_style = GetProfileInt("Desktop", "TileWallpaper", 1) | GetProfileInt("Desktop", "WallpaperStyle", 0);
+    wallpaper = load_wallpaper(buf);
+    if (!wallpaper) { wallpaper_style = 0; return FALSE; }
+    wallpaper_x = GetProfileInt("Desktop", "WallpaperOriginX", 0);
+    wallpaper_y = GetProfileInt("Desktop", "WallpaperOriginY", 0);
+    if (!(wallpaper_style & 1)) {
+        W16Bitmap *b = w16_bitmap_of(wallpaper);
+        if (!wallpaper_x) wallpaper_x = (GetSystemMetrics(SM_CXSCREEN) - b->w) / 2;
+        if (!wallpaper_y) wallpaper_y = (GetSystemMetrics(SM_CYSCREEN) - b->h) / 2;
+    }
+    return TRUE;
+}
+
+/* every window again, the desktop first (USER's RedrawWindow of the desktop with RDW_ALLCHILDREN) */
+void w16_desktop_redraw(void)
+{
+    if (w16_desktop) w16_invalidate_screen_rect(&w16_desktop->rw);
+}
+
+/* seg21:06E8: the wallpaper in tiles from (x, y) over the clip box */
+static void tile_wallpaper(HDC dc, int x, int y)
+{
+    RECT clip;
+    W16Bitmap *b = w16_bitmap_of(wallpaper);
+    GetClipBox(dc, &clip);
+    while (b->w + x < clip.left) x += b->w;
+    while (b->h + y < clip.top) y += b->h;
+    while (clip.left < x) x -= b->w;
+    while (clip.top < y) y -= b->h;
+    HDC mem = CreateCompatibleDC(dc);
+    HGDIOBJ old = SelectObject(mem, wallpaper);
+    for (int ty = y; ty < clip.bottom; ty += b->h)
+        for (int tx = x; tx < clip.right; tx += b->w) BitBlt(dc, tx, ty, b->w, b->h, mem, 0, 0, SRCCOPY);
+    SelectObject(mem, old);
+    DeleteDC(mem);
+}
+
+/* seg21:086E PaintDesktop (the desktop DC is in screen coordinates already) */
+static void paint_desktop(HDC dc)
+{
+    RECT clip;
+    if (GetClipBox(dc, &clip) == NULLREGION) return;
+    SetBrushOrg(dc, 0, 0);
+    if (wallpaper_style & 1) {
+        tile_wallpaper(dc, wallpaper_x, wallpaper_y);
+        return;
+    }
+    /* seg21:07B7: centred, the desktop brush around it */
+    W16Bitmap *b = w16_bitmap_of(wallpaper);
+    RECT rc = {wallpaper_x, wallpaper_y, wallpaper_x + b->w, wallpaper_y + b->h};
+    SaveDC(dc);
+    IntersectClipRect(dc, rc.left, rc.top, rc.right, rc.bottom);
+    tile_wallpaper(dc, wallpaper_x, wallpaper_y);
+    RestoreDC(dc, -1);
+    SaveDC(dc);
+    ExcludeClipRect(dc, rc.left, rc.top, rc.right, rc.bottom);
+    GetClipBox(dc, &clip);
+    FillRect(dc, &clip, w16_sys_brush(COLOR_BACKGROUND));
+    RestoreDC(dc, -1);
+}
+
+/* USER seg41:0D6E: a new border width grows or shrinks each sizable window around its client area
+ * (a minimised one's restored rectangle), then everything is drawn again */
+static void border_resize(HWND h, int dx, int dy)
+{
+    for (; h; h = h->next) {
+        if (h->style & WS_THICKFRAME) {
+            if (h->style & WS_MINIMIZE) {
+                InflateRect(&h->restore, dx, dy);
+            } else {
+                RECT r = h->rw;
+                InflateRect(&r, dx, dy);
+                RECT pr = h->parent && h->parent != w16_desktop ? h->parent->rc : (RECT){0, 0, 0, 0};
+                SetWindowPos(h, NULL, r.left - pr.left, r.top - pr.top, r.right - r.left, r.bottom - r.top,
+                             SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW | SWP_NOCOPYBITS);
+            }
+        }
+        border_resize(h->child, dx, dy);
+    }
+}
+
+void w16_border_changed(int old)
+{
+    int d = w16_border_width - old;
+    w16_metric[SM_CXFRAME] = w16_metric[SM_CYFRAME] = w16_border_width + 1;
+    if (w16_desktop) border_resize(w16_desktop->child, d * GetSystemMetrics(SM_CXBORDER), d * GetSystemMetrics(SM_CYBORDER));
+    w16_desktop_redraw();
+}
 
 LRESULT w16_desktop_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
 {
     switch (m) {
     case WM_ERASEBKGND: {
         HDC dc = (HDC)wp;
-        RECT r = {0, 0, w16_screen.w, w16_screen.h};
-        FillRect(dc, &r, w16_sys_brush(COLOR_BACKGROUND));
         if (wallpaper) {
-            HDC mem = CreateCompatibleDC(dc);
-            HGDIOBJ o = SelectObject(mem, wallpaper);
-            W16Bitmap *b = w16_bitmap_of(wallpaper);
-            if (wallpaper_tile)
-                for (int y = 0; y < r.bottom; y += b->h)
-                    for (int x = 0; x < r.right; x += b->w) BitBlt(dc, x, y, b->w, b->h, mem, 0, 0, SRCCOPY);
-            else
-                BitBlt(dc, (r.right - b->w) / 2, (r.bottom - b->h) / 2, b->w, b->h, mem, 0, 0, SRCCOPY);
-            SelectObject(mem, o);
-            DeleteDC(mem);
+            paint_desktop(dc);
+        } else {
+            RECT r = {0, 0, w16_screen.w, w16_screen.h};
+            FillRect(dc, &r, w16_sys_brush(COLOR_BACKGROUND));
         }
         return 1;
     }
@@ -1239,29 +1418,9 @@ void w16_desktop_create(void)
     SetRect(&h->rw, 0, 0, w16_screen.w, w16_screen.h);
     h->rc = h->rw;
     w16_desktop = h;
-    char wp[260];
-    GetProfileString("Desktop", "Wallpaper", "(None)", wp, sizeof wp);
-    wallpaper_tile = GetProfileInt("Desktop", "TileWallpaper", 0);
-    if (strcasecmp(wp, "(None)") && wp[0]) {
-        /* wallpapers are .BMP files: from the user's ripped files or a DOS path */
-        char path[1200];
-        const char *base = strrchr(wp, '\\') ? strrchr(wp, '\\') + 1 : wp;
-        snprintf(path, sizeof path, "%s/files/%s", w16_assets_dir(), base);
-        FILE *f = fopen(path, "rb");
-        if (!f && w16_dos_to_host(wp, path, sizeof path) == 0) f = fopen(path, "rb");
-        if (f) {
-            fseek(f, 0, SEEK_END);
-            long n = ftell(f);
-            fseek(f, 0, SEEK_SET);
-            uint8_t *d = malloc(n);
-            if (fread(d, 1, n, f) == (size_t)n && n > 14 && d[0] == 'B' && d[1] == 'M') {
-                HBITMAP w16_bitmap_from_dib(const uint8_t *d, int len, int force_color);
-                wallpaper = w16_bitmap_from_dib(d + 14, n - 14, 1);
-            }
-            free(d);
-            fclose(f);
-        }
-    }
+    /* USER's start: the pattern and the wallpaper WIN.INI names */
+    w16_set_desk_pattern((LPCSTR)-1);
+    w16_set_desk_wallpaper((LPCSTR)-1);
     rgn_set(&h->upd, &h->rw);
     h->need_erase = 1;
 }

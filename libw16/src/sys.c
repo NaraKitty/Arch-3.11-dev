@@ -243,6 +243,11 @@ static int ini_get(const char *path, LPCSTR app, LPCSTR key, LPSTR out, int cb, 
     return found;
 }
 
+/* KERNEL's WriteProfileString as measured on 3.11 (Desktop applet, WIN.INI [Desktop]): a key that is
+ * there keeps its own spelling and only the value after its '=' changes ("Wallpaper=" stays when
+ * MAIN.CPL writes "WallPaper"); a new key goes after the last line of its section that is not
+ * blank; a new section goes at the end after an empty line. key NULL removes the section, val NULL
+ * the key. */
 static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
 {
     char *d = read_all(path);
@@ -252,6 +257,7 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
     char *out = malloc(cap);
     out[0] = 0;
     int in = 0, done = 0, sawsec = 0;
+    size_t after_last = 0;   /* in out: the end of the section's last line that is not blank */
     char *p = d;
     while (*p) {
         char *nl = strchr(p, '\n');
@@ -263,14 +269,25 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
         trim(t);
         if (t[0] == '[') {
             if (in && !done && key && val) {
-                strcat(out, key); strcat(out, "="); strcat(out, val); strcat(out, "\r\n");
+                /* the new key after the section's last line */
+                char line[2048];
+                snprintf(line, sizeof line, "%s=%s\r\n", key, val);
+                memmove(out + after_last + strlen(line), out + after_last, strlen(out + after_last) + 1);
+                memcpy(out + after_last, line, strlen(line));
                 done = 1;
             }
             char *e = strchr(t, ']');
             if (e) *e = 0;
-            in = !strcasecmp(t + 1, app);
+            in = !done && !strcasecmp(t + 1, app);
             if (in) sawsec = 1;
             if (in && !key) { p += n; continue; } /* delete whole section */
+            if (in) {
+                strncat(out, p, n);
+                if (!nl) strcat(out, "\r\n");
+                after_last = strlen(out);
+                p += n;
+                continue;
+            }
         } else if (in) {
             if (!key) { p += n; continue; }
             char *eq = strchr(t, '=');
@@ -279,12 +296,24 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
                 trim(t);
                 if (!strcasecmp(t, key)) {
                     if (val && !done) {
-                        strcat(out, key); strcat(out, "="); strcat(out, val); strcat(out, "\r\n");
+                        /* the line up to its '=' stays */
+                        size_t pre = (size_t)(strchr(p, '=') - p) + 1;
+                        strncat(out, p, pre);
+                        strcat(out, val);
+                        strcat(out, "\r\n");
+                        after_last = strlen(out);
                     }
                     done = 1;
                     p += n;
                     continue;
                 }
+            }
+            if (t[0]) {
+                strncat(out, p, n);
+                if (!nl) strcat(out, "\r\n");
+                after_last = strlen(out);
+                p += n;
+                continue;
             }
         }
         strncat(out, p, n);
@@ -295,31 +324,13 @@ static int ini_set(const char *path, LPCSTR app, LPCSTR key, LPCSTR val)
             size_t L = strlen(out);
             if (L && out[L - 1] != '\n') strcat(out, "\r\n");
             strcat(out, "\r\n["); strcat(out, app); strcat(out, "]\r\n");
-        } else if (in) {
-            size_t L = strlen(out);
-            if (L && out[L - 1] != '\n') strcat(out, "\r\n");
-        }
-        if (sawsec && !in) {
-            /* section exists earlier: rebuild by inserting after its header */
-            char hdr[300];
-            snprintf(hdr, sizeof hdr, "[%s]", app);
-            char *h = strcasestr(out, hdr);
-            if (h) {
-                char *eol = strchr(h, '\n');
-                size_t at = eol ? (size_t)(eol - out + 1) : strlen(out);
-                char line[2048];
-                snprintf(line, sizeof line, "%s=%s\r\n", key, val);
-                char *o2 = malloc(strlen(out) + strlen(line) + 1);
-                memcpy(o2, out, at);
-                strcpy(o2 + at, line);
-                strcat(o2, out + at);
-                free(out);
-                out = o2;
-                done = 1;
-            }
-        }
-        if (!done) {
             strcat(out, key); strcat(out, "="); strcat(out, val); strcat(out, "\r\n");
+        } else {
+            /* the section ends the file */
+            char line[2048];
+            snprintf(line, sizeof line, "%s=%s\r\n", key, val);
+            memmove(out + after_last + strlen(line), out + after_last, strlen(out + after_last) + 1);
+            memcpy(out + after_last, line, strlen(line));
         }
     }
     FILE *f = fopen(path, "wb");
@@ -943,4 +954,101 @@ int w16_chdir(LPCSTR dos)
     snprintf(cur_dir, sizeof cur_dir, "%s", n + 2);
     snprintf(drive_dir[cur_drive - 'A'], sizeof drive_dir[0], "%s", cur_dir);
     return 0;
+}
+
+/* ------------------------------------------------------------------ DOS find first / next (INT 21h 4Eh/4Fh) */
+typedef struct { int n, i; W16FINDDATA *e; } FindState;
+
+static int find_cmp(const void *a, const void *b)
+{
+    const W16FINDDATA *x = a, *y = b;
+    int dx = !strcmp(x->name, ".") ? 0 : !strcmp(x->name, "..") ? 1 : 2;
+    int dy = !strcmp(y->name, ".") ? 0 : !strcmp(y->name, "..") ? 1 : 2;
+    return dx != dy ? dx - dy : strcmp(x->name, y->name);
+}
+
+static void find_add(FindState *s, const char *name, BYTE attrib, DWORD size)
+{
+    W16FINDDATA *e = realloc(s->e, sizeof *e * (s->n + 1));
+    if (!e) return;
+    s->e = e;
+    e = &s->e[s->n++];
+    memset(e, 0, sizeof *e);
+    snprintf(e->name, sizeof e->name, "%s", name);
+    AnsiUpper(e->name);
+    e->attrib = attrib;
+    e->size = size;
+}
+
+/* Linux keeps no DOS directory order: the names come sorted, "." and ".." first */
+int w16_find_first(LPCSTR spec, UINT attr, W16FINDDATA *f)
+{
+    char dir[300] = "", pat[260] = "*.*", full[300], host[1024];
+    memset(f, 0, sizeof *f);
+    const char *bs = strrchr(spec, '\\');
+    if (!bs && spec[0] && spec[1] == ':') bs = spec + 1;
+    if (bs) {
+        snprintf(dir, sizeof dir, "%.*s", (int)(bs - spec + 1), spec);
+        snprintf(pat, sizeof pat, "%s", bs + 1);
+    } else
+        snprintf(pat, sizeof pat, "%s", spec);
+    norm_dos(dir[0] ? dir : ".", full, sizeof full);
+    DIR *d = w16_dos_to_host(full, host, sizeof host) ? NULL : opendir(host);
+    if (!d) return -1;
+    FindState *s = calloc(1, sizeof *s);
+    if (!s) { closedir(d); return -1; }
+    if ((attr & 0x10) && full[3]) {
+        if (w16_wildmatch(pat, ".")) find_add(s, ".", 0x10, 0);
+        if (w16_wildmatch(pat, "..")) find_add(s, "..", 0x10, 0);
+    }
+    for (struct dirent *e; (e = readdir(d));) {
+        char path[1400];
+        struct stat st;
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        snprintf(path, sizeof path, "%s/%s", host, e->d_name);
+        int hidden = e->d_name[0] == '.';
+        if (stat(path, &st) || (hidden && !(attr & 0x02)) || !w16_wildmatch(pat, e->d_name)) continue;
+        if (S_ISDIR(st.st_mode)) {
+            if (attr & 0x10) find_add(s, e->d_name, 0x10 | (hidden ? 0x02 : 0), 0);
+        } else
+            find_add(s, e->d_name, 0x20 | (access(path, W_OK) ? 0x01 : 0) | (hidden ? 0x02 : 0), (DWORD)st.st_size);
+    }
+    closedir(d);
+    if (attr & 0x10) {
+        /* directories mounted here from elsewhere (C:\WINDOWS) */
+        char sub[16][64];
+        int ns = w16_mount_children(full, sub, 16);
+        for (int i = 0; i < ns; i++) {
+            int dup = 0;
+            for (int k = 0; k < s->n && !dup; k++) dup = !strcasecmp(s->e[k].name, sub[i]);
+            if (!dup && w16_wildmatch(pat, sub[i])) find_add(s, sub[i], 0x10, 0);
+        }
+    }
+    if (s->n) qsort(s->e, s->n, sizeof *s->e, find_cmp);
+    f->search = s;
+    return w16_find_next(f);
+}
+
+int w16_find_next(W16FINDDATA *f)
+{
+    FindState *s = f->search;
+    if (!s) return -1;
+    if (s->i >= s->n) {
+        w16_find_close(f);
+        return -1;
+    }
+    void *keep = f->search;
+    *f = s->e[s->i++];
+    f->search = keep;
+    return 0;
+}
+
+void w16_find_close(W16FINDDATA *f)
+{
+    FindState *s = f->search;
+    if (s) {
+        free(s->e);
+        free(s);
+    }
+    f->search = NULL;
 }
