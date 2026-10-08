@@ -21,8 +21,16 @@ build/control: $(CONTROL_SRC) control/*.h $(LIBW16)
 	@mkdir -p build
 	$(CC) $(CFLAGS) -Icontrol $(CONTROL_SRC) $(LIBS) -o $@
 
+# unit tests without the libw16 runtime (the CUPS output parsers)
+build/cups_test: control/tests/cups_test.c control/cupsparse.c control/cups.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -Icontrol control/tests/cups_test.c control/cupsparse.c -o $@
+
+check: build/cups_test
+	build/cups_test
+
 clean:
 	rm -rf build
 
 FORCE:
-.PHONY: all clean FORCE
+.PHONY: all check clean FORCE

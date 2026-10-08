@@ -83,7 +83,9 @@ static void draw_item(HWND h, HDC dc, int i, HBRUSH bg)
     /* a disabled list grays every item, the selected one too (on the highlight) */
     COLORREF old = SetTextColor(dc, (h->style & WS_DISABLED) ? GetSysColor(COLOR_GRAYTEXT) : sel ? GetSysColor(COLOR_HIGHLIGHTTEXT) : GetTextColor(dc));
     const char *s = l->it[i].s ? l->it[i].s : "";
-    if (h->style & LBS_USETABSTOPS) TabbedTextOut(dc, 2, y, s, strlen(s), l->ntabs, l->ntabs ? l->tabs : NULL, 2);
+    /* USER seg35:24A6 measures the tab stops from the client edge (tab origin 0), not from the text
+     * (measured: MAIN.CPL Connect's port list puts "Local Port" 56 px in) */
+    if (h->style & LBS_USETABSTOPS) TabbedTextOut(dc, 2, y, s, strlen(s), l->ntabs, l->ntabs ? l->tabs : NULL, 0);
     else TextOut(dc, 2, y, s, strlen(s));
     SetTextColor(dc, old);
     if (l->focus && i == l->caret) DrawFocusRect(dc, &ir);
