@@ -1,9 +1,5 @@
-# Date/Time applet (MAIN.CPL dialog 7): third in the window (after Mouse, Keyboard).
+# Date/Time applet (MAIN.CPL dialog 7): tools/run-cp-test.sh apps/control/tests/datetime.w16 OUT Date/Time
 # Run with ARCH311_CLOCK="1993-11-08 09:30:00". Same keys as arch311-ref/scn/datetime.scn
-sleep 600
-key right
-key right
-key enter
 sleep 600
 shot shots/01-datetime.png
 type 12
