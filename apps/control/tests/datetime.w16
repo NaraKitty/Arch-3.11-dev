@@ -1,0 +1,16 @@
+# Date/Time applet (MAIN.CPL dialog 7): third in the window (after Mouse, Keyboard).
+# Run with ARCH311_CLOCK="1993-11-08 09:30:00". Same keys as arch311-ref/scn/datetime.scn
+sleep 600
+key right
+key right
+key enter
+sleep 600
+shot shots/01-datetime.png
+type 12
+key tab
+sleep 300
+shot shots/02-month12.png
+key esc
+sleep 300
+shot shots/03-closed.png
+quit

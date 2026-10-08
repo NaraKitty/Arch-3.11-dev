@@ -294,7 +294,7 @@ static const uint32_t *trails_overlay(const uint32_t *frame)
                 if (X < 0 || Y < 0 || X >= w16_screen.w || Y >= w16_screen.h) continue;
                 int i = y * w + x;
                 uint32_t *d = &buf[(size_t)Y * w16_screen.w + X];
-                if (am[i]) { if (xp[i]) *d ^= 0x00FFFFFF; }
+                if (am[i]) { if (xp[i]) *d = w16_invert_display_px(*d); }
                 else *d = (*d & 0xFF000000) | w16_display_px(xp[i]);
             }
     }

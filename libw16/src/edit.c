@@ -130,19 +130,28 @@ static int line_of(Edit *e, int pos)
 
 static int vis_lines(Edit *e) { return max(1, (e->fmt.bottom - e->fmt.top) / e->lh); }
 
+/* ES_CENTER / ES_RIGHT: in 3.1 they align each line of a multiline edit (single-line edits ignore
+ * them; MAIN.CPL's Date & Time fields are multiline for that reason). The line is measured like
+ * GetTextExtent, the font's overhang included. */
+static int line_indent(HWND h, Edit *e, const char *t, int l)
+{
+    if (!e->multi || !(h->style & (ES_CENTER | ES_RIGHT))) return 0;
+    int end = line_end(e, t, l);
+    int w = seg_width(e, t, e->ls[l], end);
+    if (end > e->ls[l]) w += e->f ? e->f->bold_sim : 0;
+    int fw = e->fmt.right - e->fmt.left;
+    /* measured on the Date & Time fields: two digits sit 2 px into an 18-px field, one digit 5 */
+    return (h->style & ES_CENTER) ? (fw - w + 1) / 2 : fw - w;
+}
+
 /* client coordinates of a character position */
 static void pos_xy(HWND h, int pos, int *x, int *y)
 {
     Edit *e = ed(h);
     char *t = txt(e);
     int l = line_of(e, pos);
-    int w = seg_width(e, t, e->ls[l], pos);
+    int w = seg_width(e, t, e->ls[l], pos) + line_indent(h, e, t, l);
     untxt(e);
-    if (!e->multi) {
-        int fw = e->fmt.right - e->fmt.left;
-        if (h->style & ES_CENTER) w += (fw - e->maxw) / 2;
-        else if (h->style & ES_RIGHT) w += fw - e->maxw;
-    }
     *x = e->fmt.left + w - e->xoff;
     *y = e->fmt.top + (l - e->top) * e->lh;
 }
@@ -156,7 +165,7 @@ static int xy_pos(HWND h, int x, int y)
     if (l >= e->nl) l = e->nl - 1;
     char *t = txt(e);
     int s = e->ls[l], end = line_end(e, t, l);
-    int target = x - e->fmt.left + e->xoff, cx = 0, p = s;
+    int target = x - e->fmt.left + e->xoff - line_indent(h, e, t, l), cx = 0, p = s;
     while (p < end) {
         int w = ch_w(e, t[p], cx);
         if (cx + w / 2 >= target) break;
@@ -196,12 +205,7 @@ static void draw_line(HWND h, HDC dc, int l, HBRUSH bg, char *t)
     int s = e->ls[l], end = line_end(e, t, l);
     int ss = smin(e), se = smax(e);
     int showsel = (e->focus || e->nohidesel) && ss != se;
-    int x0 = e->fmt.left - e->xoff;
-    if (!e->multi) {
-        int fw = e->fmt.right - e->fmt.left;
-        if (h->style & ES_CENTER) x0 += (fw - e->maxw) / 2;
-        else if (h->style & ES_RIGHT) x0 += fw - e->maxw;
-    }
+    int x0 = e->fmt.left - e->xoff + line_indent(h, e, t, l);
     int sv = SaveDC(dc);
     IntersectClipRect(dc, lr.left, lr.top, lr.right, lr.bottom);
     COLORREF fg = GetTextColor(dc);

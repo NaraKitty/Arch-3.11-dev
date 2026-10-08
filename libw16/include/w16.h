@@ -1633,6 +1633,8 @@ BOOL Rectangle(HDC dc, int l, int t, int r, int b);
 BOOL RoundRect(HDC dc, int l, int t, int r, int b, int w, int h);
 BOOL Ellipse(HDC dc, int l, int t, int r, int b);
 BOOL Polygon(HDC dc, const POINT *p, int n);
+COLORREF GetNearestColor(HDC dc, COLORREF c);
+int MulDiv(int a, int b, int c);
 BOOL Polyline(HDC dc, const POINT *p, int n);
 BOOL Arc(HDC dc, int l, int t, int r, int b, int x1, int y1, int x2, int y2);
 BOOL Pie(HDC dc, int l, int t, int r, int b, int x1, int y1, int x2, int y2);

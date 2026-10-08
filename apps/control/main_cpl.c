@@ -38,7 +38,7 @@ static Applet applets[] = {
     {29, 53, 605, 5, TRUE, 5005, TRUE},    /* Keyboard */
     {25, 49, 601, 1, TRUE, 5001, FALSE},   /* Printers */
     {27, 51, 603, 3, TRUE, 5003, FALSE},   /* International */
-    {31, 55, 607, 7, TRUE, 5007, FALSE},   /* Date/Time */
+    {31, 55, 607, 7, TRUE, 5007, TRUE},    /* Date/Time */
     {34, 58, 610, 10, TRUE, 5010, TRUE},   /* Network */
 };
 #define NAPPLETS ((int)(sizeof applets / sizeof applets[0]))
@@ -123,6 +123,9 @@ static void RunApplet(HWND hwnd, int id)
     case 6:
         MouseRun(hwnd);
         break;
+    case 7:
+        DialogBox(hInstMain, MAKEINTRESOURCE(7), hwnd, DateTimeDlgProc);
+        break;
     case 10:
         NetworkDialog(hwnd);
         break;
@@ -135,6 +138,7 @@ static BOOL InitApplet(void)
     hInstMain = w16_load_module("MAIN.CPL");
     if (!hInstMain) return FALSE;
     wHelpMessage = RegisterWindowMessage("ShellHelp");
+    RegisterArrowClass(hInstMain);
     LoadString(hInstMain, 0, szOutOfMem, sizeof szOutOfMem);
     LoadString(hInstMain, 1, szCaption, sizeof szCaption);
     return TRUE;

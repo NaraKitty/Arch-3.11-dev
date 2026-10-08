@@ -22,6 +22,8 @@ param(
     [string]$Cwd = '\WINDOWS',
     [string]$Run = '',         # WIN.INI [windows] run= (programs started after the shell)
     [string]$Scenario = '',    # a .scn file (scenario.py); replaces -Keys
+    [string[]]$Dos = @(),      # DOS commands run before Windows starts (e.g. 'date 11-08-1993')
+    [string[]]$WinIni = @(),   # WIN.INI settings, 'section/key=value' (e.g. 'intl/sDate=-')
     [int]$Tolerance = 80       # pixels that may change in a 'stable' frame (caret 80; focused
                                # scroll bar, whose thumb blinks, needs about 300)
 )
@@ -40,6 +42,23 @@ if ($Run) {
     $text = [IO.File]::ReadAllText($wini) -replace '(?m)^run=.*$', "run=$Run"
     [IO.File]::WriteAllText($wini, $text, [Text.Encoding]::ASCII)
 }
+foreach ($kv in $WinIni) {
+    # one WIN.INI key: replaced in its section, or added at the section's top (CRLF kept)
+    if ($kv -notmatch '^([^/]+)/([^=]+)=(.*)$') { throw "bad -WinIni entry: $kv" }
+    $sec = $Matches[1]; $key = $Matches[2]; $val = $Matches[3]
+    $wini = Join-Path $drive 'WINDOWS\WIN.INI'
+    $lines = [Collections.Generic.List[string]]([IO.File]::ReadAllLines($wini))
+    $at = -1; $in = $false; $done = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^\[(.*)\]') { $in = $Matches[1] -eq $sec; if ($in) { $at = $i } ; continue }
+        if ($in -and $lines[$i] -match "^$([regex]::Escape($key))=") { $lines[$i] = "$key=$val"; $done = $true; break }
+    }
+    if (-not $done) {
+        if ($at -lt 0) { $lines.Add("[$sec]"); $at = $lines.Count - 1 }
+        $lines.Insert($at + 1, "$key=$val")
+    }
+    [IO.File]::WriteAllLines($wini, $lines, [Text.Encoding]::ASCII)
+}
 
 $conf = Join-Path $RefDir 'run.conf'
 $auto = if ($Keys.Count) { "autotype -w $Wait -p $Pace " + ($Keys -join ' ') } else { 'rem no keys' }
@@ -49,6 +68,7 @@ mount c "$drive"
 c:
 cd $Cwd
 $auto
+$($Dos -join "`r`n")
 win
 exit
 "@ | Set-Content -Encoding ascii $conf

@@ -89,6 +89,24 @@ uint32_t w16_invert_px(uint32_t p)
     return ~p & 0xFFFFFF;
 }
 
+/* a presented (DAC) pixel inverted the way the VGA does it, by palette index */
+uint32_t w16_invert_display_px(uint32_t d)
+{
+    uint32_t a = d & 0xFF000000;
+    d &= 0xFFFFFF;
+    for (int i = 0; i < 16; i++)
+        if (w16_display_px(vga16[i]) == d) return a | w16_display_px(vga16[i ^ 15]);
+    return a | (~d & 0xFFFFFF);
+}
+
+/* the solid colour a 16-colour display shows for c */
+COLORREF GetNearestColor(HDC dc, COLORREF c)
+{
+    (void)dc;
+    uint32_t p = w16_rgb(c);
+    return RGB((p >> 16) & 255, (p >> 8) & 255, p & 255);
+}
+
 uint32_t w16_rgb(COLORREF c)
 {
     if ((c >> 24) == 1) /* PALETTEINDEX */
@@ -551,20 +569,31 @@ DWORD SetBrushOrg(HDC dc, int x, int y) { DWORD o = MAKELONG(dc->brushorgx, dc->
 BOOL UnrealizeObject(HGDIOBJ o) { (void)o; return TRUE; }
 int SetTextCharacterExtra(HDC dc, int e) { int o = dc->charextra; dc->charextra = e; return o; }
 
+/* a * b / c rounded to the nearest integer (halves away from zero) */
+int MulDiv(int a, int b, int c)
+{
+    if (!c) return -1;
+    long long p = (long long)a * b;
+    int neg = (p < 0) != (c < 0);
+    long long q = ((p < 0 ? -p : p) + (c < 0 ? -(long long)c : c) / 2) / (c < 0 ? -(long long)c : c);
+    return (int)(neg ? -q : q);
+}
+
+/* window -> viewport scaling rounds like GDI's (MulDiv), not truncates */
 void w16_lp_to_dp(HDC dc, int *x, int *y)
 {
     if (dc->mapmode == MM_TEXT) {
         *x = *x - dc->worgx + dc->vorgx + dc->ox;
         *y = *y - dc->worgy + dc->vorgy + dc->oy;
     } else {
-        *x = (int)((long)(*x - dc->worgx) * dc->vextx / dc->wextx) + dc->vorgx + dc->ox;
-        *y = (int)((long)(*y - dc->worgy) * dc->vexty / dc->wexty) + dc->vorgy + dc->oy;
+        *x = MulDiv(*x - dc->worgx, dc->vextx, dc->wextx) + dc->vorgx + dc->ox;
+        *y = MulDiv(*y - dc->worgy, dc->vexty, dc->wexty) + dc->vorgy + dc->oy;
     }
 }
 static int lp_len(HDC dc, int v, int horiz)
 {
     if (dc->mapmode == MM_TEXT) return v;
-    return horiz ? (int)((long)v * dc->vextx / dc->wextx) : (int)((long)v * dc->vexty / dc->wexty);
+    return horiz ? MulDiv(v, dc->vextx, dc->wextx) : MulDiv(v, dc->vexty, dc->wexty);
 }
 BOOL LPtoDP(HDC dc, LPPOINT p, int n)
 {
@@ -976,25 +1005,27 @@ BOOL Polyline(HDC dc, const POINT *p, int n)
     return TRUE;
 }
 
-/* scanline polygon fill (alternate), device coordinates */
+/* scanline polygon fill (alternate), device coordinates: the pixels whose integer centres lie inside;
+ * the pen outline then adds the boundary (measured on MAIN.CPL's spin-arrow triangles) */
 static void fill_poly_dev(HDC dc, const POINT *pt, int n)
 {
     if (!dc->brush || dc->brush->u.brush.style == BS_NULL || n < 3) return;
     int ymin = pt[0].y, ymax = pt[0].y;
     for (int i = 1; i < n; i++) { ymin = min(ymin, pt[i].y); ymax = max(ymax, pt[i].y); }
-    int *xs = malloc(sizeof(int) * n);
-    for (int y = ymin; y < ymax; y++) {
+    double *xs = malloc(sizeof(double) * n);
+    for (int y = ymin; y <= ymax; y++) {
         int k = 0;
-        double yc = y + 0.5;
         for (int i = 0; i < n; i++) {
             POINT a = pt[i], b = pt[(i + 1) % n];
-            if ((a.y <= yc && b.y > yc) || (b.y <= yc && a.y > yc))
-                xs[k++] = (int)ceil(a.x + (yc - a.y) * (b.x - a.x) / (double)(b.y - a.y) - 0.5);
+            if ((a.y <= y && b.y > y) || (b.y <= y && a.y > y))
+                xs[k++] = a.x + (y - a.y) * (b.x - a.x) / (double)(b.y - a.y);
         }
         for (int i = 1; i < k; i++)
-            for (int j = i; j > 0 && xs[j - 1] > xs[j]; j--) { int t = xs[j]; xs[j] = xs[j - 1]; xs[j - 1] = t; }
-        for (int i = 0; i + 1 < k; i += 2)
-            fill_brush_rop(dc, &(RECT){xs[i], y, xs[i + 1], y + 1}, dc->brush, dc->rop2);
+            for (int j = i; j > 0 && xs[j - 1] > xs[j]; j--) { double t = xs[j]; xs[j] = xs[j - 1]; xs[j - 1] = t; }
+        for (int i = 0; i + 1 < k; i += 2) {
+            int l = (int)ceil(xs[i] - 1e-9), r = (int)floor(xs[i + 1] + 1e-9);
+            if (l <= r) fill_brush_rop(dc, &(RECT){l, y, r + 1, y + 1}, dc->brush, dc->rop2);
+        }
     }
     free(xs);
 }

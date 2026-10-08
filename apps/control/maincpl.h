@@ -19,6 +19,8 @@ int DoDialogBoxParam(int id, HWND hwnd, DLGPROC proc, DWORD dwHelp, LPARAM lPara
 /* applet dialog procedures */
 BOOL KeyboardDlgProc(HWND, UINT, WPARAM, LPARAM);  /* seg15:0000, dialog 5 */
 void MouseRun(HWND hwnd);                          /* seg3:097F, dialog 6 (seg16) */
+BOOL DateTimeDlgProc(HWND, UINT, WPARAM, LPARAM);  /* seg8:077C, dialog 7 */
+BOOL RegisterArrowClass(HINSTANCE hInst);          /* seg2:060E, "cpArrow" */
 void NetworkDialog(HWND owner);                    /* arch311: replaces WNetDeviceMode */
 
 #endif

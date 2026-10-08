@@ -327,4 +327,5 @@ extern int w16_mouse_params[3];         /* MouseThreshold1, MouseThreshold2, Mou
 void w16_trails_init(void);             /* mouse trails (msg.c): VGA.DRV's MOUSETRAILS escape */
 int w16_trails_query(void);
 int w16_trails_escape(int n);
+uint32_t w16_invert_display_px(uint32_t d);
 #endif

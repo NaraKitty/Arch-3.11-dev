@@ -237,6 +237,27 @@ behind a theme layer with win311 as the first theme. Native Linux apps get the t
 bars, min/max/close behaviour through the WM (3.11: minimise to a desktop icon, maximise to full screen,
 close from the system menu / double click / Alt+F4). MS-DOS Prompt just launches the Linux terminal
 emulator. IE and Netscape (Chromium/CEF shells) are essential - de-risk early.
-NEXT: Date/Time (7, seg8:077C), Desktop (8, seg18:1419), Color (100, seg6:0DC8 modeless), International
-(3, seg12:194D), Fonts (2, seg9:0CBC), Ports (4, seg19:062E), Printers (1, seg20:1302); Internet applet;
-CEF feasibility spike for the browsers; theme layer refactor; WM; scroll-bar focus (blinking thumb).
+Date & Time applet (datetime.c = seg8 + the DOS clock calls seg1:189B-1915; arrow.c = the "cpArrow" spin
+control, seg2, also used by Desktop). Verified against real 3.11 (scn/datetime.scn with ref-run
+-Dos 'time 09:30:00', port test datetime.w16 with ARCH311_CLOCK): both frames are pixel-identical except
+the caret (screenshots hide it) and the ticking seconds. Three probe runs with odd WIN.INI [intl] values
+(ref-run -WinIni) pinned down the layout rules. The dialog keeps its edits as an offset to the clock and
+sets the Linux clock once on OK (timedatectl set-ntp false + set-time; UNTESTED outside simulation).
+MAIN.CPL counts 2000 as a common year (DaysInMonth seg8:064E) - ported as is.
+libw16 findings from it:
+- VGA.DRV GetCharWidth (seg1:17DC) returns widths + 2 for simulated bold on a 386 in protected mode
+  (text still advances + 1): GetCharWidth now does the same.
+- ES_CENTER / ES_RIGHT align each line of MULTILINE edits only (was: single-line only, backwards);
+  line measured with the overhang, centring offset (fw - w + 1) / 2.
+- DrawText DT_CENTER floors a negative offset (text wider than its rectangle).
+- Polygon fill: pixels with integer centres inside, then the pen outline (was sampled at y + .5).
+- MulDiv added; mapping-mode transforms round (MulDiv) instead of truncating; GetNearestColor.
+- AdjustArrowWidth (seg2:0000) makes the spin control's WIDTH odd (13), not its height.
+Rig: ref-run.ps1 -Dos 'cmd', ... (DOS commands before win; DOSBox-X's `date` did not take, `time` did)
+and -WinIni 'section/key=value', ...; PowerShell jobs do not survive between tool calls - run captures
+with the tool's background mode instead.
+docs/THEMES.md: the theme architecture (owner direction: 3.11 first, Win 1/2/95/98/XP/7 later).
+NEXT: Desktop (8, seg18:1419), Color (100, seg6:0DC8 modeless), International (3, seg12:194D), Fonts (2,
+seg9:0CBC), Ports (4, seg19:062E), Printers (1, seg20:1302); Internet applet; CEF spike for the browsers
+(download needs the owner's OK: cef_binary_154.0.34+g14c5a08+chromium-154.0.8037.98_linux64_minimal,
+326 MB); theme layer refactor; WM; scroll-bar focus (blinking thumb).

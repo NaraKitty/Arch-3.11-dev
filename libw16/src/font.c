@@ -319,10 +319,14 @@ int GetTextFace(HDC dc, int cb, LPSTR buf)
     snprintf(buf, cb, "%s", f->face);
     return strlen(buf);
 }
+/* VGA.DRV GetCharWidth (seg1:17DC) adds 2 to every width of a simulated bold font when Windows runs
+ * in protected mode on a 386 or better, although text output advances by only 1 extra per character
+ * (measured: MAIN.CPL's Date & Time fields are sized from digit widths of 8 in its bold dialog font,
+ * whose digits advance 7) */
 BOOL GetCharWidth(HDC dc, UINT first, UINT last, int *out)
 {
     W16Font *f = w16_dc_font(dc);
-    for (UINT c = first; c <= last && c < 256; c++) *out++ = f->widths[c];
+    for (UINT c = first; c <= last && c < 256; c++) *out++ = f->widths[c] + (f->bold_sim ? 1 : 0);
     return TRUE;
 }
 int AddFontResource(LPCSTR file)
@@ -495,7 +499,9 @@ int DrawText(HDC dc, LPCSTR s, int n, LPRECT r, UINT fmt)
         maxw = max(maxw, lw);
         if (!(fmt & DT_CALCRECT)) {
             int x = r->left;
-            if (fmt & DT_CENTER) x = r->left + (width - lw) / 2;
+            /* a line wider than the rectangle starts left of it by half the excess, rounded down
+             * (measured: a 7-px "/" in MAIN.CPL's 6-px Date & Time separator starts 1 px left) */
+            if (fmt & DT_CENTER) x = r->left + ((width - lw) >> 1);
             else if (fmt & DT_RIGHT) x = r->right - lw;
             /* draw segments between tabs */
             int cx = x, st = i;
