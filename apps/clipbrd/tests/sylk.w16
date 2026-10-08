@@ -1,0 +1,50 @@
+# Clipboard Viewer: the keys of arch311-ref/scn/clipbrd-sylk.scn (tools/ref311/scenario.py w16)
+# A clipboard with only SYLK: Auto shows the binary-format message (DT_SINGLELINE, centred and cut),
+# the Sylk item is grayed; Help menu; About (user name and memory figures ignored).
+# compare: clipbrd-sylk/03.png 01.png ignore 320 240 333 261
+# compare: clipbrd-sylk/04.png 02.png ignore 320 240 333 261
+# compare: clipbrd-sylk/05.png 03.png ignore 320 240 333 261
+# compare: clipbrd-sylk/06.png 04.png ignore 320 240 333 261 ignore 120 178 232 194 ignore 250 286 372 318
+# compare: clipbrd-sylk/07.png 05.png ignore 320 240 333 261
+# regress: sh apps/clipbrd/tests/run.sh "$TEST" "$OUT"
+sleep 400
+key alt
+key f
+key o
+key s
+key y
+key s
+key t
+key e
+key m
+key backslash
+key c
+key b
+key s
+key y
+key l
+key k
+key period
+key c
+key l
+key p
+key enter
+sleep 400
+shot shots/01.png
+key alt
+key d
+sleep 400
+shot shots/02.png
+key esc
+key esc
+key alt
+key h
+sleep 400
+shot shots/03.png
+key a
+sleep 400
+shot shots/04.png
+key esc
+sleep 400
+shot shots/05.png
+quit
