@@ -1,0 +1,12 @@
+# Color applet (MAIN.CPL dialog 100): first icon of this branch's Control Panel, as in real 3.11
+# (index 0), so Enter opens it. Same keys as arch311-ref/scn/color-open.scn: opened, then the next
+# scheme (Arizona) in the Color Schemes combo. Compare in 16 colours: W16_COLORS=16 (tests/color.sh).
+sleep 400
+shot shots/01.png
+key enter
+sleep 400
+shot shots/02.png
+key down
+sleep 400
+shot shots/03.png
+quit

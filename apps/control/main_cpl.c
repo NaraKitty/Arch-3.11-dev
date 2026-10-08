@@ -30,7 +30,7 @@ typedef struct {
 } Applet;
 
 static Applet applets[] = {
-    {24, 48, 600, 0, TRUE, 5000, FALSE},   /* Color */
+    {24, 48, 600, 0, TRUE, 5000, TRUE},    /* Color */
     {26, 50, 602, 2, TRUE, 5002, FALSE},   /* Fonts */
     {28, 52, 604, 4, TRUE, 5004, FALSE},   /* Ports */
     {30, 54, 606, 6, TRUE, 5006, TRUE},    /* Mouse */
@@ -114,13 +114,15 @@ int DoDialogBoxParam(int id, HWND hwnd, DLGPROC proc, DWORD dwHelp, LPARAM lPara
 }
 
 /* ------------------------------------------------------------------ seg3:0733: run applet <id>
- * Not ported yet: 0 Color = CreateDialog 100 with seg6:0DC8, then the modal loop seg3:06AE;
- * 1 Printers = dialog 1, seg20:1302 (activates the open one, [0x16], instead when there is one);
- * 2 Fonts = dialog 2, seg9:0CBC; 3 International = dialog 3, seg12:194D; 4 Ports = dialog 4,
- * seg19:062E; 8 Desktop = dialog 8, seg18:1419. */
+ * Not ported yet: 1 Printers = dialog 1, seg20:1302 (activates the open one, [0x16], instead when
+ * there is one); 2 Fonts = dialog 2, seg9:0CBC; 3 International = dialog 3, seg12:194D; 4 Ports =
+ * dialog 4, seg19:062E; 8 Desktop = dialog 8, seg18:1419. */
 static void RunApplet(HWND hwnd, int id)
 {
     switch (id) {
+    case 0:
+        ColorRun(hwnd);     /* CreateDialog 100 with seg6:0DC8, then the loop seg3:06AE */
+        break;
     case 5:
         DialogBox(hInstMain, MAKEINTRESOURCE(5), hwnd, KeyboardDlgProc);
         break;
@@ -200,7 +202,7 @@ LRESULT Main_CPlApplet(HWND hwndCPl, UINT msg, LPARAM lParam1, LPARAM lParam2)
         return 0;
     }
     case CPL_EXIT:
-        if (--cInit == 0) { /* seg3:0371 frees GDI objects that ported applets keep */ }
+        if (--cInit == 0) ColorExit();     /* seg3:0371 frees the GDI objects applets keep */
         return 0;
     }
     /* messages 100 (Printers for Print Manager) and 101 (seg3:0010 for Setup) are private

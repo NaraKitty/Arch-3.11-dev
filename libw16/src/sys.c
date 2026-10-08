@@ -95,11 +95,30 @@ static void init_metrics(int sw, int sh)
 int GetSystemMetrics(int i) { return (i >= 0 && i < SM_CMETRICS) ? w16_metric[i] : 0; }
 COLORREF GetSysColor(int i) { return (i >= 0 && i < W16_NUM_SYSCOLORS) ? w16_syscolor[i] : 0; }
 
+/* USER SetSysColors (seg41:0C06): the text-like colours (jump table seg41:0C50) are made solid with
+ * the display's GetNearestColor; a scroll bar colour of exactly E0E0E0 gets the 0x10 flag in its high
+ * byte (VGA.DRV then realizes the brush as its 50% gray pattern). Then every top-level window gets
+ * WM_SYSCOLORCHANGE and the whole screen is redrawn, frames and children included
+ * (RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN on the desktop). */
 void SetSysColors(int n, const int *idx, const COLORREF *v)
 {
-    for (int i = 0; i < n; i++)
-        if (idx[i] >= 0 && idx[i] < W16_NUM_SYSCOLORS)
-            w16_syscolor[idx[i]] = v[i];
+    for (int i = 0; i < n; i++) {
+        int k = idx[i];
+        COLORREF c = v[i];
+        if (k < 0 || k >= W16_NUM_SYSCOLORS) continue;
+        switch (k) {
+        case COLOR_SCROLLBAR:
+            if (c == 0x00E0E0E0) c |= 0x10000000;
+            break;
+        case COLOR_MENU: case COLOR_WINDOW: case COLOR_WINDOWFRAME: case COLOR_MENUTEXT:
+        case COLOR_WINDOWTEXT: case COLOR_CAPTIONTEXT: case COLOR_HIGHLIGHT: case COLOR_HIGHLIGHTTEXT:
+        case COLOR_BTNTEXT: case COLOR_INACTIVECAPTIONTEXT:
+            c = GetNearestColor(NULL, c);
+            break;
+        }
+        w16_syscolor[k] = c;
+    }
+    SendMessage(HWND_BROADCAST, WM_SYSCOLORCHANGE, 0, 0);
     w16_invalidate_screen_rect(&(RECT){0, 0, w16_metric[SM_CXSCREEN], w16_metric[SM_CYSCREEN]});
 }
 

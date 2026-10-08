@@ -344,10 +344,36 @@ HCURSOR SetCursor(HCURSOR c)
 }
 int ShowCursor(BOOL show) { cursor_count += show ? 1 : -1; if (!headless) SDL_ShowCursor(cursor_count >= 0); w16_screen_dirty = 1; return cursor_count; }
 void GetCursorPos(LPPOINT p) { *p = w16_mouse; }
+
+/* USER ClipCursor: the pointer stays inside the rectangle (right and bottom exclusive) until
+ * ClipCursor(NULL); positions from the host are clamped to it */
+static RECT cursor_clip;
+static int cursor_clipped;
+static void clamp_mouse(void)
+{
+    if (!cursor_clipped) return;
+    if (w16_mouse.x < cursor_clip.left) w16_mouse.x = cursor_clip.left;
+    if (w16_mouse.x >= cursor_clip.right) w16_mouse.x = cursor_clip.right - 1;
+    if (w16_mouse.y < cursor_clip.top) w16_mouse.y = cursor_clip.top;
+    if (w16_mouse.y >= cursor_clip.bottom) w16_mouse.y = cursor_clip.bottom - 1;
+}
+void ClipCursor(LPCRECT r)
+{
+    RECT s = {0, 0, w16_screen.w, w16_screen.h};
+    cursor_clipped = r && IntersectRect(&cursor_clip, r, &s);
+    clamp_mouse();
+}
+void GetClipCursor(LPRECT r)
+{
+    if (cursor_clipped) *r = cursor_clip;
+    else SetRect(r, 0, 0, w16_screen.w, w16_screen.h);
+}
+
 void SetCursorPos(int x, int y)
 {
     w16_mouse.x = x; w16_mouse.y = y;
-    if (win) SDL_WarpMouseInWindow(win, x * scale, y * scale);
+    clamp_mouse();
+    if (win) SDL_WarpMouseInWindow(win, w16_mouse.x * scale, w16_mouse.y * scale);
 }
 
 /* ------------------------------------------------------------------ keyboard */
@@ -600,7 +626,7 @@ static int script_step(void)
         }
         if (!strcmp(cmd, "move") || !strcmp(cmd, "click") || !strcmp(cmd, "dblclick") || !strcmp(cmd, "down") || !strcmp(cmd, "up")) {
             int x, y;
-            if (sscanf(arg, "%d %d", &x, &y) == 2) { w16_mouse.x = x; w16_mouse.y = y; }
+            if (sscanf(arg, "%d %d", &x, &y) == 2) { w16_mouse.x = x; w16_mouse.y = y; clamp_mouse(); }
             mouse_event(WM_MOUSEMOVE);
             if (!strcmp(cmd, "click") || !strcmp(cmd, "down") || !strcmp(cmd, "dblclick")) {
                 w16_keystate[VK_LBUTTON] |= 0x80; mouse_event(WM_LBUTTONDOWN);
@@ -670,11 +696,13 @@ static void handle_sdl(SDL_Event *e)
         break;
     case SDL_MOUSEMOTION:
         w16_mouse.x = e->motion.x; w16_mouse.y = e->motion.y;
+        clamp_mouse();
         mouse_event(WM_MOUSEMOVE);
         break;
     case SDL_MOUSEBUTTONDOWN:
     case SDL_MOUSEBUTTONUP: {
         w16_mouse.x = e->button.x; w16_mouse.y = e->button.y;
+        clamp_mouse();
         int down = e->type == SDL_MOUSEBUTTONDOWN;
         int vk = e->button.button == SDL_BUTTON_LEFT ? VK_LBUTTON : e->button.button == SDL_BUTTON_RIGHT ? VK_RBUTTON : VK_MBUTTON;
         if (w16_swap_buttons && vk != VK_MBUTTON) vk = vk == VK_LBUTTON ? VK_RBUTTON : VK_LBUTTON;

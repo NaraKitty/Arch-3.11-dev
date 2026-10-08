@@ -130,7 +130,12 @@ HINSTANCE GetModuleHandle(LPCSTR name)
 {
     if (!name)
         return w16_module_open(w16_app_module);
-    return w16_module_open(name);
+    HINSTANCE m = w16_module_open(name);
+    /* "DISPLAY" is the display driver's module name; libw16 shows what VGA.DRV would (its OEM
+     * bitmaps, colours and OEMBIN resources come from the user's ripped VGA.DRV) */
+    if (!m && !strcasecmp(name, "DISPLAY"))
+        m = w16_module_open("VGA.DRV");
+    return m;
 }
 
 static int match(int id, const char *nm, LPCSTR want)

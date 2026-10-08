@@ -912,6 +912,18 @@ int FrameRect(HDC dc, LPCRECT r, HBRUSH b)
     w16_fill_rect_dev(dc, &(RECT){d.right - 1, d.top, d.right, d.bottom}, b);
     return 1;
 }
+/* GDI FillRgn: the region is in logical coordinates of the DC */
+BOOL FillRgn(HDC dc, HRGN rgn, HBRUSH b)
+{
+    if (!dc || !rgn || rgn->kind != OBJ_RGN) return FALSE;
+    b = brush_arg(b);
+    for (int i = 0; i < rgn->u.rgn.n; i++) {
+        RECT d;
+        lp_rect(dc, &rgn->u.rgn.r[i], &d);
+        w16_fill_rect_dev(dc, &d, b);
+    }
+    return TRUE;
+}
 void InvertRect(HDC dc, LPCRECT r)
 {
     RECT d;

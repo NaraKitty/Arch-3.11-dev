@@ -21,6 +21,8 @@ BOOL KeyboardDlgProc(HWND, UINT, WPARAM, LPARAM);  /* seg15:0000, dialog 5 */
 void MouseRun(HWND hwnd);                          /* seg3:097F, dialog 6 (seg16) */
 BOOL DateTimeDlgProc(HWND, UINT, WPARAM, LPARAM);  /* seg8:077C, dialog 7 */
 BOOL RegisterArrowClass(HINSTANCE hInst);          /* seg2:060E, "cpArrow" */
+void ColorRun(HWND hwnd);                          /* seg3:0756, dialog 100 (seg6) modeless */
+void ColorExit(void);                              /* seg3:0371: Color's GDI objects */
 void NetworkDialog(HWND owner);                    /* arch311: replaces WNetDeviceMode */
 
 #endif
