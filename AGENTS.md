@@ -586,3 +586,40 @@ the output buffer. tools/run-cp-test.sh: ARCH311_A_FILES="NAME ..." puts ripped 
 UNTESTED: KWAJ-compressed sources (TODO), OEMSETUP.INF installs (dialog 1002), related drivers (Sound
 Blaster + msadlib), alias numbering beyond one, [boot] drivers= drivers, file-in-use (3.1's MMSYSTEM
 keeps [drivers] open from boot; nothing does here), CD-ROM default source (no MSCDEX), Help, Restart Now.
+
+### Session 9 (Oct 8, Calculator worktree) - Calculator (CALC.EXE) and the MS C 6 floating point
+apps/calc/calc.c ports CALC.EXE 3.10 function by function (seg1-seg3, each with its seg:offset):
+standard and scientific views (WIN.INI [SciCalc] layout), every key and keyboard equivalent, display
+formatting, errors and the error state, memory, the scientific functions (Deg/Rad/Grad, Inv/Hyp),
+hex/oct/bin with Dword/Word/Byte and the bitwise operators, the statistics box, Edit > Copy (hidden edit
++ WM_COPY) and Paste (CALC's paste table), Help and About. apps/calc/mscrt.c ports the pieces of the
+Microsoft C 6 run time CALC uses (sqrt/log/log10/pow/sin/cos/tan/asin/acos/atan/sinh/cosh/tanh with
+their fxam class tables, matherr types and PLOSS/TLOSS ranges, _fltout/$I8_OUTPUT digit generation with
+the power-of-ten tables, gcvt, ftol, itoa/ltoa/atol) on the x87 through inline asm in long double (x86-64
+only; built with -ffp-contract=off), so results match 3.1 to the last digit - e.g. sin 180 degrees =
+-1.209806994168e-015 from the x87's 66-bit pi.
+Reference rig: the default DOSBox-X build computes FPU instructions with host doubles (sin 180 gives
+-1.209802949635e-015); C:\DOSBox-X\dosbox-x_MinGWx64_SDL2.exe uses the host x87 and is the one to record
+Calculator with. Text needing Shift/Ctrl (memory, parentheses, n!, Mod, bitwise, statistics) goes in
+through Edit > Paste: the reference run has Program Manager as shell, run=calc.exe notepad.exe, Notepad
+opens SYSTEM\cpN.txt (ref-run -Files), Select All, Copy, Exit, then Calculator pastes; the port side
+puts the text on the clipboard with the new "clip TEXT" script command. Rig notes: the MinGW build now
+and then stops pumping messages (PrintWindow then blocks the recorder) or its AUTOTYPE stalls - retry
+the run; a blinking caret (Notepad) keeps frames from settling with -Tolerance 0, so no Notepad frames
+are recorded; identical consecutive frames are dropped, so give every shot a distinct screen.
+Verified (tools/regress.sh, apps/calc/tests/*.w16 vs arch311-ref/shots/calc-*, recorded from the
+.scn files next to them): calc-a, calc-fmt,
+calc-fpu, calc-hex, calc-menu, calc-sci/sci2/sci3/sci4/sci5, calc-std2/std3/std4, calc-paste1-4 and
+calc-copy - 201 frames (207 comparisons), every one 0 px apart (calc-menu's About box leaves out the
+user name, memory and resources lines), and WIN.INI [SciCalc] layout as 3.11 writes it (or leaves it
+unwritten). Whole suite after merging dev (ca655a4): 589 PASS, no FAIL, no SKIP.
+libw16: RoundRect (GDI's midpoint ellipse quadrants), the dialog creation clamp of USER seg24:043D,
+DLGWINDOWEXTRA, keypad key names and "clip TEXT" in scripts, disabled text of check boxes / radio buttons
+/ group boxes grayed like push buttons (USER seg25:1488: GrayString with the WINDOWTEXT brush when
+GRAYTEXT is BTNFACE or black; the checkerboard counts from the text origin, as the Color session found
+too), menu shadow/check mark and ShellAbout's text boxes (the same findings as the Clock and Minesweeper
+sessions; their code kept). tools/run-cp-test.sh: ARCH311_APP runs another program than CONTROL.EXE.
+UNTESTED: the mouse (HitTest, FlashKey on a click), Help (WinHelp, HelpError), the busy-clipboard and
+out-of-memory messages, [SciCalc] background, other than 16 colours, the statistics box's CAD and
+resizing, SIGFPE paths CALC's own range checks keep out of reach, non-x86 hosts (libm fallback),
+RoundRect with odd/oversized radii or wide/styled pens.
