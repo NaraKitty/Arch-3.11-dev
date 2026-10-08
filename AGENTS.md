@@ -635,3 +635,30 @@ SetSysModalWindow), the International Help buttons, error box 808 and the valida
 MB_DEFBUTTON2 (real COMMDLG: No is the default, cdlg-save/07) - for the COMMDLG port. Rig: the recorder
 (WinCap) sometimes hangs - run captures one per call in the foreground; Git Bash's grep hides CRs,
 check line endings in WSL.
+
+### Session 11 (Oct 8, COMMDLG worktree) - COMMDLG File Open / Save As and Find / Replace ported
+libw16/src/commdlg.c: the file and find parts are now a function-by-function port of 3.11's
+COMMDLG.DLL (seg:offset comments): GetOpenFileName/GetSaveFileName (FILEINST property 0xA000,
+ParseFile, MatchSpec, ListFiles, owner-drawn file/directory lists and drive combo with bitmap 576
+recoloured by LoadAlterBitmap, OKButtonPressed, TestCreate, hooks, type-ahead), GetFileTitle,
+FindText/ReplaceText (FRDialog, FRDlgProc). PrintDlg and the ChooseFont stub are unchanged
+(the "Replace existing file?" prompt already passes MB_DEFBUTTON2). Mapping: DOS calls go
+through sys.c's path layer; drive types from /proc/mounts (w16_drive_class: floppy A:/B:, CD
+iso9660/udf, network nfs/cifs/smb3/sshfs/fuse-network, RAM tmpfs, else fixed), GetDriveType,
+volume label = folder basename; WNet stubs return WN_NOT_SUPPORTED and the dialogs do what 3.1
+does without a network. Fixed 3.1 bugs (each commented "3.1 BUG"): unbounded skip in the UNC
+path shortener, StrRChr NULL in ListFiles, unbounded palette search in LoadAlterBitmap,
+off-by-one lpstrFile size check, uninitialised FILEINST. Arch311 fix: a path OpenFile accepts
+that ParseFile refuses (Linux directory names longer than 8.3) no longer gives negative offsets.
+USER parts ported for it: owner-draw combo field, CB_SETEXTENDEDUI keys, combo forwarding of
+owner-draw messages, list box integral height (seg38:0457), LB_SETTOPINDEX clamp, DlgDirList's
+"c:\...\" path fitting (seg37:0000), integer-atom properties, w16_GetClassPtr.
+tools/run-fixture-test.sh APP SCRIPT OUT runs any program on the rig fixture (run-cp-test.sh wraps it).
+Tests apps/notepad/tests/cdlg-{open,types,missing,save,find,mouse}.w16 against arch311-ref
+scn/cdlg-*.scn: every compared frame 0 px apart (message boxes included). Verified (WSL, merged
+with dev 4b82b47): `ARCH311_REF=/mnt/c/Users/pikac/arch311-ref tools/regress.sh` -> 498 PASS,
+0 FAIL (50 of them cdlg). UNTESTED: Replace
+(no 3.11 program uses it; only a scratch harness), hooks, custom templates, multi-select,
+the Network button, Help, Esc in a dropped combo. Open: 8.3 rules reject long Linux names
+(readme.html is "not valid", Save As after opening in a long-named directory fails
+InitFileDlg) - needs 8.3 aliases in the path layer or relaxed ParseFile; ".." at a drive root.
