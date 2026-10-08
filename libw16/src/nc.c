@@ -1174,7 +1174,7 @@ void w16_sys_command(HWND h, UINT cmd, int x, int y)
             return;
         }
         if (x == ' ' && (o->style & WS_SYSMENU)) w16_menu_track_sys(o, 1);
-        else if (o->menu && !IsIconic(o)) w16_menu_track_bar(o, 0, 0, x, 1);
+        else if (o->menu) w16_menu_track_bar(o, 0, 0, x, 1); /* an icon too: nothing shows (winmine-g) */
         else if ((o->style & WS_SYSMENU) && x == 0) w16_menu_track_sys(o, 1);
         else MessageBeep(0);
         return;

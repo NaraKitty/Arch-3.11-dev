@@ -674,3 +674,7 @@ menu and the child system menu), WM_MENUCHAR's HIWORD(lParam) menu handle (0 her
 get lower-case Linux names (ci_resolve), so a saved C:\AUTOEXEC.BAT becomes autoexec.bat (TODO:
 keep the case of a file a rename replaces?). For Program Manager / File Manager: create the client
 with CLIENTCREATESTRUCT and pass WM_COMMAND / WM_SIZE / WM_MENUCHAR on to DefFrameProc as 3.1 does.
+Verified (WSL, merged with dev 4b82b47): `ARCH311_REF=/mnt/c/Users/pikac/arch311-ref tools/regress.sh`
+-> 482 PASS, 2 FAIL (winmine-g: Alt on WINMINE's icon dropped its system menu; fixed - a top-level
+window with a menu bar keeps dev's behaviour when iconic), then winmine-g, the SysEdit min/max/next/
+keys tests and clock icon/dicon re-run: all PASS (484 checks, 0 FAIL).
