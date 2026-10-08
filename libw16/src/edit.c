@@ -26,6 +26,7 @@ typedef struct {
     char pw;
     int maxw;
     int nohidesel;
+    int quiet;                /* no EN_ notifications (initial text in WM_CREATE) */
     UINT_PTR_W16 timer;
 } Edit;
 
@@ -35,7 +36,7 @@ static void untxt(Edit *e) { LocalUnlock(e->hbuf); }
 static int smin(Edit *e) { return min(e->anchor, e->caret); }
 static int smax(Edit *e) { return max(e->anchor, e->caret); }
 
-static void notify(HWND h, int code) { w16_notify_parent(h, code); }
+static void notify(HWND h, int code) { Edit *e = h->ctl; if (!e || !e->quiet) w16_notify_parent(h, code); }
 
 /* ------------------------------------------------------------------ measuring */
 static int tab_stop(Edit *e, int x)
@@ -543,7 +544,9 @@ LRESULT w16_edit_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     case WM_CREATE: {
         calc_fmt(h);
         CREATESTRUCT *cs = (CREATESTRUCT *)lp;
+        e->quiet = 1; /* the creation text is not a change the parent hears about */
         set_text(h, cs && cs->lpszName && !IS_INTRESOURCE(cs->lpszName) ? cs->lpszName : "");
+        e->quiet = 0;
         if (e->multi) {
             if (h->style & WS_VSCROLL) SetScrollRange(h, SB_VERT, 0, 100, FALSE);
             if (h->style & WS_HSCROLL) SetScrollRange(h, SB_HORZ, 0, 100, FALSE);

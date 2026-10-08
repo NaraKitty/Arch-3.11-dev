@@ -164,3 +164,48 @@ UNTESTED: the real back ends (no PipeWire/NetworkManager in WSL; nmcli --ask wit
 particular), hostnamectl permissions (polkit), Help (no help viewer yet).
 NEXT: port MAIN.CPL (Color, Fonts, Ports, Mouse, Desktop, Keyboard, Printers, International,
 Date/Time) into apps/control; test Volume/Network on a real Arch install; T-PRN-01; Calculator, Clock.
+
+### Session 5 (Claude Code on the owner's PC, Oct 7-8 2026)
+MAIN.CPL port started (apps/control/main_cpl.c = seg3:03A2 CPlApplet with the ds:00CE applet table,
+HourGlass seg1:19D7, BroadcastWinIniChange seg4:0283, CPHelp seg3:09DD; dialogs/icons/strings load
+from the user's MAIN.CPL at run time). Applets not ported yet are left out of GETCOUNT/INQUIRE
+(`ported` flag in the table). Done: Keyboard (kbdcpl.c, seg15:0000, dialog 5). Network is now
+MAIN.CPL's entry 10 (id 10 ran WNetDeviceMode; it runs arch311's Network dialog); cplreg.c loads
+MAIN.CPL then VOLUME.CPL. Messages 100/101 (Print Manager / Setup entry points) and the MOUSE-driver
+CplApplet override are not ported (noted in code).
+Verified against real 3.11 (tools/ref311, scenario %USERPROFILE%\arch311-ref\scn\keyboard.scn vs
+apps/control/tests/keyboard.w16): the Keyboard dialog with the Test box filled is pixel-identical to
+real 3.11; KeyboardDelay/KeyboardSpeed written to WIN.INI match the values the same keys give there.
+Notepad's main window still matches (hello test); Control Panel smoke test passes.
+libw16 fixes found by that comparison (first dialogs ever measured - Notepad's were never compared):
+- Dialog template x,y place the CLIENT area in the owner's client coordinates; frame/caption go
+  around it (was: window origin). Empty menu name no longer adds a menu bar's height.
+- Dialog class is CS_DBLCLKS|CS_SAVEBITS|CS_BYTEALIGNWINDOW (USER seg3:1547, style 0x2808);
+  CreateWindow byte-aligns window x (CS_BYTEALIGNWINDOW) or client x (CS_BYTEALIGNCLIENT) to the
+  nearest 8 px, ported from USER seg13:0E34 (called from CreateWindow seg8:06FC). Not yet applied in
+  SetWindowPos / move tracking (seg6:12D3 calls it too) - TODO.
+- Dialog frame inset 5 (border + 4), caption inside a white line; controls convert x, y, cx, cy
+  separately with rounding (a 14-unit button is 23 px wherever it sits).
+- GetTextExtent/DrawText/prefix widths include the overhang of simulated bold once per string
+  (dialog fonts): underlines, centred button text and right-aligned statics now land right; push
+  button text centres on the face less the 2-px right shadow; group-box title cell 3 px below the
+  control top with the line broken from 2 px before to 2 px after it (measured on MS Sans Serif 8
+  only); scroll-bar arrows stretch to the control thickness (centre-sampled), thumb position rounds.
+- RestoreDC decremented the save depth twice, so the second DrawText on a DC left its clip rectangle
+  behind (Control Panel's third icon was never drawn). Edit controls no longer send EN_UPDATE/
+  EN_CHANGE for their creation text (the dialog proc saw WM_COMMAND before WM_INITDIALOG).
+- Config dir is created with its parents (~/.config may not exist). Keyboard SPI get/set
+  (SPI_*KEYBOARDSPEED/DELAY, SPIF_UPDATEINIFILE writes WIN.INI), HWND_BROADCAST.
+- Key repeat: host auto-repeat is ignored; libw16 repeats the last key with PC/AT typematic timing
+  from KeyboardDelay/KeyboardSpeed (delay (d+1)*250 ms, period (8+A)*2^B*4.17 ms, code 31-speed).
+UNTESTED: the typematic timing on a real keyboard (the headless script driver bypasses it); Help
+buttons (no help viewer yet); no-caption dialog-frame top inset (assumed 5 like the sides).
+Owner direction (Oct 8): arch311 is a modern OS mimicking 3.11 accurately to a degree - once the
+Control Panel is complete, internet settings must be in it (Network LAN/Wi-Fi is there now; add an
+Internet applet in 3.11 style, e.g. proxy/DNS/default browser for the IE/Netscape CEF shells).
+Rig note: the blinking focus thumb made the reference recorder drop the in-dialog frames; only the
+frame with focus in the Test edit (caret within tolerance) was captured. Use scenarios that end each
+step with focus on an edit or button.
+NEXT: Mouse (dialog 6, seg3:097F), Date/Time (7, seg8:077C), Desktop (8, seg18:1419), Color (100,
+seg6:0DC8 modeless), International (3, seg12:194D), Fonts (2, seg9:0CBC), Ports (4, seg19:062E),
+Printers (1, seg20:1302); then the Internet applet; scroll-bar focus (blinking thumb) per real 3.11.

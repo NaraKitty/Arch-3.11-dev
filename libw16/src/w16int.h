@@ -320,4 +320,5 @@ extern int w16_metric[SM_CMETRICS];
 void w16_sys_init(void);
 const char *w16_config_dir(void);
 extern int w16_border_width;
+extern int w16_kbd_speed, w16_kbd_delay; /* typematic: speed 0..31, delay 0..3 (WIN.INI [windows]) */
 #endif

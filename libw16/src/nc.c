@@ -23,9 +23,9 @@ static void frame_insets(HWND h, int *l, int *t, int *r, int *b)
     if (h->style & WS_THICKFRAME) {
         *l = *t = *r = *b = CXFRAME;
     } else if (has_dlgframe(h)) {
-        int d = GetSystemMetrics(SM_CXDLGFRAME) + 2;
-        *l = *r = *b = d;
-        *t = w16_has_caption(h->style) ? d - 1 : d;
+        /* border + dialog frame; measured on MAIN.CPL's Keyboard dialog (3.11 places its controls
+         * from the client origin this gives). A caption sits on a white line inside the top band. */
+        *l = *t = *r = *b = GetSystemMetrics(SM_CXDLGFRAME) + 1;
     } else if (h->style & WS_BORDER) {
         *l = *t = *r = *b = 1;
     }
@@ -57,6 +57,7 @@ static void caption_rect(HWND h, RECT *c)
     frame_insets(h, &l, &t, &r, &b);
     int w = h->rw.right - h->rw.left;
     SetRect(c, l, t, w - r, t + GetSystemMetrics(SM_CYCAPTION) - 2);
+    if (has_dlgframe(h)) InflateRect(c, -1, 0); /* inside the white line beside the caption */
 }
 
 static int has_min(HWND h) { return w16_has_caption(h->style) && (h->style & WS_MINIMIZEBOX) && !(h->style & WS_CHILD); }
@@ -112,6 +113,24 @@ static void obm(HDC dc, int id, int x, int y, int sx, int w, int h)
     w16_blit_bitmap(dc, dx, dy, b, sx, 0, w, h, SRCCOPY);
 }
 
+/* an OBM bitmap stretched to w x h, as 3.1 does for scroll-bar arrows on controls whose thickness
+ * differs from the system metric: nearest pixel, sampled at pixel centres (measured: a 17x17 arrow
+ * on a 20-pixel-high control repeats source rows 2, 8 and 14) */
+static void obm_stretch(HDC dc, int id, int x, int y, int w, int h)
+{
+    W16Bitmap *b = w16_obm(id);
+    if (!b) return;
+    if (w == b->w && h == b->h) { obm(dc, id, x, y, 0, w, h); return; }
+    int dx = x, dy = y;
+    w16_lp_to_dp(dc, &dx, &dy);
+    for (int yy = 0; yy < h; yy++) {
+        int sy = (2 * yy + 1) * b->h / (2 * h);
+        if (w == b->w) { w16_blit_bitmap(dc, dx, dy + yy, b, 0, sy, w, 1, SRCCOPY); continue; }
+        for (int xx = 0; xx < w; xx++)
+            w16_blit_bitmap(dc, dx + xx, dy + yy, b, (2 * xx + 1) * b->w / (2 * w), sy, 1, 1, SRCCOPY);
+    }
+}
+
 static void fill(HDC dc, int l, int t, int r, int b, COLORREF c)
 {
     int a = l, bb = t, cc = r, d = b;
@@ -154,8 +173,12 @@ static void draw_frame(HWND h, HDC dc, int active)
         fill(dc, 0, 0, 1, ht, black); fill(dc, w - 1, 0, w, ht, black);
         fill(dc, 1, 1, w - 1, 1 + td, fc); fill(dc, 1, ht - 1 - d, w - 1, ht - 1, fc);
         fill(dc, 1, 1 + td, 1 + d, ht - 1 - d, fc); fill(dc, w - 1 - d, 1 + td, w - 1, ht - 1 - d, fc);
-        fill(dc, 1 + d, 1 + td, w - 1 - d, 2 + td, in); fill(dc, 1 + d, ht - 2 - d, w - 1 - d, ht - 1 - d, in);
-        fill(dc, 1 + d, 1 + td, 2 + d, ht - 1 - d, in); fill(dc, w - 2 - d, 1 + td, w - 1 - d, ht - 1 - d, in);
+        if (cap) {
+            /* white line around the caption, inside the frame; the client starts on it below */
+            int cb = 1 + td + GetSystemMetrics(SM_CYCAPTION);
+            fill(dc, 1 + d, 1 + td, w - 1 - d, 2 + td, in);
+            fill(dc, 1 + d, 1 + td, 2 + d, cb, in); fill(dc, w - 2 - d, 1 + td, w - 1 - d, cb, in);
+        }
     } else if (h->style & WS_BORDER) {
         fill(dc, 0, 0, w, 1, black); fill(dc, 0, ht - 1, w, ht, black);
         fill(dc, 0, 0, 1, ht, black); fill(dc, w - 1, 0, w, ht, black);
@@ -217,7 +240,7 @@ static int thumb_pos(W16Scroll *s, int track_len, int thumb)
     int p = s->pos - s->min;
     if (p < 0) p = 0;
     if (p > range) p = range;
-    return (int)((long)avail * p / range);
+    return (int)(((long)avail * p + range / 2) / range); /* MulDiv rounding, as measured */
 }
 
 /* parts: 1 = line up, 2 = page up, 3 = thumb, 4 = page down, 5 = line down */
@@ -297,11 +320,11 @@ void w16_draw_sb_ctl(HDC dc, const RECT *r, int vert, W16Scroll *s, int pressed,
                   : (enabled ? (pressed == 5 ? OBM_RGARROWD : OBM_RGARROW) : OBM_RGARROWI);
     if (!shrink) {
         if (vert) {
-            obm(dc, up, r->left, r->top, 0, r->right - r->left, a);
-            obm(dc, dn, r->left, r->bottom - a, 0, r->right - r->left, a);
+            obm_stretch(dc, up, r->left, r->top, r->right - r->left, a);
+            obm_stretch(dc, dn, r->left, r->bottom - a, r->right - r->left, a);
         } else {
-            obm(dc, up, r->left, r->top, 0, a, r->bottom - r->top);
-            obm(dc, dn, r->right - a, r->top, 0, a, r->bottom - r->top);
+            obm_stretch(dc, up, r->left, r->top, a, r->bottom - r->top);
+            obm_stretch(dc, dn, r->right - a, r->top, a, r->bottom - r->top);
         }
     } else {
         /* too short for the bitmaps: plain boxes */

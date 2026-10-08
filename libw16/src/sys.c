@@ -11,6 +11,7 @@
 
 int w16_debug;
 int w16_border_width = 3;
+int w16_kbd_speed = 31, w16_kbd_delay = 2;
 
 /* Windows 3.1 "Windows Default" colours (USER defaults; overridable from [colors] in WIN.INI) */
 COLORREF w16_syscolor[W16_NUM_SYSCOLORS] = {
@@ -108,6 +109,9 @@ const char *w16_config_dir(void)
             snprintf(d, sizeof d, "%s/arch311", x);
         else
             snprintf(d, sizeof d, "%s/.config/arch311", getenv("HOME") ? getenv("HOME") : ".");
+        /* mkdir -p: $HOME/.config may not exist yet */
+        for (char *c = d + 1; *c; c++)
+            if (*c == '/') { *c = 0; mkdir(d, 0755); *c = '/'; }
         mkdir(d, 0755);
     }
     return d;
@@ -366,6 +370,10 @@ void w16_sys_init(void)
     w16_border_width = GetProfileInt("windows", "BorderWidth", 3);
     if (w16_border_width < 1) w16_border_width = 1;
     if (w16_border_width > 49) w16_border_width = 49;
+    w16_kbd_speed = GetProfileInt("windows", "KeyboardSpeed", 31);
+    w16_kbd_delay = GetProfileInt("windows", "KeyboardDelay", 2);
+    if (w16_kbd_speed < 0 || w16_kbd_speed > 31) w16_kbd_speed = 31;
+    if (w16_kbd_delay < 0 || w16_kbd_delay > 3) w16_kbd_delay = 2;
     for (int i = 0; i < W16_NUM_SYSCOLORS; i++) {
         if (GetProfileString("colors", color_keys[i], "", b, sizeof b)) {
             int r, g, bl;

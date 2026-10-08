@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "w16.h"
-#include "cpl.h"
+#include "maincpl.h"
 #include "net.h"
 
 enum {
@@ -396,36 +396,11 @@ static W16DlgTemplate *NetworkTemplate(void)
     return t;
 }
 
-/* ------------------------------------------------------------------ CPlApplet */
-static HICON hIconNet;
-
-LRESULT Network_CPlApplet(HWND hwndCPl, UINT msg, LPARAM l1, LPARAM l2)
+/* ------------------------------------------------------------------ MAIN.CPL applet 10
+ * MAIN.CPL ran WNetDeviceMode (the network driver's dialog) here; arch311 shows its own */
+void NetworkDialog(HWND owner)
 {
-    (void)l1;
-    switch (msg) {
-    case CPL_INIT: {
-        HINSTANCE main = w16_load_module("MAIN.CPL");
-        hIconNet = main ? LoadIcon(main, MAKEINTRESOURCE(34)) : NULL;
-        if (!hIconNet) hIconNet = LoadIcon(NULL, IDI_APPLICATION);
-        return TRUE;
-    }
-    case CPL_GETCOUNT:
-        return 1;
-    case CPL_NEWINQUIRE: {
-        NEWCPLINFO *ni = (NEWCPLINFO *)l2;
-        memset(ni, 0, sizeof *ni);
-        ni->dwSize = sizeof *ni;
-        ni->hIcon = hIconNet;
-        lstrcpy(ni->szName, "&Network");
-        lstrcpy(ni->szInfo, "Changes your network settings and connections");
-        return 0;
-    }
-    case CPL_DBLCLK: {
-        W16DlgTemplate *t = NetworkTemplate();
-        DialogBoxIndirectParam(NULL, w16_dlgt_data(t), hwndCPl, NetworkDlgProc, 0);
-        w16_dlgt_free(t);
-        return 0;
-    }
-    }
-    return 0;
+    W16DlgTemplate *t = NetworkTemplate();
+    DialogBoxIndirectParam(NULL, w16_dlgt_data(t), owner, NetworkDlgProc, 0);
+    w16_dlgt_free(t);
 }

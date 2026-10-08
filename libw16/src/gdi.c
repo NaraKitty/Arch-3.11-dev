@@ -496,14 +496,13 @@ int SaveDC(HDC dc)
 BOOL RestoreDC(HDC dc, int n)
 {
     if (n < 0) n = dc->saved_depth + n + 1;
+    if (n < 1 || n > dc->saved_depth) return FALSE;
     while (dc->saved && dc->saved_depth >= n) {
         HDC s = dc->saved;
         Region vis = dc->vis;
         rgn_free(&dc->clip);
-        *dc = *s;
+        *dc = *s; /* the state from before that SaveDC, its depth and older saves included */
         dc->vis = vis;
-        dc->saved = s->saved;
-        dc->saved_depth--;
         free(s);
     }
     return TRUE;

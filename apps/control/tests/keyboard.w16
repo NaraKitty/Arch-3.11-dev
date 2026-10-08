@@ -1,0 +1,23 @@
+# Keyboard applet (MAIN.CPL dialog 5): the first applet in the window
+sleep 600
+key enter
+sleep 500
+shot shots/01-keyboard.png
+key right
+key right
+sleep 200
+shot shots/02-delay-short.png
+key tab
+key left
+key left
+key pageup
+sleep 200
+shot shots/03-rate-slower.png
+key tab
+type abc
+sleep 200
+shot shots/04-test.png
+key enter
+sleep 300
+shot shots/05-closed.png
+quit

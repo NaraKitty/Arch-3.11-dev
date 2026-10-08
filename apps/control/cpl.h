@@ -42,7 +42,7 @@ typedef struct {
 extern const CplModuleDef cpl_modules[];
 
 /* applets */
-LRESULT Network_CPlApplet(HWND, UINT, LPARAM, LPARAM);
+LRESULT Main_CPlApplet(HWND, UINT, LPARAM, LPARAM);
 LRESULT Volume_CPlApplet(HWND, UINT, LPARAM, LPARAM);
 
 #endif

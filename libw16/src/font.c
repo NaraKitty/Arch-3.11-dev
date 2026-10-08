@@ -271,15 +271,20 @@ BOOL ExtTextOut(HDC dc, int x, int y, UINT opt, LPCRECT r, LPCSTR s, UINT n, con
 
 BOOL TextOut(HDC dc, int x, int y, LPCSTR s, int n) { return ExtTextOut(dc, x, y, 0, NULL, s, n, NULL); }
 
+/* GDI's extents include the overhang of a simulated bold or italic font once per string
+ * (TEXTMETRIC.tmOverhang); measured on 3.11 dialog text: mnemonic underlines, centred button text
+ * and right-aligned statics all come out one pixel wider than the advance widths */
+static int overhang(W16Font *f, int n) { return n > 0 ? f->bold_sim : 0; }
+
 DWORD GetTextExtent(HDC dc, LPCSTR s, int n)
 {
     W16Font *f = w16_dc_font(dc);
-    return MAKELONG(extent(dc, f, s, n), f->height);
+    return MAKELONG(extent(dc, f, s, n) + overhang(f, n), f->height);
 }
 BOOL GetTextExtentPoint(HDC dc, LPCSTR s, int n, LPSIZE sz)
 {
     W16Font *f = w16_dc_font(dc);
-    sz->cx = extent(dc, f, s, n);
+    sz->cx = extent(dc, f, s, n) + overhang(f, n);
     sz->cy = f->height;
     return TRUE;
 }
@@ -381,7 +386,8 @@ DWORD GetTabbedTextExtent(HDC dc, LPCSTR s, int n, int ntabs, const int *tabs)
 }
 
 /* ------------------------------------------------------------------ prefix (&) text */
-int w16_prefix_text_width(HDC dc, const char *s, int n)
+/* advance of the text with '&' prefixes removed */
+static int prefix_advance(HDC dc, const char *s, int n)
 {
     W16Font *f = w16_dc_font(dc);
     int w = 0;
@@ -390,6 +396,13 @@ int w16_prefix_text_width(HDC dc, const char *s, int n)
         w += f->widths[(unsigned char)s[i]] + dc->charextra;
     }
     return w;
+}
+
+/* its extent, as USER measures it (GetTextExtent: plus the overhang) */
+int w16_prefix_text_width(HDC dc, const char *s, int n)
+{
+    int w = prefix_advance(dc, s, n);
+    return w > 0 ? w + w16_dc_font(dc)->bold_sim : w;
 }
 
 char w16_mnemonic(const char *s)
@@ -419,7 +432,8 @@ void w16_draw_prefix_text(HDC dc, int x, int y, const char *s, int n, int nopref
     }
     TextOut(dc, x, y, buf, m);
     if (ul >= 0) {
-        int ux = x + extent(dc, f, buf, ul), uw = f->widths[(unsigned char)buf[ul]] - f->bold_sim;
+        /* underline: the extent of the mnemonic character (overhang included), from its origin */
+        int ux = x + extent(dc, f, buf, ul), uw = f->widths[(unsigned char)buf[ul]] + f->bold_sim;
         int uy = y + f->ascent + 1;
         int a = ux, b = uy, c = ux + uw, d = uy + 1;
         w16_lp_to_dp(dc, &a, &b);
@@ -477,6 +491,7 @@ int DrawText(HDC dc, LPCSTR s, int n, LPRECT r, UINT fmt)
         /* trailing spaces of a wrapped line do not count */
         int jj = j;
         while ((fmt & DT_WORDBREAK) && jj > i && s[jj - 1] == ' ') { jj--; lw -= f->widths[' ']; }
+        if (lw > 0) lw += f->bold_sim; /* measured with GetTextExtent: overhang included */
         maxw = max(maxw, lw);
         if (!(fmt & DT_CALCRECT)) {
             int x = r->left;
@@ -488,7 +503,7 @@ int DrawText(HDC dc, LPCSTR s, int n, LPRECT r, UINT fmt)
                 if (k == jj || (s[k] == '\t' && (fmt & DT_EXPANDTABS))) {
                     if (k > st) {
                         w16_draw_prefix_text(dc, cx, y, s + st, k - st, noprefix);
-                        cx += noprefix ? extent(dc, f, s + st, k - st) : w16_prefix_text_width(dc, s + st, k - st);
+                        cx += noprefix ? extent(dc, f, s + st, k - st) : prefix_advance(dc, s + st, k - st);
                     }
                     if (k < jj) cx = x + ((cx - x) / tabw + 1) * tabw;
                     st = k + 1;

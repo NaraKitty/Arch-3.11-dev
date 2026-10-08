@@ -201,7 +201,6 @@ int main(int argc, char **argv)
 /* ------------------------------------------------------------------ SystemParametersInfo */
 BOOL SystemParametersInfo(UINT action, UINT param, void *pv, UINT winini)
 {
-    (void)param; (void)winini;
     switch (action) {
     case SPI_GETBEEP:
         if (pv) { char b[8]; GetProfileString("windows", "Beep", "yes", b, sizeof b); *(BOOL *)pv = !strcasecmp(b, "yes"); }
@@ -209,6 +208,25 @@ BOOL SystemParametersInfo(UINT action, UINT param, void *pv, UINT winini)
     case SPI_GETBORDER:
         if (pv) *(int *)pv = w16_border_width;
         return TRUE;
+    case SPI_GETKEYBOARDSPEED:
+        if (pv) *(int *)pv = w16_kbd_speed;
+        return TRUE;
+    case SPI_GETKEYBOARDDELAY:
+        if (pv) *(int *)pv = w16_kbd_delay;
+        return TRUE;
+    case SPI_SETKEYBOARDSPEED:
+    case SPI_SETKEYBOARDDELAY: {
+        int v = (int)param, spd = action == SPI_SETKEYBOARDSPEED;
+        if (spd) w16_kbd_speed = v < 0 ? 0 : v > 31 ? 31 : v;
+        else w16_kbd_delay = v < 0 ? 0 : v > 3 ? 3 : v;
+        if (winini & SPIF_UPDATEINIFILE) {
+            char t[8];
+            wsprintf(t, "%d", spd ? w16_kbd_speed : w16_kbd_delay);
+            WriteProfileString("windows", spd ? "KeyboardSpeed" : "KeyboardDelay", t);
+        }
+        if (winini & SPIF_SENDWININICHANGE) SendMessage(HWND_BROADCAST, WM_WININICHANGE, 0, (LPARAM) "windows");
+        return TRUE;
+    }
     case SPI_ICONHORIZONTALSPACING:
         if (pv) *(int *)pv = GetProfileInt("desktop", "IconSpacing", 75);
         return TRUE;

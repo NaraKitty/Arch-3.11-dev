@@ -540,6 +540,30 @@ static int script_step(void)
     exit(0);
 }
 
+/* ------------------------------------------------------------------ typematic
+ * The host's key repeat is ignored; the last key pressed repeats at the PC/AT typematic
+ * timing that KeyboardDelay / KeyboardSpeed select, like KEYBOARD.DRV programming the 8042:
+ * delay (d+1)*250 ms, period (8+A)*2^B*4.17 ms with rate code 31-speed = B<<3|A. */
+static int rep_vk, rep_scan;
+static DWORD rep_next;
+
+static DWORD rep_period(void)
+{
+    int code = 31 - w16_kbd_speed;
+    return (DWORD)((8 + (code & 7)) * (1 << ((code >> 3) & 3)) * 417 / 100);
+}
+
+static void typematic(void)
+{
+    if (!rep_vk) return;
+    DWORD now = GetTickCount();
+    if ((int)(now - rep_next) < 0) return;
+    if (!(w16_keystate[rep_vk] & 0x80)) { rep_vk = 0; return; }
+    key_event(WM_KEYDOWN, rep_vk, rep_scan, 1);
+    rep_next += rep_period();
+    if ((int)(now - rep_next) > 0) rep_next = now + rep_period(); /* fell behind: don't burst */
+}
+
 /* ------------------------------------------------------------------ SDL pump */
 static void handle_sdl(SDL_Event *e)
 {
@@ -572,11 +596,17 @@ static void handle_sdl(SDL_Event *e)
     case SDL_KEYDOWN:
     case SDL_KEYUP: {
         int vk = sdl_to_vk(e->key.keysym.sym, e->key.keysym.scancode);
-        if (!vk) break;
+        if (!vk || e->key.repeat) break;
         int down = e->type == SDL_KEYDOWN;
-        if (down) { w16_keystate[vk] |= 0x80; if (!e->key.repeat) w16_keystate[vk] ^= 1; }
-        else w16_keystate[vk] &= ~0x80;
-        key_event(down ? WM_KEYDOWN : WM_KEYUP, vk, e->key.keysym.scancode, e->key.repeat);
+        if (down) {
+            w16_keystate[vk] |= 0x80; w16_keystate[vk] ^= 1;
+            rep_vk = vk; rep_scan = e->key.keysym.scancode;
+            rep_next = GetTickCount() + (w16_kbd_delay + 1) * 250;
+        } else {
+            w16_keystate[vk] &= ~0x80;
+            if (vk == rep_vk) rep_vk = 0;
+        }
+        key_event(down ? WM_KEYDOWN : WM_KEYUP, vk, e->key.keysym.scancode, 0);
         break;
     }
     case SDL_TEXTINPUT: {
@@ -602,8 +632,13 @@ void w16_pump(int wait_ms)
         return;
     }
     SDL_Event e;
+    if (rep_vk && wait_ms > 0) {
+        int left = (int)(rep_next - GetTickCount());
+        if (left < wait_ms) wait_ms = left > 0 ? left : 0;
+    }
     if (wait_ms > 0 && SDL_WaitEventTimeout(&e, wait_ms)) handle_sdl(&e);
     while (SDL_PollEvent(&e)) handle_sdl(&e);
+    typematic();
 }
 
 void w16_delay(int ms)

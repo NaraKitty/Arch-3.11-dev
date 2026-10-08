@@ -87,7 +87,8 @@ void w16_register_system_classes(void)
     sysclass("COMBOBOX", w16_combobox_proc, CS_DBLCLKS | CS_PARENTDC, arrow, 0);
     sysclass("COMBOLBOX", w16_combolbox_proc, CS_DBLCLKS | CS_SAVEBITS, arrow, 0);
     sysclass("SCROLLBAR", w16_scrollbar_proc, CS_DBLCLKS | CS_PARENTDC, arrow, 0);
-    sysclass("#32770", w16_dialog_wndproc, CS_SAVEBITS, arrow, 30);
+    /* USER seg3:1547 registers the dialog class with style 0x2808 */
+    sysclass("#32770", w16_dialog_wndproc, CS_DBLCLKS | CS_SAVEBITS | CS_BYTEALIGNWINDOW, arrow, 30);
     sysclass("#32769", w16_desktop_proc, 0, arrow, 0);
 }
 
@@ -571,6 +572,24 @@ static void default_rect(HWND h, RECT *r)
     default_pos_count++;
 }
 
+/* USER seg13:0E34, which CreateWindow (seg8:06FC) runs on every new window rectangle: on displays
+ * under 8 bits per pixel (libw16 shows the 16-colour VGA), CS_BYTEALIGNWINDOW moves the window and
+ * CS_BYTEALIGNCLIENT its client area to the nearest byte (8 pixels) across. */
+static int byte_align_dx(HWND h)
+{
+    WORD cs = h->cls ? h->cls->wc.style : 0;
+    int x = h->rw.left;
+    if (cs & CS_BYTEALIGNWINDOW) return ((x + 4) & ~7) - x;
+    if (!(cs & CS_BYTEALIGNCLIENT)) return 0;
+    int frame = 0;
+    DWORD cap = h->style & WS_CAPTION;
+    if (h->style & WS_THICKFRAME) frame = w16_border_width + 1;
+    else if (cap == WS_CAPTION || cap == WS_BORDER) frame = 1;
+    if (cap == WS_DLGFRAME || (h->exstyle & WS_EX_DLGMODALFRAME)) frame = 5;
+    x += frame * GetSystemMetrics(SM_CXBORDER);
+    return ((x + 4) & ~7) - x;
+}
+
 /* The overlapped-window part of CreateWindow (USER, after "test [si+2Bh],0C0h"): runs for every
  * top-level overlapped window; one with an explicit position hands its cascade slot back. */
 static void default_position(HWND h, int *x, int *y, int *cx, int *cy, int usedef_pos, int usedef_size)
@@ -647,6 +666,7 @@ HWND CreateWindowEx(DWORD ex, LPCSTR cls, LPCSTR title, DWORD style, int x, int 
         mm.ptMaxTrackSize.y = mm.ptMaxSize.y;
     }
     h->rw = (RECT){pr.left + x, pr.top + y, pr.left + x + cx, pr.top + y + cy};
+    if (h->parent == w16_desktop) OffsetRect(&h->rw, byte_align_dx(h), 0);
     h->restore = h->rw;
     h->style &= ~(WS_VISIBLE | WS_MINIMIZE | WS_MAXIMIZE);
     link_top(h);

@@ -80,7 +80,9 @@ static void paint_push(HWND h, HDC dc)
     int tw = w16_prefix_text_width(dc, h->text, n);
     TEXTMETRIC tm;
     GetTextMetrics(dc, &tm);
-    int x = (rt - l - tw) / 2 + l, y = (bt - t - tm.tmHeight) / 2 + t;
+    /* centred across the face less the 2-px right shadow (measured: OK, Cancel and Help in a 3.11
+     * dialog all start one pixel left of the full-width centre, whatever the text width) */
+    int x = (rt - l - 2 - tw) / 2 + l, y = (bt - t - tm.tmHeight) / 2 + t;
     if (pressed) { x += 2; y += 2; }
     if ((h->style & WS_DISABLED) && GetSysColor(COLOR_GRAYTEXT) == GetSysColor(COLOR_BTNFACE))
         w16_draw_stippled_text(dc, x, y, h->text, n, 0, GetSysColor(COLOR_BTNTEXT));
@@ -175,11 +177,14 @@ static void paint_group(HWND h, HDC dc)
         int tw = w16_prefix_text_width(dc, h->text, n);
         SetBkMode(dc, OPAQUE);
         SetBkColor(dc, GetSysColor(COLOR_WINDOW));
-        RECT tb = {8, 0, 8 + tw + 2, tm.tmHeight};
+        /* measured on MAIN.CPL's Keyboard dialog (MS Sans Serif 8): the title cell sits 3 px below the
+         * control top and breaks the line from 2 px before the text to 2 px after its extent */
+        int ty = 3;
+        RECT tb = {7, ty, 9 + tw + 2, ty + tm.tmHeight};
         FillRect(dc, &tb, w16_ctl_color(h, dc, CTLCOLOR_BTN));
         SetBkMode(dc, TRANSPARENT);
-        if (h->style & WS_DISABLED) w16_draw_gray_text(dc, 9, 0, h->text, n, 0);
-        else { SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT)); w16_draw_prefix_text(dc, 9, 0, h->text, n, 0); }
+        if (h->style & WS_DISABLED) w16_draw_gray_text(dc, 9, ty, h->text, n, 0);
+        else { SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT)); w16_draw_prefix_text(dc, 9, ty, h->text, n, 0); }
     }
     SelectObject(dc, of);
 }

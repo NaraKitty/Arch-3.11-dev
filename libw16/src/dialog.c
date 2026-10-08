@@ -102,13 +102,16 @@ static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC 
     RECT big = {0, 0, 1000, 1000}, inner;
     w16_nc_calc(&fake, &big, &inner);
     int fl = inner.left, ft = inner.top, fr = 1000 - inner.right, fb = 1000 - inner.bottom;
-    if (menuord || menuname) ft += GetSystemMetrics(SM_CYMENU) + 1;
+    if (menuord || (menuname && *menuname)) ft += GetSystemMetrics(SM_CYMENU) + 1;
+    /* the template's x,y place the dialog's client area (in the owner's client coordinates unless
+     * DS_ABSALIGN); the frame, caption and menu go around it (AdjustWindowRect) */
     int wx = px, wy = py;
     if (!(style & DS_ABSALIGN) && owner && w16_valid(owner) && !(wstyle & WS_CHILD)) {
         HWND o = owner;
         wx += o->rc.left;
         wy += o->rc.top;
     }
+    if (!(wstyle & WS_CHILD)) { wx -= fl; wy -= ft; }
     int ww = rc.right + fl + fr, wh = rc.bottom + ft + fb;
     if (!(wstyle & WS_CHILD)) {
         /* keep on screen */
@@ -133,7 +136,7 @@ static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC 
     W16Class *c = w16_find_class(cls, inst);
     if (!c) c = w16_find_class("#32770", NULL);
     WNDPROC saved = c->wc.lpfnWndProc;
-    HWND h = CreateWindowEx(ex, c->name, caption, wstyle, wx - (owner && !(wstyle & WS_CHILD) && !(style & DS_ABSALIGN) ? 0 : 0), wy, ww, wh,
+    HWND h = CreateWindowEx(ex, c->name, caption, wstyle, wx, wy, ww, wh,
                             (wstyle & WS_CHILD) ? owner : owner, menu, inst, NULL);
     (void)saved;
     if (!h) { free(dd); return NULL; }
@@ -155,11 +158,11 @@ static HWND create_dialog(HINSTANCE inst, const uint8_t *t, HWND owner, DLGPROC 
         int ord = name_or_ord(&p, &txt);
         int extra = *p;
         p += 1 + extra;
-        RECT r = {ix, iy, ix + icx, iy + icy};
-        r.left = (r.left * cxc + 2) / 4; r.right = (r.right * cxc + 2) / 4;
-        r.top = (r.top * cyc + 4) / 8; r.bottom = (r.bottom * cyc + 4) / 8;
+        /* position and size convert separately (rounded, as MulDiv): a 14-unit button is 23 px
+         * high wherever it sits, as measured on real 3.11 */
+        int cx_ = (icx * cxc + 2) / 4, cy_ = (icy * cyc + 4) / 8;
         HWND ch = CreateWindowEx(WS_EX_NOPARENTNOTIFY, ccls, ord ? "" : txt, (is | WS_CHILD) & ~WS_POPUP,
-                                 r.left, r.top, r.right - r.left, r.bottom - r.top, h, (HMENU)(uintptr_t)id, inst, NULL);
+                                 (ix * cxc + 2) / 4, (iy * cyc + 4) / 8, cx_, cy_, h, (HMENU)(uintptr_t)id, inst, NULL);
         if (!ch) { W16_LOG("dialog: could not create control class %s\n", ccls); continue; }
         if (font) SendMessage(ch, WM_SETFONT, (WPARAM)font, 0);
         if (ord && !strcasecmp(ccls, "STATIC") && (is & 0xF) == SS_ICON) {

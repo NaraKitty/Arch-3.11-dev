@@ -891,8 +891,10 @@ static LRESULT LbWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case LB_GETCURSEL: return l->cur;
     case LB_GETCOUNT: return l->count;
     case LB_SETCOLUMNWIDTH:
+        /* every item moves: repaint all (items past the area a resize exposes were left blank) */
         l->cx = (int)wp;
         LbUpdateScroll(l);
+        InvalidateRect(h, NULL, TRUE);
         return 0;
     case LB_GETITEMDATA: return ((int)wp >= 0 && (int)wp < l->count) ? l->data[wp] : LB_ERR;
     case LB_SETITEMDATA:
