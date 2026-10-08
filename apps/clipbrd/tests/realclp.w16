@@ -1,4 +1,4 @@
-# Clipboard Viewer: the keys of arch311-ref/scn/clipbrd-realclp.scn (tools/ref311/scenario.py w16)
+# Clipboard Viewer reading .CLP files written by real 3.11.
 # Port only: opens the .CLP files real 3.11's viewer saved in the bmp, wmf and text reference runs
 # (BMP.CLP, WMF.CLP, TEXT.CLP from the rig, as RBMP/RWMF/RTEXT.CLP) and compares what it shows with
 # the frames real 3.11 showed for the same content.
@@ -7,7 +7,6 @@
 # compare: clipbrd-bmp/07.png 02.png ignore 320 240 333 261
 # compare: clipbrd-wmf/03.png 03.png ignore 320 240 333 261 max 48
 # compare: clipbrd-text/03.png 04.png ignore 320 240 333 261
-# regress: sh apps/clipbrd/tests/run.sh "$TEST" "$OUT"
 sleep 400
 key alt
 key f
