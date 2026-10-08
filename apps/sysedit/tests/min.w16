@@ -1,0 +1,40 @@
+# SysEdit: three children minimised with their system menus (Alt, '-', n): icons at USER's slots
+# along the client's bottom with the child class icon (64 x 64, shrunk to 32 x 32) and #32772 title
+# windows; the Window menu; child 4 (AUTOEXEC.BAT) restored from it; Window > Arrange Icons
+# reference: scn/mdi-min.scn (frames 02-07)
+# regress: sh apps/sysedit/tests/sysedit.sh "$TEST" "$OUT"
+# compare: mdi-min/02.png 02.png active ignore 316 228 333 261
+# compare: mdi-min/03.png 03.png active ignore 316 228 333 261
+# compare: mdi-min/04.png 04.png active ignore 316 228 333 261
+# compare: mdi-min/05.png 05.png active ignore 316 228 333 261
+# compare: mdi-min/06.png 06.png active ignore 316 228 333 261
+# compare: mdi-min/07.png 07.png active ignore 316 228 333 261
+sleep 500
+key alt
+key minus
+key n
+sleep 300
+shotcaret shots/02.png
+key alt
+key minus
+key n
+sleep 300
+shotcaret shots/03.png
+key alt
+key minus
+key n
+sleep 300
+shotcaret shots/04.png
+key alt
+key w
+sleep 300
+shotcaret shots/05.png
+key 4
+sleep 300
+shotcaret shots/06.png
+key alt
+key w
+key i
+sleep 300
+shotcaret shots/07.png
+quit

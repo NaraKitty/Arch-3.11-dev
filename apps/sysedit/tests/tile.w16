@@ -1,0 +1,22 @@
+# SysEdit: the Window menu (Tile, Cascade, Arrange Icons, the four children, the active one checked),
+# Window > Tile (WM_MDITILE: a 2 x 2 grid, column by column from the top of the z-order), then
+# Window > Cascade (WM_MDICASCADE: back to the cascade positions)
+# reference: scn/mdi-tile.scn (frames 02-04)
+# regress: sh apps/sysedit/tests/sysedit.sh "$TEST" "$OUT"
+# compare: mdi-tile/02.png 02.png active ignore 316 228 333 261
+# compare: mdi-tile/03.png 03.png active ignore 310 228 333 261
+# compare: mdi-tile/04.png 04.png active ignore 316 228 333 261
+sleep 500
+key alt
+key w
+sleep 300
+shot shots/02.png
+key t
+sleep 300
+shot shots/03.png
+key alt
+key w
+key c
+sleep 300
+shotcaret shots/04.png
+quit

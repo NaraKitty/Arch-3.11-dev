@@ -1,0 +1,18 @@
+# SysEdit: the MDI accelerators (TranslateMDISysAccel): Ctrl+F6 twice is Next twice and Ctrl+F4
+# closes the active child, the same screens as the child system menu's Next, Next, Close
+# reference: scn/mdi-next.scn (frames 03-05)
+# regress: sh apps/sysedit/tests/sysedit.sh "$TEST" "$OUT"
+# compare: mdi-next/03.png 03.png active ignore 316 228 333 261
+# compare: mdi-next/04.png 04.png active ignore 316 228 333 261
+# compare: mdi-next/05.png 05.png active ignore 316 228 333 261
+sleep 500
+key ctrl+f6
+sleep 300
+shotcaret shots/03.png
+key ctrl+f6
+sleep 300
+shotcaret shots/04.png
+key ctrl+f4
+sleep 300
+shotcaret shots/05.png
+quit

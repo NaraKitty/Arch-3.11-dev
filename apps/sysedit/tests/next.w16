@@ -1,0 +1,28 @@
+# SysEdit: Alt then '-' (the frame's menu hands '-' on with WM_MENUCHAR: the active child's system
+# menu opens), Next twice (the next child comes to the top and is activated, the old one goes to the
+# bottom), then Close (WM_MDIDESTROY: WIN.INI goes, SYSTEM.INI is activated)
+# reference: scn/mdi-next.scn (frames 02-05)
+# regress: sh apps/sysedit/tests/sysedit.sh "$TEST" "$OUT"
+# compare: mdi-next/02.png 02.png active ignore 316 228 333 261
+# compare: mdi-next/03.png 03.png active ignore 316 228 333 261
+# compare: mdi-next/04.png 04.png active ignore 316 228 333 261
+# compare: mdi-next/05.png 05.png active ignore 316 228 333 261
+sleep 500
+key alt
+key minus
+sleep 300
+shot shots/02.png
+key t
+sleep 300
+shotcaret shots/03.png
+key alt
+key minus
+key t
+sleep 300
+shotcaret shots/04.png
+key alt
+key minus
+key c
+sleep 300
+shotcaret shots/05.png
+quit

@@ -190,9 +190,11 @@ struct W16Window {
     DWORD style, exstyle;
     RECT rw;            /* window rect, screen coords */
     RECT rc;            /* client rect, screen coords */
-    RECT restore;       /* normal position (for min/max) */
-    POINT iconpos;
-    int has_iconpos;
+    RECT restore;       /* normal position (for min/max), in the parent's client coordinates */
+    POINT iconpos;      /* USER's CHECKPOINT ptMin (parent client coordinates) */
+    int has_iconpos;    /* CHECKPOINT flag 1: ptMin chosen by the user (an icon moved by hand) */
+    int cp_flags;       /* CHECKPOINT flags 2 (restore to maximized) and 4 (was minimized before maximize) */
+    HWND icon_title;    /* the icon title window (#32772) of a minimised child window */
     HWND parent, owner;
     HWND child;         /* topmost child */
     HWND next;          /* next sibling below */
@@ -268,6 +270,17 @@ void w16_paint_icon_titles(HDC desktop_dc); /* the desktop's WM_PAINT draws the 
 void w16_minimize(HWND h);
 void w16_maximize(HWND h);
 void w16_restore(HWND h);
+/* child windows (MDI children) minimise, maximise and restore inside their parent as USER does it */
+void w16_min_maximize(HWND h, int cmd, int keep_hidden); /* USER seg6:1A72 MinMaximize */
+void w16_show_icon_title(HWND h, BOOL show);             /* seg1:6E25 */
+void w16_redraw_icon_title(HWND h);                      /* seg1:6DE3 */
+LRESULT w16_icon_title_proc(HWND, UINT, WPARAM, LPARAM); /* seg1:6CA0, class #32772 */
+void w16_icon_slot_in(HWND h, POINT *pt);                /* seg4:0000 FindIconSlot (parent client) */
+void w16_icon_title_rect_at(HWND icon, int x, int y, RECT *r); /* seg1:6C14 (parent client, x y cx cy) */
+int w16_caption_active(HWND h);             /* the frame is drawn active (USER's WFFRAMEON) */
+void w16_set_sysmenu(HWND h);               /* seg9:0D8B SetSysMenu: system-menu items for the state */
+LRESULT w16_mdiclient_proc(HWND, UINT, WPARAM, LPARAM);
+HMENU w16_sysmenu_popup(HWND h);           /* the window's system menu popup, NULL without one */
 
 /* messages */
 void w16_post(HWND h, UINT m, WPARAM wp, LPARAM lp);
@@ -292,6 +305,8 @@ struct W16MenuItem {
     HMENU sub;
     char *text;
     RECT rc;            /* relative to menu bar window or popup */
+    uintptr_t bmp;      /* MF_BITMAP: the bitmap, or USER's 1 (MDI child system menu), 2 (restore),
+                           3 (minimize) */
 };
 struct W16Menu {
     int n, cap;

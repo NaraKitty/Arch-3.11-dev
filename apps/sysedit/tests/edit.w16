@@ -1,0 +1,38 @@
+# SysEdit: a line typed into AUTOEXEC.BAT and saved, child 2 (WIN.INI) chosen from the Window menu,
+# two lines typed into it and saved, Exit. The files left on C: (AUTOEXEC.BAT, its backup
+# AUTOEXEC.SYD, WIN.INI and WIN.SYD) must equal what real 3.11 wrote, and no temporary file is left
+# reference: scn/mdi-edit.scn (frames 02-04; the frames after each save equal the ones before but
+# for the caret, which the rig does not record)
+# regress: sh apps/sysedit/tests/sysedit.sh "$TEST" "$OUT" mdi-edit
+# compare: mdi-edit/02.png 02.png active ignore 316 228 333 261
+# compare: mdi-edit/03.png 03.png active ignore 316 228 333 261
+# compare: mdi-edit/04.png 04.png active ignore 316 228 333 261
+# ini: WIN.INI arch311 mdi=1
+sleep 500
+type rem arch311
+key enter
+sleep 300
+shotcaret shots/02.png
+key alt
+key f
+key s
+sleep 300
+key alt
+key w
+key 2
+sleep 300
+shotcaret shots/03.png
+type [arch311]
+key enter
+type mdi=1
+key enter
+sleep 300
+shotcaret shots/04.png
+key alt
+key f
+key s
+sleep 300
+key alt
+key f
+key x
+quit

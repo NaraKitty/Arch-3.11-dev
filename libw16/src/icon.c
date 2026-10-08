@@ -89,7 +89,37 @@ static HICON load_group(HINSTANCE m, LPCSTR name, int cursor)
     int best = u16(d + 6 + pick_image(d, n, cursor) * 14 + 12);
     const W16Res *r = w16_find_res(m, MAKEINTRESOURCE(best), cursor ? RT_CURSOR : RT_ICON);
     if (!r) return NULL;
-    return from_dib(w16_res_data(m, r), cursor);
+    HICON ic = from_dib(w16_res_data(m, r), cursor);
+    if (ic && !cursor && (ic->w != 32 || ic->h != 32) && ic->w > 0 && ic->h > 0) {
+        /* an icon of another size is stretched to the display's 32 x 32 (SYSEDIT's child icon is
+         * only 64 x 64 monochrome; real 3.11 shows it at 32 x 32 - measured: SysEdit's minimised
+         * children). Shrunk as StretchBlt's BLACKONWHITE mode: of the pixels that become one, the
+         * darkest wins and the mask stays opaque if any is (thin black lines survive, as measured) */
+        uint32_t *x = calloc(32 * 32, sizeof *x);
+        uint8_t *a = calloc(32 * 32, 1);
+        for (int y = 0; y < 32; y++)
+            for (int xx = 0; xx < 32; xx++) {
+                int x0 = xx * ic->w / 32, x1 = max(x0 + 1, (xx + 1) * ic->w / 32);
+                int y0 = y * ic->h / 32, y1 = max(y0 + 1, (y + 1) * ic->h / 32);
+                uint32_t best = 0xFFFFFFFF;
+                int lum = 1 << 30, m = 1;
+                for (int sy = y0; sy < y1; sy++)
+                    for (int sx = x0; sx < x1; sx++) {
+                        uint32_t p = ic->xorpx[sy * ic->w + sx];
+                        int l = (p >> 16 & 255) + (p >> 8 & 255) + (p & 255);
+                        if (l < lum) { lum = l; best = p; }
+                        m &= ic->andm[sy * ic->w + sx];
+                    }
+                x[y * 32 + xx] = best;
+                a[y * 32 + xx] = m;
+            }
+        free(ic->xorpx);
+        free(ic->andm);
+        ic->xorpx = x;
+        ic->andm = a;
+        ic->w = ic->h = 32;
+    }
+    return ic;
 }
 
 static HICON cache_get(HINSTANCE m, LPCSTR name, int cursor)
