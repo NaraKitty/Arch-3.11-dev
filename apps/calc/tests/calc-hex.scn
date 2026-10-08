@@ -1,0 +1,83 @@
+# Calculator, scientific view: hexadecimal, octal and binary, the word sizes, errors and the
+# error state (the radix buttons are disabled until C), the overflow checks of * + / and Exp
+# ini: WIN.INI SciCalc layout=0
+shot
+key alt
+type vs
+shot
+key f5
+type ff
+shot
+key f6
+shot
+key f7
+shot
+key f8
+shot
+key f5
+key f4
+type 1fe
+shot
+key f3
+type 1234
+shot
+key f2
+key esc
+type ffffffff
+shot
+key f6
+key f9
+shot
+key f5
+shot
+key esc
+type a
+key kp_plus
+type b=
+shot
+key kp_multiply
+type 2=
+shot
+key f6
+key esc
+type 1x400
+shot
+key esc
+type 0n
+shot
+key esc
+type 2is
+shot
+key esc
+type 10y400=
+shot
+key esc
+type 1x130
+key kp_multiply
+type 1x10=
+shot
+key esc
+type 1x10
+key kp_multiply
+type 1x130=
+shot
+key esc
+type 5r
+shot
+key esc
+type 9x307
+key kp_plus
+type 9x307=
+shot
+key esc
+type 1x
+key f9
+type 400
+shot
+key esc
+type 1x300
+key kp_divide
+type 1x
+key f9
+type 10=
+shot

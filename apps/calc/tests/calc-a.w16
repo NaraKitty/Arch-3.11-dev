@@ -1,4 +1,5 @@
 # Calculator: standard view at start, number entry, keypad operators, = and C
+# (the view is not changed, so 3.11 writes no [SciCalc] layout: the ini line expects none)
 # Generated from calc-a.scn by tools/ref311/scenario.py w16; reference frames: arch311-ref/shots/calc-a,
 # recorded with dosbox-x_MinGWx64_SDL2.exe (its FPU computes with the host x87, as a real 387 would).
 # regress: ARCH311_APP=apps/build/calc sh tools/run-cp-test.sh "$TEST" "$OUT"
@@ -10,6 +11,7 @@
 # compare: calc-a/06.png 06.png active ignore 320 240 332 260
 # compare: calc-a/07.png 07.png active ignore 320 240 332 260
 # compare: calc-a/08.png 08.png active ignore 320 240 332 260
+# ini: WIN.INI SciCalc layout=
 sleep 400
 sleep 400
 shot shots/01.png

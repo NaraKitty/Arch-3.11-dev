@@ -15,6 +15,7 @@
 # compare: calc-fpu/10.png 10.png active ignore 320 240 332 260
 # compare: calc-fpu/11.png 11.png active ignore 320 240 332 260
 # compare: calc-fpu/12.png 12.png active ignore 320 240 332 260
+# ini: WIN.INI SciCalc layout=0
 sleep 400
 sleep 400
 shot shots/01.png

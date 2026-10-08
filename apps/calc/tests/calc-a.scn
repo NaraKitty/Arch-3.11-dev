@@ -1,4 +1,6 @@
 # Calculator: standard view at start, number entry, keypad operators, = and C
+# (the view is not changed, so 3.11 writes no [SciCalc] layout: the ini line expects none)
+# ini: WIN.INI SciCalc layout=
 shot
 type 12345
 shot

@@ -84,6 +84,18 @@ static void text_layout(HWND h, HDC dc, int type, const char *text, int n, TextL
     t->ty = t->rc.top + (t->rc.bottom - t->rc.top - tm.tmAscent) / 2;
 }
 
+/* Disabled button text (seg25:1488): when GRAYTEXT is black or the same as BTNFACE (VGA) USER
+ * grays it with GrayString - push buttons with the BTNTEXT brush, the other types with no brush,
+ * which GrayString's BltColor (seg1:8BFA) replaces by the WINDOWTEXT brush; otherwise the text is
+ * drawn in GRAYTEXT. */
+static void disabled_text(HDC dc, int x, int y, const char *s, int n, int push)
+{
+    COLORREF g = GetSysColor(COLOR_GRAYTEXT);
+    if (g == 0 || g == GetSysColor(COLOR_BTNFACE))
+        w16_draw_stippled_text(dc, x, y, s, n, 0, GetSysColor(push ? COLOR_BTNTEXT : COLOR_WINDOWTEXT));
+    else w16_draw_gray_text(dc, x, y, s, n, 0);
+}
+
 /* the dotted focus rectangle around the text (seg25:15D3) */
 static void draw_focus(HWND h, HDC dc, const TextLayout *t, int push, int pressed)
 {
@@ -144,9 +156,7 @@ static void paint_push(HWND h, HDC dc)
     text_layout(h, dc, BT_PUSH, h->text, n, &tl);
     int x = tl.tx, y = tl.ty;
     if (pressed) { x++; y++; }
-    if ((h->style & WS_DISABLED) && GetSysColor(COLOR_GRAYTEXT) == GetSysColor(COLOR_BTNFACE))
-        w16_draw_stippled_text(dc, x, y, h->text, n, 0, GetSysColor(COLOR_BTNTEXT));
-    else if (h->style & WS_DISABLED) w16_draw_gray_text(dc, x, y, h->text, n, 0);
+    if (h->style & WS_DISABLED) disabled_text(dc, x, y, h->text, n, 1);
     else {
         SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
         w16_draw_prefix_text(dc, x, y, h->text, n, 0);
@@ -203,7 +213,7 @@ static void paint_check(HWND h, HDC dc)
     TextLayout tl;
     text_layout(h, dc, BT_CHECK, h->text, n, &tl);
     SetBkMode(dc, TRANSPARENT);
-    if (h->style & WS_DISABLED) w16_draw_gray_text(dc, tl.tx, tl.ty, h->text, n, 0);
+    if (h->style & WS_DISABLED) disabled_text(dc, tl.tx, tl.ty, h->text, n, 0);
     else {
         SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
         w16_draw_prefix_text(dc, tl.tx, tl.ty, h->text, n, 0);
@@ -230,7 +240,7 @@ static void paint_group(HWND h, HDC dc)
         text_layout(h, dc, BT_GROUP, h->text, n, &tl);
         FillRect(dc, &tl.rc, w16_ctl_color(h, dc, CTLCOLOR_BTN));
         SetBkMode(dc, TRANSPARENT);
-        if (h->style & WS_DISABLED) w16_draw_gray_text(dc, tl.tx, tl.ty, h->text, n, 0);
+        if (h->style & WS_DISABLED) disabled_text(dc, tl.tx, tl.ty, h->text, n, 0);
         else { SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT)); w16_draw_prefix_text(dc, tl.tx, tl.ty, h->text, n, 0); }
     }
     SelectObject(dc, of);
