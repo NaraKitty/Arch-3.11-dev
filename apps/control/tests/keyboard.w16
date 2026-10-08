@@ -1,5 +1,6 @@
-# Keyboard applet (MAIN.CPL dialog 5): the first applet in the window
+# Keyboard applet (MAIN.CPL dialog 5): second in the window, after Mouse
 sleep 600
+key right
 key enter
 sleep 500
 shot shots/01-keyboard.png

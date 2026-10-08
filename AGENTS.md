@@ -197,7 +197,8 @@ libw16 fixes found by that comparison (first dialogs ever measured - Notepad's w
 - Config dir is created with its parents (~/.config may not exist). Keyboard SPI get/set
   (SPI_*KEYBOARDSPEED/DELAY, SPIF_UPDATEINIFILE writes WIN.INI), HWND_BROADCAST.
 - Key repeat: host auto-repeat is ignored; libw16 repeats the last key with PC/AT typematic timing
-  from KeyboardDelay/KeyboardSpeed (delay (d+1)*250 ms, period (8+A)*2^B*4.17 ms, code 31-speed).
+  from KeyboardDelay/KeyboardSpeed (delay (d+1)*250 ms, period (8+A)*2^B*4.17 ms, rate code from
+  KEYBOARD.DRV's speed table seg6:0000 - not 31-speed).
 UNTESTED: the typematic timing on a real keyboard (the headless script driver bypasses it); Help
 buttons (no help viewer yet); no-caption dialog-frame top inset (assumed 5 like the sides).
 Owner direction (Oct 8): arch311 is a modern OS mimicking 3.11 accurately to a degree - once the
@@ -206,6 +207,36 @@ Internet applet in 3.11 style, e.g. proxy/DNS/default browser for the IE/Netscap
 Rig note: the blinking focus thumb made the reference recorder drop the in-dialog frames; only the
 frame with focus in the Test edit (caret within tolerance) was captured. Use scenarios that end each
 step with focus on an edit or button.
-NEXT: Mouse (dialog 6, seg3:097F), Date/Time (7, seg8:077C), Desktop (8, seg18:1419), Color (100,
-seg6:0DC8 modeless), International (3, seg12:194D), Fonts (2, seg9:0CBC), Ports (4, seg19:062E),
-Printers (1, seg20:1302); then the Internet applet; scroll-bar focus (blinking thumb) per real 3.11.
+Later the same session - Mouse applet (mousecpl.c = seg3:097F + seg16, dialog 6) and MAIN.CPL helpers
+(MyMessageBox seg4:0000, DoDialogBoxParam seg4:007E, OutOfMemory seg1:1881). Verified against real 3.11
+(scn/mouse.scn vs apps/control/tests/mouse.w16): the dialog after tracking +2, double-click -3 lines is
+pixel-identical, and WIN.INI after Swap + OK matches real exactly (DoubleClickSpeed=500,
+SwapMouseButtons=yes, MouseThreshold1=4, MouseThreshold2=9, MouseSpeed=2).
+libw16: SetDoubleClickTime/GetDoubleClickTime/SwapMouseButton (buttons swapped as SDL reports them),
+SPI_GET/SETMOUSE, SPI_SETDOUBLECLICKTIME, SPI_SETMOUSEBUTTONSWAP; USER init defaults (DoubleClickSpeed 0 =
+500 ms, MouseThreshold1 = MOUSE.DRV's X threshold 2, MouseThreshold2 10, MouseSpeed 1); Escape moved to
+w16.h with QUERYESCSUPPORT; VGA.DRV's MOUSETRAILS escape (seg5:00C7, 1-7 pointer images, WIN.INI
+"MouseTrails= n" / "-n") with the trail drawn into the presented frame (UNTESTED on a display: headless
+shots have no pointer). Pointer acceleration from the thresholds is stored but not applied (the host
+moves the pointer) - TODO when arch311 owns the pointer.
+Button text now follows USER BNDrawText exactly (seg25:102E style->layout table, seg25:1097 text rects,
+seg25:1366): text centred vertically on tmAscent (not tmHeight), check-box text at the OBM_CHECKBOXES
+cell width (bitmap/4 = 14) + 4, group-box title rect = system char width - 1, extent + 4 wide and high
+(replaces the measured constants), pressed push buttons shift the text 1 px (was 2), focus rectangle
+text-2/text-1 .. +extent+4/+height+3 (push buttons kept 3 px off the top and 4 off the bottom on
+displays over 300 lines). DrawFocusRect ported from seg1:2069/1FAA: four full-length PATINVERT strips
+(corners inverted twice), inverting odd x+y.
+KEYBOARD.DRV SetSpeed (seg6:0020) maps KeyboardSpeed through a 32-entry table to the 8042 rate code;
+libw16's typematic uses that table now.
+Rig: ref-run.ps1 -Tolerance (default 80; 300 records frames with a blinking focused scroll bar);
+runcp.sh-style tests should start from a fresh WIN.INI (re-seeded from WIN.SRC) like the reference.
+Owner direction (Oct 8, later): the look is a THEME - Windows 3.11 now, Windows 1, 2, 95, 98, XP and 7 later;
+programs must be able to switch with the theme. Keep look-specific code (metrics, frames, captions,
+buttons, scroll bars, menus, fonts, colours, cursors, sounds, ripped assets, WM decorations, GTK/Qt styling)
+behind a theme layer with win311 as the first theme. Native Linux apps get the theme's frames, scroll
+bars, min/max/close behaviour through the WM (3.11: minimise to a desktop icon, maximise to full screen,
+close from the system menu / double click / Alt+F4). MS-DOS Prompt just launches the Linux terminal
+emulator. IE and Netscape (Chromium/CEF shells) are essential - de-risk early.
+NEXT: Date/Time (7, seg8:077C), Desktop (8, seg18:1419), Color (100, seg6:0DC8 modeless), International
+(3, seg12:194D), Fonts (2, seg9:0CBC), Ports (4, seg19:062E), Printers (1, seg20:1302); Internet applet;
+CEF feasibility spike for the browsers; theme layer refactor; WM; scroll-bar focus (blinking thumb).

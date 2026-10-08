@@ -1461,6 +1461,13 @@ HICON CreateIcon(HINSTANCE inst, int w, int h, BYTE planes, BYTE bpp, const void
 #define SPIF_UPDATEINIFILE 0x0001
 #define SPIF_SENDWININICHANGE 0x0002
 BOOL SystemParametersInfo(UINT action, UINT param, void *pv, UINT winini);
+BOOL SetDoubleClickTime(UINT ms);
+UINT GetDoubleClickTime(void);
+BOOL SwapMouseButton(BOOL swap);
+/* GDI Escape (printing escapes are in commdlg.h) */
+#define QUERYESCSUPPORT 8
+#define MOUSETRAILS 39 /* display driver: mouse trails (not supported: QUERYESCSUPPORT says 0) */
+int Escape(HDC dc, int esc, int cb, LPCSTR in, void *out);
 
 typedef struct {
     UINT length, flags, showCmd;

@@ -12,6 +12,9 @@
 int w16_debug;
 int w16_border_width = 3;
 int w16_kbd_speed = 31, w16_kbd_delay = 2;
+UINT w16_dblclk_time = 500;
+int w16_swap_buttons;
+int w16_mouse_params[3] = {2, 10, 1};
 
 /* Windows 3.1 "Windows Default" colours (USER defaults; overridable from [colors] in WIN.INI) */
 COLORREF w16_syscolor[W16_NUM_SYSCOLORS] = {
@@ -374,6 +377,15 @@ void w16_sys_init(void)
     w16_kbd_delay = GetProfileInt("windows", "KeyboardDelay", 2);
     if (w16_kbd_speed < 0 || w16_kbd_speed > 31) w16_kbd_speed = 31;
     if (w16_kbd_delay < 0 || w16_kbd_delay > 3) w16_kbd_delay = 2;
+    /* mouse, as USER's init reads it: DoubleClickSpeed 0 = 500 ms; MouseThreshold1 defaults to the
+     * driver's X threshold (MOUSE.DRV Inquire: 2), MouseThreshold2 (read when MouseSpeed is 2) to 10 */
+    SetDoubleClickTime(GetProfileInt("windows", "DoubleClickSpeed", 0));
+    GetProfileString("windows", "SwapMouseButtons", "no", b, sizeof b);
+    w16_swap_buttons = !strcasecmp(b, "yes") || !strcasecmp(b, "true") || !strcasecmp(b, "on") || atoi(b) != 0;
+    w16_mouse_params[0] = GetProfileInt("windows", "MouseThreshold1", 2);
+    w16_mouse_params[2] = GetProfileInt("windows", "MouseSpeed", 1);
+    if (w16_mouse_params[2] == 2) w16_mouse_params[1] = GetProfileInt("windows", "MouseThreshold2", 10);
+    w16_trails_init();
     for (int i = 0; i < W16_NUM_SYSCOLORS; i++) {
         if (GetProfileString("colors", color_keys[i], "", b, sizeof b)) {
             int r, g, bl;

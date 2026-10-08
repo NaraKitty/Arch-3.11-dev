@@ -869,24 +869,32 @@ void InvertRect(HDC dc, LPCRECT r)
     lp_rect(dc, r, &d);
     w16_invert_dev(dc, &d);
 }
+/* USER seg1:2069 / seg1:1FAA: the gray brush PATINVERTed as four full-length one-pixel strips (top,
+ * bottom, left, right), so each corner is inverted twice and stays as it was. The halftone inverts
+ * pixels with an odd x + y (measured on a 3.11 check box; screen vs window alignment of the brush
+ * untested - the samples so far sit at an even window origin) */
+static void focus_strip(HDC dc, W16Bitmap *t, Region *e, int x0, int y0, int w, int h)
+{
+    for (int y = y0; y < y0 + h; y++)
+        for (int x = x0; x < x0 + w; x++)
+            if (((x + y) & 1) && x >= 0 && y >= 0 && x < t->w && y < t->h && rgn_contains(e, x, y))
+                t->px[y * t->w + x] = w16_invert_px(t->px[y * t->w + x]);
+    (void)dc;
+}
+
 void DrawFocusRect(HDC dc, LPCRECT r)
 {
-    /* dotted XOR frame, every other pixel, aligned to the screen grid */
     RECT d;
     lp_rect(dc, r, &d);
+    int w = d.right - d.left, h = d.bottom - d.top;
+    if (w <= 0 || h <= 0) return;
     Region e;
     w16_dc_clip_iter_begin(dc, &e);
     W16Bitmap *t = tgt(dc);
-    for (int x = d.left; x < d.right; x++) {
-        if (((x + d.top) & 1) == 0 && rgn_contains(&e, x, d.top)) t->px[d.top * t->w + x] = w16_invert_px(t->px[d.top * t->w + x]);
-        if (((x + d.bottom - 1) & 1) == 0 && d.bottom - 1 > d.top && rgn_contains(&e, x, d.bottom - 1))
-            t->px[(d.bottom - 1) * t->w + x] = w16_invert_px(t->px[(d.bottom - 1) * t->w + x]);
-    }
-    for (int y = d.top + 1; y < d.bottom - 1; y++) {
-        if (((d.left + y) & 1) == 0 && rgn_contains(&e, d.left, y)) t->px[y * t->w + d.left] = w16_invert_px(t->px[y * t->w + d.left]);
-        if (((d.right - 1 + y) & 1) == 0 && d.right - 1 > d.left && rgn_contains(&e, d.right - 1, y))
-            t->px[y * t->w + d.right - 1] = w16_invert_px(t->px[y * t->w + d.right - 1]);
-    }
+    focus_strip(dc, t, &e, d.left, d.top, w, 1);
+    focus_strip(dc, t, &e, d.left, d.bottom - 1, w, 1);
+    focus_strip(dc, t, &e, d.left, d.top, 1, h);
+    focus_strip(dc, t, &e, d.right - 1, d.top, 1, h);
     rgn_free(&e);
     mark_dirty(dc);
 }
@@ -1338,8 +1346,12 @@ int Escape(HDC dc, int esc, int cb, LPCSTR in, void *out)
     (void)cb; (void)in; (void)out;
     if (!dc) return SP_ERROR;
     switch (esc) {
-    case 8: /* QUERYESCSUPPORT */
+    case QUERYESCSUPPORT:
+        /* the display driver's: VGA.DRV answers for MOUSETRAILS with its pointer count */
+        if (in && *(const int *)in == MOUSETRAILS) return w16_trails_query();
         return 0;
+    case MOUSETRAILS:
+        return in ? w16_trails_escape(*(const int *)in) : 0;
     case SETABORTPROC:
         return 1;
     default:

@@ -199,6 +199,12 @@ int main(int argc, char **argv)
 }
 
 /* ------------------------------------------------------------------ SystemParametersInfo */
+/* 0 selects the default, 500 ms */
+BOOL SetDoubleClickTime(UINT ms) { w16_dblclk_time = ms ? ms : 500; return TRUE; }
+UINT GetDoubleClickTime(void) { return w16_dblclk_time; }
+/* returns the previous setting; the buttons are swapped as SDL reports them (msg.c) */
+BOOL SwapMouseButton(BOOL swap) { BOOL was = w16_swap_buttons; w16_swap_buttons = swap != 0; return was; }
+
 BOOL SystemParametersInfo(UINT action, UINT param, void *pv, UINT winini)
 {
     switch (action) {
@@ -227,6 +233,32 @@ BOOL SystemParametersInfo(UINT action, UINT param, void *pv, UINT winini)
         if (winini & SPIF_SENDWININICHANGE) SendMessage(HWND_BROADCAST, WM_WININICHANGE, 0, (LPARAM) "windows");
         return TRUE;
     }
+    case SPI_GETMOUSE:
+        if (pv) memcpy(pv, w16_mouse_params, sizeof w16_mouse_params);
+        return TRUE;
+    case SPI_SETMOUSE:
+        /* stored and written to WIN.INI; the pointer itself moves under the host's acceleration
+         * (TODO: apply 3.1 thresholds when arch311 owns the pointer) */
+        if (!pv) return FALSE;
+        memcpy(w16_mouse_params, pv, sizeof w16_mouse_params);
+        if (winini & SPIF_UPDATEINIFILE) {
+            static const char *const key[3] = {"MouseThreshold1", "MouseThreshold2", "MouseSpeed"};
+            for (int i = 0; i < 3; i++) {
+                char t[8];
+                wsprintf(t, "%d", w16_mouse_params[i]);
+                WriteProfileString("windows", key[i], t);
+            }
+        }
+        if (winini & SPIF_SENDWININICHANGE) SendMessage(HWND_BROADCAST, WM_WININICHANGE, 0, (LPARAM) "windows");
+        return TRUE;
+    case SPI_SETDOUBLECLICKTIME:
+        SetDoubleClickTime(param);
+        if (winini & SPIF_UPDATEINIFILE) { char t[8]; wsprintf(t, "%u", w16_dblclk_time); WriteProfileString("windows", "DoubleClickSpeed", t); }
+        return TRUE;
+    case SPI_SETMOUSEBUTTONSWAP:
+        SwapMouseButton(param != 0);
+        if (winini & SPIF_UPDATEINIFILE) WriteProfileString("windows", "SwapMouseButtons", param ? "yes" : "no");
+        return TRUE;
     case SPI_ICONHORIZONTALSPACING:
         if (pv) *(int *)pv = GetProfileInt("desktop", "IconSpacing", 75);
         return TRUE;

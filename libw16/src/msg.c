@@ -214,11 +214,100 @@ void w16_video_init(void)
     SDL_StartTextInput();
 }
 
+/* ------------------------------------------------------------------ mouse trails
+ * VGA.DRV's MOUSETRAILS escape (seg5:00C7): up to 7 pointer images in all; the positions the pointer
+ * passed are drawn into the presented frame (the pointer itself is the host cursor). */
+static int trails = 1;            /* pointer images, 1 = off ([0x1e7]) */
+static int trails_saved;          /* WIN.INI MouseTrails: < 0 = off with the count remembered ([0x12]) */
+static POINT trail[8];
+static DWORD trail_tick;
+static int cursor_count;          /* ShowCursor counter */
+
+static void trails_set(int n) { trails = n; for (int i = 0; i < 8; i++) trail[i] = w16_mouse; w16_screen_dirty = 1; }
+
+void w16_trails_init(void)
+{
+    int n = GetProfileInt("windows", "MouseTrails", 0); /* UNTESTED against the driver's own startup */
+    if (n > 7) n = 7;
+    if (n < -7) n = -7;
+    trails_saved = n;
+    trails_set(n > 0 ? n : 1);
+}
+
+int w16_trails_query(void) { return trails_saved < 0 ? trails_saved : trails; }
+
+int w16_trails_escape(int n)
+{
+    int was = trails_saved;
+    if (n > 0) trails_saved = n > 7 ? 7 : n;
+    else if (n < 0) {
+        if (was > 0) return was;                 /* already on */
+        trails_saved = was ? -was : 7;           /* the remembered count, or 7 */
+    } else {
+        if (was <= 0) return was;
+        trails_saved = -was;
+    }
+    trails_set(trails_saved > 0 ? trails_saved : 1);
+    if (n >= -1) {
+        /* written as the driver does: sign or space, then the digit */
+        char v[3] = {trails_saved > 0 ? ' ' : '-', (char)('0' + abs(trails_saved)), 0};
+        WriteProfileString("windows", "MouseTrails", v);
+    }
+    return trails_saved;
+}
+
+/* the trail follows the pointer and gathers on it when the pointer rests (one step per 55 ms tick) */
+static void trails_step(void)
+{
+    if (trails <= 1) return;
+    DWORD now = GetTickCount();
+    if (now - trail_tick < 55 && trail[0].x == w16_mouse.x && trail[0].y == w16_mouse.y) return;
+    trail_tick = now;
+    int moved = 0;
+    for (int i = trails - 1; i > 0; i--) {
+        if (trail[i].x != trail[i - 1].x || trail[i].y != trail[i - 1].y) moved = 1;
+        trail[i] = trail[i - 1];
+    }
+    trail[0] = w16_mouse;
+    if (moved) w16_screen_dirty = 1;
+}
+
+/* pointer images at the trail positions, drawn into a copy of the frame (AND mask, then XOR) */
+static const uint32_t *trails_overlay(const uint32_t *frame)
+{
+    static uint32_t *buf;
+    static size_t cap;
+    if (trails <= 1 || !cur_cursor || cursor_count < 0) return frame;
+    size_t n = (size_t)w16_screen.w * w16_screen.h;
+    if (n > cap) { free(buf); buf = malloc(n * 4); cap = n; }
+    memcpy(buf, frame, n * 4);
+    int w, h, hx, hy;
+    const uint32_t *xp;
+    const uint8_t *am;
+    w16_icon_info(cur_cursor, &w, &h, &hx, &hy, &xp, &am);
+    for (int t = 1; t < trails; t++) {
+        int ox = trail[t].x - hx, oy = trail[t].y - hy;
+        if (trail[t].x == w16_mouse.x && trail[t].y == w16_mouse.y) continue;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                int X = ox + x, Y = oy + y;
+                if (X < 0 || Y < 0 || X >= w16_screen.w || Y >= w16_screen.h) continue;
+                int i = y * w + x;
+                uint32_t *d = &buf[(size_t)Y * w16_screen.w + X];
+                if (am[i]) { if (xp[i]) *d ^= 0x00FFFFFF; }
+                else *d = (*d & 0xFF000000) | w16_display_px(xp[i]);
+            }
+    }
+    return buf;
+}
+
 void w16_present(void)
 {
-    if (headless || !w16_screen_dirty) return;
+    if (headless) return;
+    trails_step();
+    if (!w16_screen_dirty) return;
     w16_screen_dirty = 0;
-    SDL_UpdateTexture(tex, NULL, w16_display_frame(), w16_screen.w * 4);
+    SDL_UpdateTexture(tex, NULL, trails_overlay(w16_display_frame()), w16_screen.w * 4);
     SDL_RenderClear(ren);
     SDL_RenderCopy(ren, tex, NULL, NULL);
     SDL_RenderPresent(ren);
@@ -252,7 +341,7 @@ HCURSOR SetCursor(HCURSOR c)
     if (*nat) SDL_SetCursor(*nat);
     return o;
 }
-int ShowCursor(BOOL show) { static int n = 0; n += show ? 1 : -1; if (!headless) SDL_ShowCursor(n >= 0); return n; }
+int ShowCursor(BOOL show) { cursor_count += show ? 1 : -1; if (!headless) SDL_ShowCursor(cursor_count >= 0); w16_screen_dirty = 1; return cursor_count; }
 void GetCursorPos(LPPOINT p) { *p = w16_mouse; }
 void SetCursorPos(int x, int y)
 {
@@ -387,7 +476,7 @@ static void mouse_event(UINT base)
         }
         /* double clicks */
         DWORD now = GetTickCount();
-        UINT dbl = GetProfileInt("windows", "DoubleClickSpeed", 452);
+        UINT dbl = w16_dblclk_time;
         if (h == last_click_hwnd && base == last_click_msg && now - last_click_time <= dbl &&
             abs(p.x - last_click_pt.x) <= GetSystemMetrics(SM_CXDOUBLECLK) / 2 &&
             abs(p.y - last_click_pt.y) <= GetSystemMetrics(SM_CYDOUBLECLK) / 2 &&
@@ -542,14 +631,19 @@ static int script_step(void)
 
 /* ------------------------------------------------------------------ typematic
  * The host's key repeat is ignored; the last key pressed repeats at the PC/AT typematic
- * timing that KeyboardDelay / KeyboardSpeed select, like KEYBOARD.DRV programming the 8042:
- * delay (d+1)*250 ms, period (8+A)*2^B*4.17 ms with rate code 31-speed = B<<3|A. */
+ * timing that KeyboardDelay / KeyboardSpeed select, like KEYBOARD.DRV SetSpeed (seg6:0020)
+ * programming the 8042: delay (d+1)*250 ms; the speed indexes the driver's table (seg6:0000) for
+ * the rate code B<<3|A, period (8+A)*2^B*4.17 ms. */
 static int rep_vk, rep_scan;
 static DWORD rep_next;
 
 static DWORD rep_period(void)
 {
-    int code = 31 - w16_kbd_speed;
+    static const unsigned char rate[32] = {
+        0x1F, 0x1F, 0x1F, 0x1A, 0x17, 0x14, 0x12, 0x11, 0x0F, 0x0D, 0x0C, 0x0B, 0x0A, 0x09, 0x09, 0x08,
+        0x07, 0x06, 0x06, 0x05, 0x04, 0x04, 0x03, 0x03, 0x02, 0x02, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00,
+    };
+    int code = rate[w16_kbd_speed & 0x1F];
     return (DWORD)((8 + (code & 7)) * (1 << ((code >> 3) & 3)) * 417 / 100);
 }
 
@@ -581,6 +675,7 @@ static void handle_sdl(SDL_Event *e)
         w16_mouse.x = e->button.x; w16_mouse.y = e->button.y;
         int down = e->type == SDL_MOUSEBUTTONDOWN;
         int vk = e->button.button == SDL_BUTTON_LEFT ? VK_LBUTTON : e->button.button == SDL_BUTTON_RIGHT ? VK_RBUTTON : VK_MBUTTON;
+        if (w16_swap_buttons && vk != VK_MBUTTON) vk = vk == VK_LBUTTON ? VK_RBUTTON : VK_LBUTTON;
         UINT base = vk == VK_LBUTTON ? WM_LBUTTONDOWN : vk == VK_RBUTTON ? WM_RBUTTONDOWN : WM_MBUTTONDOWN;
         if (down) w16_keystate[vk] |= 0x80; else w16_keystate[vk] &= ~0x80;
         mouse_event(down ? base : base + 1);

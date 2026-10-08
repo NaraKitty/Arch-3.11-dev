@@ -321,4 +321,10 @@ void w16_sys_init(void);
 const char *w16_config_dir(void);
 extern int w16_border_width;
 extern int w16_kbd_speed, w16_kbd_delay; /* typematic: speed 0..31, delay 0..3 (WIN.INI [windows]) */
+extern UINT w16_dblclk_time;            /* DoubleClickSpeed */
+extern int w16_swap_buttons;            /* SwapMouseButtons */
+extern int w16_mouse_params[3];         /* MouseThreshold1, MouseThreshold2, MouseSpeed */
+void w16_trails_init(void);             /* mouse trails (msg.c): VGA.DRV's MOUSETRAILS escape */
+int w16_trails_query(void);
+int w16_trails_escape(int n);
 #endif

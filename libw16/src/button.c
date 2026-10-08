@@ -45,6 +45,69 @@ static void bevel(HDC dc, int L, int T, int R, int B, int pressed)
 
 static HFONT ctl_font(HWND h) { return h->font ? h->font : GetStockObject(SYSTEM_FONT); }
 
+/* ------------------------------------------------------------------ USER BNDrawText geometry
+ * seg25:102E maps the style to a text layout, seg25:1097 makes the text rectangle, seg25:1366
+ * centres the text (vertically on tmAscent, not tmHeight) and derives the focus rectangle. */
+enum { BT_CHECK = 2, BT_GROUP = 3, BT_PUSH = 5 };
+/* USER [0x974]/[0x976]: the OBM_CHECKBOXES cell, bitmap width / 4 (14 with the gap between the boxes)
+ * and height / 3 (13) */
+static int checkbox_cx(void) { W16Bitmap *b = w16_obm(OBM_CHECKBOXES); return b ? b->w / 4 : 14; }
+static int checkbox_cy(void) { W16Bitmap *b = w16_obm(OBM_CHECKBOXES); return b ? b->h / 3 : 13; }
+
+typedef struct { RECT rc; int tx, ty, tw, th; } TextLayout;
+
+static void text_layout(HWND h, HDC dc, int type, const char *text, int n, TextLayout *t)
+{
+    int cxb = GetSystemMetrics(SM_CXBORDER), cyb = GetSystemMetrics(SM_CYBORDER);
+    TEXTMETRIC tm;
+    GetTextMetrics(dc, &tm);
+    t->tw = n ? w16_prefix_text_width(dc, text, n) : 0;
+    t->th = tm.tmHeight;
+    GetClientRect(h, &t->rc);
+    switch (type) {
+    case BT_CHECK:
+        t->rc.left += (h->style & BS_LEFTTEXT) ? cxb : checkbox_cx() + 4;
+        break;
+    case BT_GROUP:
+        if (!n) { SetRectEmpty(&t->rc); break; }
+        t->rc.left += LOWORD(GetDialogBaseUnits()) - cxb;   /* system font width, [0x522] */
+        t->rc.right = t->rc.left + t->tw + 4;
+        t->rc.bottom = t->rc.top + t->th + 4;
+        break;
+    case BT_PUSH:
+        t->rc.right -= 2 * cxb;
+        t->rc.bottom -= 2 * cyb;
+        break;
+    }
+    t->tx = t->rc.left;
+    if (type != BT_CHECK) t->tx += (t->rc.right - t->tw - t->rc.left) / 2;
+    t->ty = t->rc.top + (t->rc.bottom - t->rc.top - tm.tmAscent) / 2;
+}
+
+/* the dotted focus rectangle around the text (seg25:15D3) */
+static void draw_focus(HWND h, HDC dc, const TextLayout *t, int push, int pressed)
+{
+    int cxb = GetSystemMetrics(SM_CXBORDER), cyb = GetSystemMetrics(SM_CYBORDER);
+    RECT c, f;
+    GetClientRect(h, &c);
+    f.top = t->ty - cyb;
+    if (f.top < 0) f.top = 0;
+    f.bottom = f.top + t->th + 3 * cyb;
+    if (f.bottom > c.bottom) f.bottom = c.bottom;
+    if (push) {
+        /* kept off the bevel: 3 border units down on displays over 300 lines (USER [0xea]) */
+        int mt = (w16_screen.h > 300 ? 3 : 2) * cyb;
+        if (f.top < mt) f.top = mt;
+        if (f.bottom > c.bottom - 4 * cyb) f.bottom = c.bottom - 4 * cyb;
+    }
+    f.left = t->tx - 2 * cxb;
+    if (f.left < 0) f.left = 0;
+    f.right = f.left + t->tw + 4 * cxb;
+    if (f.right > c.right) f.right = c.right;
+    if (pressed) OffsetRect(&f, 1, 1);
+    DrawFocusRect(dc, &f);
+}
+
 static void paint_push(HWND h, HDC dc)
 {
     Btn *b = btn(h);
@@ -77,13 +140,10 @@ static void paint_push(HWND h, HDC dc)
     HGDIOBJ of = SelectObject(dc, ctl_font(h));
     SetBkMode(dc, TRANSPARENT);
     int n = strlen(h->text);
-    int tw = w16_prefix_text_width(dc, h->text, n);
-    TEXTMETRIC tm;
-    GetTextMetrics(dc, &tm);
-    /* centred across the face less the 2-px right shadow (measured: OK, Cancel and Help in a 3.11
-     * dialog all start one pixel left of the full-width centre, whatever the text width) */
-    int x = (rt - l - 2 - tw) / 2 + l, y = (bt - t - tm.tmHeight) / 2 + t;
-    if (pressed) { x += 2; y += 2; }
+    TextLayout tl;
+    text_layout(h, dc, BT_PUSH, h->text, n, &tl);
+    int x = tl.tx, y = tl.ty;
+    if (pressed) { x++; y++; }
     if ((h->style & WS_DISABLED) && GetSysColor(COLOR_GRAYTEXT) == GetSysColor(COLOR_BTNFACE))
         w16_draw_stippled_text(dc, x, y, h->text, n, 0, GetSysColor(COLOR_BTNTEXT));
     else if (h->style & WS_DISABLED) w16_draw_gray_text(dc, x, y, h->text, n, 0);
@@ -91,11 +151,7 @@ static void paint_push(HWND h, HDC dc)
         SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
         w16_draw_prefix_text(dc, x, y, h->text, n, 0);
     }
-    if (b->state & BST_FOCUS) {
-        RECT fr = {x - 1, y, x + tw + 1, y + tm.tmHeight};
-        IntersectRect(&fr, &fr, &(RECT){L + 2, T + 2, R - 2, B - 2});
-        DrawFocusRect(dc, &fr);
-    }
+    if (b->state & BST_FOCUS) draw_focus(h, dc, &tl, 1, pressed);
     SelectObject(dc, of);
 }
 
@@ -113,10 +169,9 @@ static void paint_check(HWND h, HDC dc)
     HGDIOBJ of = SelectObject(dc, ctl_font(h));
     TEXTMETRIC tm;
     GetTextMetrics(dc, &tm);
-    int box = 13;
     int left = (h->style & BS_LEFTTEXT) != 0;
-    int by = (r.bottom - r.top - box) / 2;
-    int bx = left ? r.right - box : 0;
+    int by = (r.bottom - r.top - checkbox_cy()) / 2;
+    int bx = left ? r.right - checkbox_cx() : 0;
     if (bm) {
         int col = (b->check ? 1 : 0) + ((b->state & BST_PUSHED) ? 2 : 0);
         int row = radio ? 1 : 0;
@@ -144,20 +199,16 @@ static void paint_check(HWND h, HDC dc)
         rgn_free(&e);
         w16_screen_dirty = 1;
     }
-    int tx = left ? 0 : box + tm.tmAveCharWidth - 1;
-    int ty = (r.bottom - r.top - tm.tmHeight) / 2;
     int n = strlen(h->text);
+    TextLayout tl;
+    text_layout(h, dc, BT_CHECK, h->text, n, &tl);
     SetBkMode(dc, TRANSPARENT);
-    if (h->style & WS_DISABLED) w16_draw_gray_text(dc, tx, ty, h->text, n, 0);
+    if (h->style & WS_DISABLED) w16_draw_gray_text(dc, tl.tx, tl.ty, h->text, n, 0);
     else {
         SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
-        w16_draw_prefix_text(dc, tx, ty, h->text, n, 0);
+        w16_draw_prefix_text(dc, tl.tx, tl.ty, h->text, n, 0);
     }
-    if (b->state & BST_FOCUS) {
-        int tw = w16_prefix_text_width(dc, h->text, n);
-        RECT fr = {tx - 1, ty, tx + tw + 1, ty + tm.tmHeight};
-        DrawFocusRect(dc, &fr);
-    }
+    if (b->state & BST_FOCUS) draw_focus(h, dc, &tl, 0, 0);
     SelectObject(dc, of);
 }
 
@@ -174,17 +225,13 @@ static void paint_group(HWND h, HDC dc)
     FrameRect(dc, &f, w16_sys_brush(COLOR_WINDOWFRAME));
     int n = strlen(h->text);
     if (n) {
-        int tw = w16_prefix_text_width(dc, h->text, n);
-        SetBkMode(dc, OPAQUE);
-        SetBkColor(dc, GetSysColor(COLOR_WINDOW));
-        /* measured on MAIN.CPL's Keyboard dialog (MS Sans Serif 8): the title cell sits 3 px below the
-         * control top and breaks the line from 2 px before the text to 2 px after its extent */
-        int ty = 3;
-        RECT tb = {7, ty, 9 + tw + 2, ty + tm.tmHeight};
-        FillRect(dc, &tb, w16_ctl_color(h, dc, CTLCOLOR_BTN));
+        /* the title's text rectangle (text extent + 4 wide and high) breaks the frame line */
+        TextLayout tl;
+        text_layout(h, dc, BT_GROUP, h->text, n, &tl);
+        FillRect(dc, &tl.rc, w16_ctl_color(h, dc, CTLCOLOR_BTN));
         SetBkMode(dc, TRANSPARENT);
-        if (h->style & WS_DISABLED) w16_draw_gray_text(dc, 9, ty, h->text, n, 0);
-        else { SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT)); w16_draw_prefix_text(dc, 9, ty, h->text, n, 0); }
+        if (h->style & WS_DISABLED) w16_draw_gray_text(dc, tl.tx, tl.ty, h->text, n, 0);
+        else { SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT)); w16_draw_prefix_text(dc, tl.tx, tl.ty, h->text, n, 0); }
     }
     SelectObject(dc, of);
 }

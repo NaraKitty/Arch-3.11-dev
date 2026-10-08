@@ -21,7 +21,9 @@ param(
     [string]$DosboxX = 'C:\DOSBox-X\dosbox-x.exe',
     [string]$Cwd = '\WINDOWS',
     [string]$Run = '',         # WIN.INI [windows] run= (programs started after the shell)
-    [string]$Scenario = ''     # a .scn file (scenario.py); replaces -Keys
+    [string]$Scenario = '',    # a .scn file (scenario.py); replaces -Keys
+    [int]$Tolerance = 80       # pixels that may change in a 'stable' frame (caret 80; focused
+                               # scroll bar, whose thumb blinks, needs about 300)
 )
 $ErrorActionPreference = 'Stop'
 if ($Scenario) { $Keys = @(python -I (Join-Path $PSScriptRoot 'scenario.py') autotype $Scenario) }
@@ -57,8 +59,7 @@ New-Item -ItemType Directory -Force $out | Out-Null
 
 $p = Start-Process $DosboxX -ArgumentList '-conf', (Join-Path $PSScriptRoot 'common.conf'), '-conf', $conf -WorkingDirectory $RefDir -PassThru
 $t0 = Get-Date
-# "unchanged" tolerates up to $Tolerance pixels so the blinking caret does not count as a change
-$Tolerance = 80
+# "unchanged" tolerates up to -Tolerance pixels so the blinking caret does not count as a change
 $prev = $null; $saved = $null; $same = 0; $n = 0
 while (-not $p.HasExited -and ((Get-Date) - $t0).TotalSeconds -lt $Timeout) {
     Start-Sleep -Milliseconds $PollMs

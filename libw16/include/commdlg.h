@@ -190,6 +190,5 @@ int ShellAbout(HWND h, LPCSTR app, LPCSTR other, HICON icon);
 #define SP_USERABORT (-3)
 #define SP_OUTOFDISK (-4)
 #define SP_OUTOFMEMORY (-5)
-int Escape(HDC dc, int esc, int cb, LPCSTR in, void *out);
 BOOL DeleteFileDos(LPCSTR name);
 #endif

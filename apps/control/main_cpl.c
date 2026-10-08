@@ -5,6 +5,7 @@
  * Applets that are not ported yet are left out of GETCOUNT/INQUIRE, the way MAIN.CPL drops
  * Network when WNetGetCaps reports no network. */
 #include "maincpl.h"
+#include <stdarg.h>
 #include <string.h>
 
 HINSTANCE hInstMain;            /* [0x10] */
@@ -12,6 +13,8 @@ DWORD dwContext;                /* [0xa2] */
 UINT wHelpMessage;              /* [0x13d8] */
 static int cInit;               /* [0x1b4] CPL_INIT count */
 static BOOL fHourGlass;         /* [0x44] */
+static char szOutOfMem[256];    /* [0x18b0] string 0 */
+static char szCaption[64];      /* [0x1f6a] string 1, "Control Panel" */
 
 static const char szHelpFile[] = "control.hlp";
 static const char *const szSections[] = {
@@ -30,7 +33,7 @@ static Applet applets[] = {
     {24, 48, 600, 0, TRUE, 5000, FALSE},   /* Color */
     {26, 50, 602, 2, TRUE, 5002, FALSE},   /* Fonts */
     {28, 52, 604, 4, TRUE, 5004, FALSE},   /* Ports */
-    {30, 54, 606, 6, TRUE, 5006, FALSE},   /* Mouse */
+    {30, 54, 606, 6, TRUE, 5006, TRUE},    /* Mouse */
     {32, 56, 608, 8, TRUE, 5008, FALSE},   /* Desktop */
     {29, 53, 605, 5, TRUE, 5005, TRUE},    /* Keyboard */
     {25, 49, 601, 1, TRUE, 5001, FALSE},   /* Printers */
@@ -75,12 +78,50 @@ void CPHelp(HWND hwnd)
     WinHelp(hwnd, szHelpFile, HELP_CONTEXT, dwContext);
 }
 
+/* ------------------------------------------------------------------ seg1:1881 */
+void OutOfMemory(HWND hwnd)
+{
+    MessageBox(hwnd, szOutOfMem, szCaption, MB_SYSTEMMODAL | MB_ICONHAND);
+}
+
+/* ------------------------------------------------------------------ seg4:0000
+ * a message box from MAIN.CPL strings; the text is a wsprintf format for the arguments */
+int MyMessageBox(HWND hwnd, int idText, int idCaption, UINT flags, ...)
+{
+    char fmt[256], text[256], cap[256];
+    int r = -1;
+    if (idText && LoadString(hInstMain, idText, fmt, sizeof fmt)) {
+        va_list ap;
+        va_start(ap, flags);
+        wvsprintf(text, fmt, ap);
+        va_end(ap);
+        if (LoadString(hInstMain, idCaption, cap, sizeof cap)) r = MessageBox(hwnd, text, cap, flags);
+    }
+    if (r == -1) OutOfMemory(hwnd);
+    return r;
+}
+
+/* ------------------------------------------------------------------ seg4:007E
+ * DialogBoxParam on a MAIN.CPL template with the help context switched for its lifetime */
+int DoDialogBoxParam(int id, HWND hwnd, DLGPROC proc, DWORD dwHelp, LPARAM lParam)
+{
+    DWORD dwWas = dwContext;
+    dwContext = dwHelp;
+    int r = DialogBoxParam(hInstMain, MAKEINTRESOURCE(id), hwnd, proc, lParam);
+    dwContext = dwWas;
+    if (r == -1) OutOfMemory(hwnd);
+    return r;
+}
+
 /* ------------------------------------------------------------------ seg3:0733: run applet <id> */
 static void RunApplet(HWND hwnd, int id)
 {
     switch (id) {
     case 5:
         DialogBox(hInstMain, MAKEINTRESOURCE(5), hwnd, KeyboardDlgProc);
+        break;
+    case 6:
+        MouseRun(hwnd);
         break;
     case 10:
         NetworkDialog(hwnd);
@@ -94,6 +135,8 @@ static BOOL InitApplet(void)
     hInstMain = w16_load_module("MAIN.CPL");
     if (!hInstMain) return FALSE;
     wHelpMessage = RegisterWindowMessage("ShellHelp");
+    LoadString(hInstMain, 0, szOutOfMem, sizeof szOutOfMem);
+    LoadString(hInstMain, 1, szCaption, sizeof szCaption);
     return TRUE;
 }
 

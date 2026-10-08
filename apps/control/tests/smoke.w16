@@ -1,6 +1,7 @@
-# Control Panel: Keyboard and Network (MAIN.CPL), Volume; run with ARCH311_SIMULATE=1
+# Control Panel: Mouse, Keyboard, Network (MAIN.CPL), Volume; run with ARCH311_SIMULATE=1
 sleep 600
 shot shots/01-control.png
+key right
 key right
 key right
 sleep 200
