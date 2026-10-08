@@ -43,7 +43,6 @@ static char g_szInactive[40];       /* [0x13da] string 94 */
 static char g_szActive[40];         /* [0x1e00] string 93 */
 static char g_szDisabled[40];       /* [0x1f8a] string 97 */
 static char g_szHighlighted[40];    /* [0x17b8] string 98 */
-static char g_szCaption[64];        /* [0x1f6a] string 1 "Control Panel" */
 static RECT g_rcSample;             /* [0x12d6] control 717, client coordinates */
 static RECT g_rcDlgFull;            /* [0x12de] the whole dialog (screen) */
 static RECT g_rcSampleScr;          /* [0x171e] */
@@ -151,7 +150,7 @@ static BOOL ConfirmMsg(HWND hwnd, LPCSTR lpszArg, int ids)
     char szFmt[256], szMsg[512];
     LoadString(hInstMain, ids, szFmt, sizeof szFmt);
     wsprintf(szMsg, szFmt, lpszArg);
-    return MessageBox(hwnd, szMsg, g_szCaption, MB_YESNO | MB_ICONEXCLAMATION) == IDYES;
+    return MessageBox(hwnd, szMsg, szCaption, MB_YESNO | MB_ICONEXCLAMATION) == IDYES;
 }
 
 /* ------------------------------------------------------------------ seg6:005B
@@ -364,7 +363,7 @@ static BOOL CALLBACK SaveSchemeDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARA
             if (idErr) {
                 /* strings 104 Windows Default, 105 '=', 106 brackets, 107 blank */
                 if (!LoadString(hInstMain, idErr + 0x48, szBuf, 0xBE)) OutOfMemory(hDlg);
-                else MessageBox(hDlg, szBuf, g_szCaption, MB_ICONINFORMATION);
+                else MessageBox(hDlg, szBuf, szCaption, MB_ICONINFORMATION);
                 break;
             }
             lstrcpy(g_szScheme, szBuf);
@@ -1494,7 +1493,7 @@ reselect:                               /* seg6:12B9 */
             if (idx == 0) {
                 if (!LoadString(hInstMain, 100, szFmt, 0x50)) { OutOfMemory(hDlg); goto tail; }
                 wsprintf(szMsg, szFmt, (LPSTR)szItem);
-                MessageBox(hDlg, szMsg, g_szCaption, MB_ICONINFORMATION);
+                MessageBox(hDlg, szMsg, szCaption, MB_ICONINFORMATION);
                 goto tail;
             }
             if (!ConfirmMsg(g_hDlg, szItem, 236)) goto tail;
@@ -2337,7 +2336,6 @@ void ColorRun(HWND hwndOwner)
         ReleaseDC(NULL, hdc);
         g_sysTmHeight = tm.tmHeight;
         g_sysExtLead = tm.tmExternalLeading;
-        LoadString(hInstMain, 1, g_szCaption, sizeof g_szCaption);
         GetWindowsDirectory(g_szIni, sizeof g_szIni - 16);
         lstrcat(g_szIni, "\\control.ini");
     }

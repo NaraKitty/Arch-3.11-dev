@@ -1,12 +1,8 @@
-# Control Panel: Mouse, Keyboard, Date/Time, Network (MAIN.CPL), Sound, Volume; run with
-# ARCH311_SIMULATE=1
+# Control Panel: the MAIN.CPL applets (Network last), Sound, then Volume; run with
+# ARCH311_SIMULATE=1. End selects Volume, two Lefts Network, whatever else is ported.
 sleep 600
 shot shots/01-control.png
-key right
-key right
-key right
-key right
-key right
+key end
 sleep 200
 shot shots/02-volume-selected.png
 key enter

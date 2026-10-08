@@ -8,6 +8,8 @@
 extern HINSTANCE hInstMain;     /* the user's ripped MAIN.CPL: dialogs, icons, strings */
 extern DWORD dwContext;         /* help context of the running applet (5000 + applet id) */
 extern UINT wHelpMessage;       /* RegisterWindowMessage("ShellHelp") */
+extern char szCaption[];        /* string 1, "Control Panel" */
+extern char szClose[];          /* string 9, "Close": Cancel buttons say it once a change is saved */
 
 void HourGlass(BOOL fOn);                     /* seg1:19D7 */
 void BroadcastWinIniChange(int section);      /* seg4:0283 */
@@ -24,5 +26,8 @@ BOOL RegisterArrowClass(HINSTANCE hInst);          /* seg2:060E, "cpArrow" */
 void ColorRun(HWND hwnd);                          /* seg3:0756, dialog 100 (seg6) modeless */
 void ColorExit(void);                              /* seg3:0371: Color's GDI objects */
 void NetworkDialog(HWND owner);                    /* arch311: replaces WNetDeviceMode */
+BOOL PortsDlgProc(HWND, UINT, WPARAM, LPARAM);     /* seg19:062E, dialog 4 */
+int DoPortSettings(HWND hwndOwner, int iPort);     /* seg19:04C6, dialog 19 (also Printers' Connect) */
+BOOL RestartDlgProc(HWND, UINT, WPARAM, LPARAM);   /* seg9:05A9, dialog 37 (Ports, Fonts) */
 
 #endif

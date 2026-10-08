@@ -318,3 +318,32 @@ Tests: tools/run-cp-test.sh SCRIPT.w16 [OUT] runs a Control Panel script with a 
 (fresh WIN.INI/SYSTEM.INI/CONTROL.INI from the .SRC templates, copied to OUT/ini afterwards) and a C:
 fixture shaped like a 3.11 install (links to the rip; with ARCH311_REF=<rig folder> exactly as in
 c-pristine). Use it for every applet test: runs can go in parallel and never touch ~/.config/arch311.
+Ports applet (apps/control/portscpl.c = MAIN.CPL seg19 + restart dialog seg9:05A9, shared with Fonts).
+Verified against real 3.11 (scn/ports-a.scn COM2 settings, scn/ports-b.scn COM1 Advanced + restart
+prompt; port tests ports.w16 / ports2.w16 run as `tools/run-cp-test.sh TEST OUT Ports`): every frame
+of the Ports, Settings, Advanced and System Setting Change dialogs is pixel-identical except the selected
+text of combo-box edits (below), and WIN.INI [ports] / SYSTEM.INI [386Enh] COM1Irq=3, COM1Base=03F8
+match the real run byte for byte. EscapeCommFunction(GETBASEIRQ) follows COMM.DRV seg2:0BD1 on Linux's
+ttyS ports (BIOS table = ports where Linux found a UART; ARCH311_SIMULATE = the reference PC's 3F8/2F8).
+"Restart Now" calls ExitWindows, which ends the program (restarting the arch311 session: TODO).
+libw16 findings:
+- Combo boxes laid out by USER seg34:02AC, again on WM_SETFONT: field = font height + min(it, system
+  font height)/4 + 4 borders (20 px for 8 pt Helv; was 22 from the system font), button = right 17 px,
+  drop-down-list field shares the button's left border, drop-down edit ends a system character (8) short
+  of it, the list is indented by 8 except under drop-down lists. Button bevel: shadow first, highlight on
+  top. Focused drop-down-list field (seg33:0E77): control colour 1 px inside the frame, highlight cell
+  inside that, opaque text 1 px in, focus rectangle around the cell.
+- DrawFocusRect's gray brush is a monochrome pattern: GDI colours it with the DC's text colour (0 bits)
+  and background colour (1 bits) - black/white inverts every other pixel, the highlight colours give the
+  black-and-yellow dots of a focused combo field (measured).
+- Tab/arrow navigation from a control's child window (a combo's edit) moves on from the control itself.
+- Owner-drawn buttons get a real DRAWITEMSTRUCT and ODA_FOCUS / ODA_SELECT notifications.
+- Icon statics fall back to system icons (dialog 37's IDI_EXCLAMATION).
+- Known difference: in a combo box's edit (3.1 creates it with internal style 0x200) real 3.11 shows a
+  14-row selection (the edit's client inset 2 px top and bottom) and a 1-px caret on the last highlight
+  column; libw16 draws the text line (13 rows) and its 2-px caret after it. Plain edits (Date/Time) do
+  show 13 rows and a 2-px caret. TODO: decode USER's edit control (single-line formatting rect, caret).
+Tests: run-cp-test.sh/run-app-test.sh pass an applet name as the Control Panel's command line
+("control NAME" opens it, seg1:10A7), so applet tests no longer depend on the icon order; smoke.w16
+reaches Volume with End. Rig: DOSBox-X AUTOTYPE has no key combinations - `key alt+x` in a .scn aborts the
+rest of the run; navigate with tab/space instead.
