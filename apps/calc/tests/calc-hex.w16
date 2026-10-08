@@ -1,0 +1,199 @@
+# Calculator, scientific view: hexadecimal, octal and binary, the word sizes, errors and the
+# error state (the radix buttons are disabled until C), the overflow checks of * + / and Exp
+# Generated from calc-hex.scn by tools/ref311/scenario.py w16; reference frames: arch311-ref/shots/calc-hex,
+# recorded with dosbox-x_MinGWx64_SDL2.exe (its FPU computes with the host x87, as a real 387 would).
+# regress: ARCH311_APP=apps/build/calc sh tools/run-cp-test.sh "$TEST" "$OUT"
+# compare: calc-hex/01.png 01.png active ignore 320 240 332 260
+# compare: calc-hex/02.png 02.png active ignore 320 240 332 260
+# compare: calc-hex/03.png 03.png active ignore 320 240 332 260
+# compare: calc-hex/04.png 04.png active ignore 320 240 332 260
+# compare: calc-hex/05.png 05.png active ignore 320 240 332 260
+# compare: calc-hex/06.png 06.png active ignore 320 240 332 260
+# compare: calc-hex/07.png 07.png active ignore 320 240 332 260
+# compare: calc-hex/08.png 08.png active ignore 320 240 332 260
+# compare: calc-hex/09.png 09.png active ignore 320 240 332 260
+# compare: calc-hex/10.png 10.png active ignore 320 240 332 260
+# compare: calc-hex/11.png 11.png active ignore 320 240 332 260
+# compare: calc-hex/12.png 12.png active ignore 320 240 332 260
+# compare: calc-hex/13.png 13.png active ignore 320 240 332 260
+# compare: calc-hex/14.png 14.png active ignore 320 240 332 260
+# compare: calc-hex/15.png 15.png active ignore 320 240 332 260
+# compare: calc-hex/16.png 16.png active ignore 320 240 332 260
+# compare: calc-hex/17.png 17.png active ignore 320 240 332 260
+# compare: calc-hex/18.png 18.png active ignore 320 240 332 260
+# compare: calc-hex/19.png 19.png active ignore 320 240 332 260
+# compare: calc-hex/20.png 20.png active ignore 320 240 332 260
+# compare: calc-hex/21.png 21.png active ignore 320 240 332 260
+# compare: calc-hex/22.png 22.png active ignore 320 240 332 260
+# compare: calc-hex/23.png 23.png active ignore 320 240 332 260
+# ini: WIN.INI SciCalc layout=0
+sleep 400
+sleep 400
+shot shots/01.png
+key alt
+key v
+key s
+sleep 400
+shot shots/02.png
+key f5
+key f
+key f
+sleep 400
+shot shots/03.png
+key f6
+sleep 400
+shot shots/04.png
+key f7
+sleep 400
+shot shots/05.png
+key f8
+sleep 400
+shot shots/06.png
+key f5
+key f4
+key 1
+key f
+key e
+sleep 400
+shot shots/07.png
+key f3
+key 1
+key 2
+key 3
+key 4
+sleep 400
+shot shots/08.png
+key f2
+key esc
+key f
+key f
+key f
+key f
+key f
+key f
+key f
+key f
+sleep 400
+shot shots/09.png
+key f6
+key f9
+sleep 400
+shot shots/10.png
+key f5
+sleep 400
+shot shots/11.png
+key esc
+key a
+key kp_plus
+key b
+key equals
+sleep 400
+shot shots/12.png
+key kp_multiply
+key 2
+key equals
+sleep 400
+shot shots/13.png
+key f6
+key esc
+key 1
+key x
+key 4
+key 0
+key 0
+sleep 400
+shot shots/14.png
+key esc
+key 0
+key n
+sleep 400
+shot shots/15.png
+key esc
+key 2
+key i
+key s
+sleep 400
+shot shots/16.png
+key esc
+key 1
+key 0
+key y
+key 4
+key 0
+key 0
+key equals
+sleep 400
+shot shots/17.png
+key esc
+key 1
+key x
+key 1
+key 3
+key 0
+key kp_multiply
+key 1
+key x
+key 1
+key 0
+key equals
+sleep 400
+shot shots/18.png
+key esc
+key 1
+key x
+key 1
+key 0
+key kp_multiply
+key 1
+key x
+key 1
+key 3
+key 0
+key equals
+sleep 400
+shot shots/19.png
+key esc
+key 5
+key r
+sleep 400
+shot shots/20.png
+key esc
+key 9
+key x
+key 3
+key 0
+key 7
+key kp_plus
+key 9
+key x
+key 3
+key 0
+key 7
+key equals
+sleep 400
+shot shots/21.png
+key esc
+key 1
+key x
+key f9
+key 4
+key 0
+key 0
+sleep 400
+shot shots/22.png
+key esc
+key 1
+key x
+key 3
+key 0
+key 0
+key kp_divide
+key 1
+key x
+key f9
+key 1
+key 0
+key equals
+sleep 400
+shot shots/23.png
+quit

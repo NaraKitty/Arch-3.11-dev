@@ -1,0 +1,35 @@
+# Calculator, Edit > Paste in the scientific view: "((1+2)*3@-2#)%7+4!=" (parentheses, x^2, x^3,
+# Mod, n!), then typed 5 and the same text pasted again
+# Port side: the text goes onto the clipboard with "clip"; the reference frames come from
+# calc-paste2.scn (Program Manager shell, Notepad copies the text; its frames before
+# Calculator pastes are not compared, only those of Calculator's window); recorded with
+# dosbox-x_MinGWx64_SDL2.exe (its FPU computes with the host x87, as a real 387 would).
+# regress: ARCH311_APP=apps/build/calc sh tools/run-cp-test.sh "$TEST" "$OUT"
+# compare: calc-paste2/01.png 01.png active ignore 320 240 332 260
+# compare: calc-paste2/02.png 02.png active ignore 320 240 332 260
+# compare: calc-paste2/03.png 03.png active ignore 320 240 332 260
+# compare: calc-paste2/04.png 04.png active ignore 320 240 332 260
+# compare: calc-paste2/05.png 05.png active ignore 320 240 332 260
+# ini: WIN.INI SciCalc layout=0
+sleep 400
+sleep 400
+shot shots/01.png
+key alt
+key v
+key s
+sleep 400
+shot shots/02.png
+clip ((1+2)*3@-2#)%7+4!=
+key alt
+key e
+key p
+sleep 400
+shot shots/03.png
+key 5
+sleep 400
+shot shots/04.png
+key alt
+key e
+key p
+sleep 400
+shot shots/05.png

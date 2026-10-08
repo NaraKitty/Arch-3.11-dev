@@ -1,0 +1,29 @@
+# Calculator, standard view: long typed numbers, divisions, 1/x and a difference that shows the
+# binary fractions (continued from calc-std3)
+# ini: WIN.INI SciCalc layout=
+# (reference frame 3 caught the typing of 0.00000012345 half way: skipped)
+# refskip: 3
+shot
+key esc
+type 1234567890123
+shot
+key esc
+type 0.00000012345
+shot
+key esc
+type 5/9=
+shot
+type 7/3-2=
+shot
+type 1/3
+key kp_multiply
+type 3=
+shot
+type 2r
+shot
+type 3r
+shot
+type 0.5-0.4-0.1=
+shot
+type 1e
+shot

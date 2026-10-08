@@ -1,0 +1,82 @@
+# Calculator, scientific view: more sin, cos and tan results digit for digit (continued in calc-sci4)
+# Generated from calc-sci2.scn by tools/ref311/scenario.py w16; reference frames: arch311-ref/shots/calc-sci2,
+# recorded with dosbox-x_MinGWx64_SDL2.exe (its FPU computes with the host x87, as a real 387 would).
+# regress: ARCH311_APP=apps/build/calc sh tools/run-cp-test.sh "$TEST" "$OUT"
+# compare: calc-sci2/01.png 01.png active ignore 320 240 332 260
+# compare: calc-sci2/02.png 02.png active ignore 320 240 332 260
+# compare: calc-sci2/03.png 03.png active ignore 320 240 332 260
+# compare: calc-sci2/04.png 04.png active ignore 320 240 332 260
+# compare: calc-sci2/05.png 05.png active ignore 320 240 332 260
+# compare: calc-sci2/06.png 06.png active ignore 320 240 332 260
+# compare: calc-sci2/07.png 07.png active ignore 320 240 332 260
+# compare: calc-sci2/08.png 08.png active ignore 320 240 332 260
+# compare: calc-sci2/09.png 09.png active ignore 320 240 332 260
+# compare: calc-sci2/10.png 10.png active ignore 320 240 332 260
+# compare: calc-sci2/11.png 11.png active ignore 320 240 332 260
+# compare: calc-sci2/12.png 12.png active ignore 320 240 332 260
+# compare: calc-sci2/13.png 13.png active ignore 320 240 332 260
+# ini: WIN.INI SciCalc layout=0
+sleep 400
+sleep 400
+shot shots/01.png
+key alt
+key v
+key s
+sleep 400
+shot shots/02.png
+key 1
+key s
+sleep 400
+shot shots/03.png
+key 1
+key 5
+key s
+sleep 400
+shot shots/04.png
+key 8
+key 9
+key s
+sleep 400
+shot shots/05.png
+key 2
+key 7
+key 0
+key s
+sleep 400
+shot shots/06.png
+key 3
+key 6
+key 0
+key s
+sleep 400
+shot shots/07.png
+key 3
+key 0
+key f9
+key s
+sleep 400
+shot shots/08.png
+key 1
+key o
+sleep 400
+shot shots/09.png
+key 8
+key 9
+key o
+sleep 400
+shot shots/10.png
+key 1
+key t
+sleep 400
+shot shots/11.png
+key 8
+key 9
+key t
+sleep 400
+shot shots/12.png
+key 9
+key 0
+key t
+sleep 400
+shot shots/13.png
+quit

@@ -1,0 +1,67 @@
+# Calculator: standard view at start, number entry, keypad operators, = and C
+# (the view is not changed, so 3.11 writes no [SciCalc] layout: the ini line expects none)
+# Generated from calc-a.scn by tools/ref311/scenario.py w16; reference frames: arch311-ref/shots/calc-a,
+# recorded with dosbox-x_MinGWx64_SDL2.exe (its FPU computes with the host x87, as a real 387 would).
+# regress: ARCH311_APP=apps/build/calc sh tools/run-cp-test.sh "$TEST" "$OUT"
+# compare: calc-a/01.png 01.png active ignore 320 240 332 260
+# compare: calc-a/02.png 02.png active ignore 320 240 332 260
+# compare: calc-a/03.png 03.png active ignore 320 240 332 260
+# compare: calc-a/04.png 04.png active ignore 320 240 332 260
+# compare: calc-a/05.png 05.png active ignore 320 240 332 260
+# compare: calc-a/06.png 06.png active ignore 320 240 332 260
+# compare: calc-a/07.png 07.png active ignore 320 240 332 260
+# compare: calc-a/08.png 08.png active ignore 320 240 332 260
+# ini: WIN.INI SciCalc layout=
+sleep 400
+sleep 400
+shot shots/01.png
+key 1
+key 2
+key 3
+key 4
+key 5
+sleep 400
+shot shots/02.png
+key kp_plus
+key 6
+key 7
+key 8
+sleep 400
+shot shots/03.png
+key enter
+sleep 400
+shot shots/04.png
+key esc
+key 2
+key period
+key 0
+key 1
+key minus
+key 2
+key equals
+sleep 400
+shot shots/05.png
+key esc
+key 1
+key period
+key 5
+key 0
+key 0
+sleep 400
+shot shots/06.png
+key 1
+key slash
+key 3
+key equals
+sleep 400
+shot shots/07.png
+key esc
+key 2
+key kp_multiply
+key 3
+key period
+key 5
+key equals
+sleep 400
+shot shots/08.png
+quit

@@ -1,0 +1,29 @@
+# Calculator, scientific view: more function results digit for digit (continued from calc-sci2)
+# ini: WIN.INI SciCalc layout=0
+shot
+key alt
+type vs
+shot
+key esc
+type 1000l
+shot
+type 0.001l
+shot
+type 2l
+shot
+type 0.5il
+shot
+type 1
+key f9
+type in
+shot
+type 10in
+shot
+type 2y
+key f9
+type 1=
+shot
+type 1.0001y10000=
+shot
+type 9iy2=
+shot

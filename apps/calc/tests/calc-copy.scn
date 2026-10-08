@@ -1,0 +1,47 @@
+# Calculator: Edit > Copy puts the display on the clipboard (through the hidden edit control) and
+# Edit > Paste types it back: a 13-digit fraction; 9.9999998e+015, which comes back as 9.9999998015
+# (the standard view has no Exp key); a hexadecimal number pasted in decimal (its letters are no
+# decimal keys: the display stays 0)
+# ini: WIN.INI SciCalc layout=0
+shot
+type 1/7=
+shot
+key alt
+type ec
+key esc
+type 2
+key kp_multiply
+shot
+key alt
+type ep
+shot
+type =
+shot
+key esc
+type 99999999
+key kp_multiply
+type 99999999=
+key alt
+type ec
+key esc
+shot
+key alt
+type ep
+shot
+key kp_divide
+type 3=
+shot
+key alt
+type vs
+shot
+type 255
+key f5
+key alt
+type ec
+key f6
+key esc
+key alt
+type ep
+shot
+key f5
+shot

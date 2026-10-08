@@ -630,12 +630,13 @@ void w16_draw_gray_text(HDC dc, int x, int y, const char *s, int n, int noprefix
     SetTextColor(dc, old);
 }
 
-/* Grayed text where GRAYTEXT would vanish into the background (push buttons: GRAYTEXT ==
- * BTNFACE on VGA): USER GrayString (seg10:2F30) draws the text into a monochrome bitmap at (0,0),
- * ORs USER's gray brush over it (rows 0x55, 0xAA from seg12:13E1: white where x + y is odd) and
- * blits it to (x, y), so the pixels kept are those an even distance from the text origin, not the
- * screen's (measured on 3.11: MAIN.CPL Color's disabled Save Scheme / Remove Scheme buttons, and the
- * Desktop applet's disabled "Test" and "Setup..." buttons, 27 px apart, with the same phase). */
+/* Grayed text where GRAYTEXT would vanish into the background (buttons: GRAYTEXT == BTNFACE on
+ * VGA): USER GrayString (seg10:2F30) draws the text into a monochrome bitmap at (0,0), ORs USER's
+ * gray brush over it (rows 0x55, 0xAA from seg3:13E1: white where x + y is odd) and BltColor
+ * (seg1:8BFA, PSDPxax) paints the brush colour fg at (x, y) where black is left, so the pixels kept
+ * are those an even distance from the text origin, not the screen's (measured on 3.11: MAIN.CPL
+ * Color's disabled Save Scheme / Remove Scheme buttons, the Desktop applet's disabled "Test" and
+ * "Setup..." buttons, 27 px apart, with the same phase, and Calculator's disabled radio buttons). */
 void w16_draw_stippled_text(HDC dc, int x, int y, const char *s, int n, int noprefix, COLORREF fg)
 {
     TEXTMETRIC tm;

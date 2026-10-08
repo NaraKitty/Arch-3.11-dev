@@ -7,5 +7,6 @@
 # afterwards) and the 3.11-shaped C: drive are tools/run-fixture-test.sh's; see there for
 # ARCH311_REF, ARCH311_REF_INI, ARCH311_INI_DIR, ARCH311_WININI, ARCH311_A_FILES, ARCH311_CWD,
 # ARCH311_SIMULATE, ARCH311_WAVEDEVS and ARCH311_CLOCK.
+# ARCH311_APP runs another program the same way (apps/build/NAME or a path; default control).
 here=$(cd "$(dirname "$0")" && pwd)
-exec sh "$here/run-fixture-test.sh" control "$@"
+exec sh "$here/run-fixture-test.sh" "${ARCH311_APP:-control}" "$@"

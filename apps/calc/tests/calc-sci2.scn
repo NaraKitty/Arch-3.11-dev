@@ -1,0 +1,30 @@
+# Calculator, scientific view: more sin, cos and tan results digit for digit (continued in calc-sci4)
+# ini: WIN.INI SciCalc layout=0
+shot
+key alt
+type vs
+shot
+type 1s
+shot
+type 15s
+shot
+type 89s
+shot
+type 270s
+shot
+type 360s
+shot
+type 30
+key f9
+type s
+shot
+type 1o
+shot
+type 89o
+shot
+type 1t
+shot
+type 89t
+shot
+type 90t
+shot

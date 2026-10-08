@@ -1,0 +1,26 @@
+# Calculator, Edit > Paste: "12:m3:p:r*2=" (MS, M+, MR by their paste codes), C, pasted again
+# Reference run only (the port side is calc-paste1.w16, which puts the text on the clipboard with
+# "clip"): Program Manager is the shell and WIN.INI run=calc.exe notepad.exe; Notepad opens
+# SYSTEM\cp1.txt (holding the text), selects and copies it and closes, then Calculator pastes.
+shot
+key alt
+type fo
+shot
+type system\cp1.txt
+key enter
+shot
+key alt
+type ea
+key alt
+type ec
+key alt
+type fx
+shot
+key alt
+type ep
+shot
+key esc
+shot
+key alt
+type ep
+shot

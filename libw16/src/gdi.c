@@ -1397,10 +1397,93 @@ BOOL Ellipse(HDC dc, int l, int t, int r, int b)
     mark_dirty(dc);
     return TRUE;
 }
+/* the first-quadrant points (x right, y up from the centre) of the midpoint-algorithm ellipse with
+ * radii a and b, from (0, b) to (a, 0) */
+static int ellipse_quadrant(int a, int b, POINT *out)
+{
+    double a2 = (double)a * a, b2 = (double)b * b, p = b2 - a2 * b + a2 / 4;
+    int x = 0, y = b, n = 0;
+    out[n++] = (POINT){x, y};
+    while (2 * b2 * x < 2 * a2 * y) {
+        x++;
+        if (p < 0) p += 2 * b2 * x + b2;
+        else { y--; p += 2 * b2 * x - 2 * a2 * y + b2; }
+        out[n++] = (POINT){x, y};
+    }
+    p = b2 * (x + 0.5) * (x + 0.5) + a2 * (y - 1.0) * (y - 1.0) - a2 * b2;
+    while (y > 0) {
+        y--;
+        if (p > 0) p += -2 * a2 * y + a2;
+        else { x++; p += 2 * b2 * x - 2 * a2 * y + a2; }
+        out[n++] = (POINT){x, y};
+    }
+    return n;
+}
+
+/* RoundRect as 3.1 draws it on the VGA, measured on Calculator's keys (10 x 20 corner ellipses,
+ * all four corners): each corner is a quarter of the midpoint ellipse with radii w/2 and h/2,
+ * centred w/2 inside the left edge and w/2 + 1 inside the right one (likewise vertically); straight
+ * edges join the arcs. Every outline pixel is drawn once with the pen and every inside pixel once
+ * with the brush, both through the ROP2 (Calculator flashes a key by inverting it twice).
+ * UNTESTED: odd and oversized ellipses, NULL, styled and wide pens (drawn as a 1-pixel outline). */
 BOOL RoundRect(HDC dc, int l, int t, int r, int b, int w, int h)
 {
-    (void)w; (void)h; /* TODO: rounded corners (T-GDI-02) */
-    return Rectangle(dc, l, t, r, b);
+    RECT d;
+    lp_rect(dc, &(RECT){l, t, r, b}, &d);
+    int W = d.right - d.left, H = d.bottom - d.top;
+    if (W <= 0 || H <= 0) return TRUE;
+    int ex0 = 0, ey0 = 0, ex1 = w, ey1 = h;
+    w16_lp_to_dp(dc, &ex0, &ey0);
+    w16_lp_to_dp(dc, &ex1, &ey1);
+    int ew = min(abs(ex1 - ex0), W), eh = min(abs(ey1 - ey0), H);
+    int rx = ew / 2, ry = eh / 2;
+    unsigned char *m = calloc((size_t)W * H, 1);
+    POINT *q = malloc(sizeof(POINT) * (size_t)(rx + ry + 4));
+    int cxl = d.left + rx, cxr = d.right - 1 - rx, cyt = d.top + ry, cyb = d.bottom - 1 - ry;
+#define RR_PLOT(px, py) do { int u_ = (px) - d.left, v_ = (py) - d.top; \
+        if (u_ >= 0 && u_ < W && v_ >= 0 && v_ < H) m[v_ * W + u_] = 1; } while (0)
+    for (int x = cxl; x <= cxr; x++) { RR_PLOT(x, d.top); RR_PLOT(x, d.bottom - 1); }
+    for (int y = cyt; y <= cyb; y++) { RR_PLOT(d.left, y); RR_PLOT(d.right - 1, y); }
+    if (rx > 0 && ry > 0) {
+        int n = ellipse_quadrant(rx, ry, q);
+        for (int i = 0; i < n; i++) {
+            RR_PLOT(cxl - q[i].x, cyt - q[i].y);
+            RR_PLOT(cxr + q[i].x, cyt - q[i].y);
+            RR_PLOT(cxl - q[i].x, cyb + q[i].y);
+            RR_PLOT(cxr + q[i].x, cyb + q[i].y);
+        }
+    }
+#undef RR_PLOT
+    HPEN p = dc->pen;
+    int pen = p && p->u.pen.style != PS_NULL;
+    /* the inside of each row: from past the left outline to before the right one */
+    for (int v = 0; v < H; v++) {
+        unsigned char *row = m + v * W;
+        int a = 0, z = W - 1;
+        while (a < W && !row[a]) a++;
+        while (a < W && row[a]) a++;
+        while (z >= 0 && !row[z]) z--;
+        while (z >= 0 && row[z]) z--;
+        if (!pen) { /* no outline: the brush covers it */
+            a = 0; z = W - 1;
+            while (a < W && !row[a]) a++;
+            while (z >= 0 && !row[z]) z--;
+        }
+        if (a <= z) fill_brush_rop(dc, &(RECT){d.left + a, d.top + v, d.left + z + 1, d.top + v + 1}, dc->brush, dc->rop2);
+    }
+    if (pen) {
+        uint32_t c = w16_rgb(p->u.pen.color);
+        Region e;
+        w16_dc_clip_iter_begin(dc, &e);
+        for (int v = 0; v < H; v++)
+            for (int u = 0; u < W; u++)
+                if (m[v * W + u]) put_rop(dc, &e, d.left + u, d.top + v, c, dc->rop2);
+        rgn_free(&e);
+    }
+    free(q);
+    free(m);
+    mark_dirty(dc);
+    return TRUE;
 }
 static BOOL arcish(HDC dc, int l, int t, int r, int b, int x1, int y1, int x2, int y2, int mode)
 {

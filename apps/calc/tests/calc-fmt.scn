@@ -1,0 +1,70 @@
+# Calculator, standard view: how numbers are shown (gcvt with 13 digits and CALC's own rewrites),
+# typed fractions and their zeros, Back, +/-, errors
+# ini: WIN.INI SciCalc layout=
+shot
+type 0.001234
+shot
+key esc
+type 123456789012345
+shot
+key esc
+type 2/3=
+shot
+key esc
+type 10/3=
+shot
+key esc
+type 1/7=
+shot
+key esc
+type 0.1
+key kp_plus
+type 0.2=
+shot
+key esc
+type 1-0.9=
+shot
+key esc
+type 2.11-2.1=
+shot
+key esc
+type 0.0000001
+shot
+key esc
+type 99999999
+key kp_multiply
+type 99999999=
+shot
+key esc
+type 5
+key f9
+shot
+key esc
+type 0.000
+shot
+key bs
+shot
+key esc
+type 123.45
+key bs
+key bs
+shot
+key bs
+key bs
+shot
+key esc
+type 1/0=
+shot
+key esc
+type 4
+shot
+key esc
+type 0r
+shot
+key esc
+type 12
+key kp_multiply
+type 3==
+shot
+type 4=
+shot
