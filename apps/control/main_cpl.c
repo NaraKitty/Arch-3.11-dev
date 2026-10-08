@@ -14,7 +14,8 @@ UINT wHelpMessage;              /* [0x13d8] */
 static int cInit;               /* [0x1b4] CPL_INIT count */
 static BOOL fHourGlass;         /* [0x44] */
 static char szOutOfMem[256];    /* [0x18b0] string 0 */
-static char szCaption[64];      /* [0x1f6a] string 1, "Control Panel" */
+char szCaption[64];             /* [0x1f6a] string 1, "Control Panel" */
+char szClose[0x9E];             /* [0x1730] string 9, "Close" */
 
 static const char szHelpFile[] = "control.hlp";
 static const char *const szSections[] = {
@@ -32,7 +33,7 @@ typedef struct {
 static Applet applets[] = {
     {24, 48, 600, 0, TRUE, 5000, FALSE},   /* Color */
     {26, 50, 602, 2, TRUE, 5002, FALSE},   /* Fonts */
-    {28, 52, 604, 4, TRUE, 5004, FALSE},   /* Ports */
+    {28, 52, 604, 4, TRUE, 5004, TRUE},    /* Ports */
     {30, 54, 606, 6, TRUE, 5006, TRUE},    /* Mouse */
     {32, 56, 608, 8, TRUE, 5008, FALSE},   /* Desktop */
     {29, 53, 605, 5, TRUE, 5005, TRUE},    /* Keyboard */
@@ -116,11 +117,14 @@ int DoDialogBoxParam(int id, HWND hwnd, DLGPROC proc, DWORD dwHelp, LPARAM lPara
 /* ------------------------------------------------------------------ seg3:0733: run applet <id>
  * Not ported yet: 0 Color = CreateDialog 100 with seg6:0DC8, then the modal loop seg3:06AE;
  * 1 Printers = dialog 1, seg20:1302 (activates the open one, [0x16], instead when there is one);
- * 2 Fonts = dialog 2, seg9:0CBC; 3 International = dialog 3, seg12:194D; 4 Ports = dialog 4,
- * seg19:062E; 8 Desktop = dialog 8, seg18:1419. */
+ * 2 Fonts = dialog 2, seg9:0CBC; 3 International = dialog 3, seg12:194D; 8 Desktop = dialog 8,
+ * seg18:1419. */
 static void RunApplet(HWND hwnd, int id)
 {
     switch (id) {
+    case 4:
+        DialogBox(hInstMain, MAKEINTRESOURCE(4), hwnd, PortsDlgProc);
+        break;
     case 5:
         DialogBox(hInstMain, MAKEINTRESOURCE(5), hwnd, KeyboardDlgProc);
         break;
@@ -145,6 +149,7 @@ static BOOL InitApplet(void)
     RegisterArrowClass(hInstMain);
     LoadString(hInstMain, 0, szOutOfMem, sizeof szOutOfMem);
     LoadString(hInstMain, 1, szCaption, sizeof szCaption);
+    LoadString(hInstMain, 9, szClose, sizeof szClose); /* seg3:01D4 keeps a LocalAlloc copy */
     return TRUE;
 }
 

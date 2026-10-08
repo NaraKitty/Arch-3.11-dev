@@ -1,0 +1,32 @@
+# Ports (MAIN.CPL dialog 4): tools/run-cp-test.sh apps/control/tests/ports.w16 OUT Ports
+# Same keys as arch311-ref/scn/ports-a.scn (after opening): COM2 settings changed
+sleep 900
+shot shots/01-ports.png
+key tab
+key tab
+key tab
+key tab
+sleep 200
+shot shots/02-com2.png
+key space
+sleep 200
+shot shots/03-settings-focus.png
+key enter
+sleep 500
+shotcaret shots/04-com2-settings.png
+type 9600
+key tab
+key tab
+key down
+key tab
+key tab
+key up
+sleep 300
+shot shots/05-changed.png
+key enter
+sleep 400
+shot shots/06-close.png
+key esc
+sleep 300
+shot shots/07-closed.png
+quit

@@ -1,0 +1,37 @@
+# Ports: COM1 Advanced, IRQ 4 -> 3, the restart prompt (Do not restart).
+# tools/run-cp-test.sh apps/control/tests/ports2.w16 OUT Ports - same keys as arch311-ref/scn/ports-b.scn
+sleep 900
+key tab
+key tab
+key tab
+key space
+key enter
+sleep 500
+shot shots/01-com1-settings.png
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key tab
+key space
+sleep 500
+shot shots/02-advanced.png
+key tab
+key down
+sleep 300
+shot shots/03-irq3.png
+key enter
+sleep 500
+shot shots/04-restart.png
+key enter
+sleep 400
+shot shots/05-close.png
+key esc
+sleep 300
+shot shots/06-ports-close.png
+key esc
+sleep 300
+shot shots/07-closed.png
+quit

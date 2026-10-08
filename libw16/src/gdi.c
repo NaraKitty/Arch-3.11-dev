@@ -918,15 +918,30 @@ void InvertRect(HDC dc, LPCRECT r)
     lp_rect(dc, r, &d);
     w16_invert_dev(dc, &d);
 }
+/* PATINVERT of one pattern pixel: palette indices XOR (as the VGA planes do), or the RGB bits for
+ * colours outside the VGA palette */
+static uint32_t xor_px(uint32_t dst, uint32_t pat)
+{
+    int a = -1, b = -1;
+    for (int i = 0; i < 16; i++) {
+        if (vga16[i] == (dst & 0xFFFFFF)) a = i;
+        if (vga16[i] == (pat & 0xFFFFFF)) b = i;
+    }
+    return a >= 0 && b >= 0 ? vga16[a ^ b] : ((dst ^ pat) & 0xFFFFFF);
+}
+
 /* USER seg1:2069 / seg1:1FAA: the gray brush PATINVERTed as four full-length one-pixel strips (top,
- * bottom, left, right), so each corner is inverted twice and stays as it was (gray_px: the brush
- * follows the DC origin) */
+ * bottom, left, right), so each corner is inverted twice and stays as it was. The brush is a
+ * monochrome pattern, so GDI colours it with the DC's text colour (0 bits) and background colour
+ * (1 bits, gray_px): black on white inverts every other pixel; the highlight colours a focused combo
+ * box field is drawn with turn it black and yellow on the blue (both as on 3.11). */
 static void focus_strip(HDC dc, W16Bitmap *t, Region *e, int x0, int y0, int w, int h)
 {
+    uint32_t fg = w16_rgb(dc->text), bg = w16_rgb(dc->bk);
     for (int y = y0; y < y0 + h; y++)
         for (int x = x0; x < x0 + w; x++)
-            if (gray_px(dc, x, y) && x >= 0 && y >= 0 && x < t->w && y < t->h && rgn_contains(e, x, y))
-                t->px[y * t->w + x] = w16_invert_px(t->px[y * t->w + x]);
+            if (x >= 0 && y >= 0 && x < t->w && y < t->h && rgn_contains(e, x, y))
+                t->px[y * t->w + x] = xor_px(t->px[y * t->w + x], gray_px(dc, x, y) ? bg : fg);
 }
 
 void DrawFocusRect(HDC dc, LPCRECT r)
