@@ -852,6 +852,21 @@ void w16_invert_dev(HDC dc, const RECT *r)
     mark_dirty(dc);
 }
 
+/* a gray caret (CreateCaret with bitmap 1): the halftone inverts every other pixel, odd x + y */
+void w16_invert_dev_gray(HDC dc, const RECT *r)
+{
+    Region e;
+    w16_dc_clip_iter_begin(dc, &e);
+    rgn_and(&e, r);
+    W16Bitmap *t = tgt(dc);
+    for (int i = 0; i < e.n; i++)
+        for (int y = max(e.r[i].top, 0); y < min(e.r[i].bottom, t->h); y++)
+            for (int x = max(e.r[i].left, 0); x < min(e.r[i].right, t->w); x++)
+                if ((x + y) & 1) t->px[y * t->w + x] = w16_invert_px(t->px[y * t->w + x]);
+    rgn_free(&e);
+    mark_dirty(dc);
+}
+
 void w16_hline(HDC dc, int x1, int x2, int y, uint32_t rgb) { w16_fill_solid_dev(dc, &(RECT){x1, y, x2, y + 1}, rgb); }
 void w16_vline(HDC dc, int x, int y1, int y2, uint32_t rgb) { w16_fill_solid_dev(dc, &(RECT){x, y1, x + 1, y2}, rgb); }
 

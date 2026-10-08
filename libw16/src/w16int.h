@@ -328,4 +328,6 @@ void w16_trails_init(void);             /* mouse trails (msg.c): VGA.DRV's MOUSE
 int w16_trails_query(void);
 int w16_trails_escape(int n);
 uint32_t w16_invert_display_px(uint32_t d);
+void w16_invert_dev_gray(HDC dc, const RECT *r);
+int w16_sb_thumb(const RECT *r, int vert, W16Scroll *s);  /* thumb offset in the bar, -1 if none (nc.c) */
 #endif

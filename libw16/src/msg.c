@@ -122,7 +122,7 @@ static Timer *due_timer(DWORD now, int *wait)
 }
 
 /* ------------------------------------------------------------------ caret */
-static struct { HWND h; int x, y, w, ht, hide, on, created; DWORD next; UINT blink; } caret = {.blink = 530};
+static struct { HWND h; int x, y, w, ht, hide, on, created, gray; DWORD next; UINT blink; } caret = {.blink = 530};
 
 static void caret_xor(void)
 {
@@ -132,15 +132,16 @@ static void caret_xor(void)
     int a = r.left, b = r.top, c = r.right, d = r.bottom;
     w16_lp_to_dp(dc, &a, &b);
     w16_lp_to_dp(dc, &c, &d);
-    w16_invert_dev(dc, &(RECT){a, b, c, d});
+    if (caret.gray) w16_invert_dev_gray(dc, &(RECT){a, b, c, d});
+    else w16_invert_dev(dc, &(RECT){a, b, c, d});
     ReleaseDC(caret.h, dc);
     caret.on = !caret.on;
 }
 static void caret_off(void) { if (caret.on) caret_xor(); }
 BOOL CreateCaret(HWND h, HBITMAP bm, int w, int ht)
 {
-    (void)bm;
     DestroyCaret();
+    caret.gray = bm == (HBITMAP)1;
     caret.h = h; caret.w = w ? w : GetSystemMetrics(SM_CXBORDER); caret.ht = ht ? ht : GetSystemMetrics(SM_CYBORDER);
     caret.hide = 1; caret.on = 0; caret.created = 1;
     caret.blink = GetProfileInt("windows", "CursorBlinkRate", 530);
@@ -614,12 +615,13 @@ static int script_step(void)
             script_wait_until = GetTickCount() + 30;
             return 1;
         }
-        if (!strcmp(cmd, "shot")) {
-            /* hide the caret so screenshots are deterministic */
+        if (!strcmp(cmd, "shot") || !strcmp(cmd, "shotcaret")) {
+            /* shot: the caret hidden, so screenshots are deterministic; shotcaret: the caret shown */
+            int want = !strcmp(cmd, "shotcaret") && caret.created && caret.hide == 0;
             int on = caret.on;
-            if (on) caret_xor();
+            if (on != want) caret_xor();
             w16_screenshot(arg);
-            if (on) caret_xor();
+            if (on != want) caret_xor();
             continue;
         }
         if (!strcmp(cmd, "quit")) exit(0);

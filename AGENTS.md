@@ -260,4 +260,7 @@ docs/THEMES.md: the theme architecture (owner direction: 3.11 first, Win 1/2/95/
 NEXT: Desktop (8, seg18:1419), Color (100, seg6:0DC8 modeless), International (3, seg12:194D), Fonts (2,
 seg9:0CBC), Ports (4, seg19:062E), Printers (1, seg20:1302); Internet applet; CEF spike for the browsers
 (download needs the owner's OK: cef_binary_154.0.34+g14c5a08+chromium-154.0.8037.98_linux64_minimal,
-326 MB); theme layer refactor; WM; scroll-bar focus (blinking thumb).
+326 MB); theme layer refactor; WM.
+Scroll-bar controls now show USER's focus caret (seg18:0A48/06F4: a gray caret, 2 px inside the thumb,
+following it); gray carets (CreateCaret bitmap 1) invert odd x + y. The Mouse dialog's first frame with
+the focused, blinking thumb matches real 3.11. Test scripts: `shotcaret` keeps the caret in the shot.

@@ -18,6 +18,19 @@ static W16Scroll *bar_of(HWND h, int bar)
 
 /* W16Window.sb[] is indexed [0]=horz [1]=vert; nc.c uses h->sb[bar] with SB_HORZ=0/SB_VERT=1 */
 
+/* USER seg18:06F4: the focus caret follows the thumb, 2 px in */
+static void place_focus_caret(HWND h)
+{
+    RECT r;
+    GetClientRect(h, &r);
+    int vert = (h->style & SBS_VERT) != 0;
+    int tp = w16_sb_thumb(&r, vert, bar_of(h, SB_CTL));
+    if (tp < 0) tp = 0;
+    int cxb = GetSystemMetrics(SM_CXBORDER), cyb = GetSystemMetrics(SM_CYBORDER);
+    if (vert) SetCaretPos(2 * cxb, tp + 2 * cyb);
+    else SetCaretPos(tp + 2 * cxb, 2 * cyb);
+}
+
 static void redraw_bar(HWND h, int bar)
 {
     if (!w16_window_visible(h)) return;
@@ -225,6 +238,7 @@ LRESULT w16_scrollbar_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         if (h->style & SBS_SIZEBOX) FillRect(dc, &r, w16_sys_brush(COLOR_SCROLLBAR));
         else w16_draw_sb_ctl(dc, &r, (h->style & SBS_VERT) != 0, bar_of(h, SB_CTL), 0, !(h->style & WS_DISABLED));
         EndPaint(h, &ps);
+        if (GetFocus() == h) place_focus_caret(h);
         return 0;
     }
     case WM_LBUTTONDOWN:
@@ -250,7 +264,22 @@ LRESULT w16_scrollbar_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     }
     case WM_GETDLGCODE: return DLGC_WANTARROWS;
     case WM_ENABLE: InvalidateRect(h, NULL, FALSE); return 0;
-    case WM_SETFOCUS: case WM_KILLFOCUS: return 0;
+    case WM_SETFOCUS: {
+        /* USER seg18:0A48: a blinking gray caret over the thumb, 2 px inside it */
+        RECT r;
+        GetClientRect(h, &r);
+        int vert = (h->style & SBS_VERT) != 0;
+        int cxb = GetSystemMetrics(SM_CXBORDER), cyb = GetSystemMetrics(SM_CYBORDER);
+        int w = (vert ? r.right - r.left : GetSystemMetrics(SM_CXHTHUMB)) - 4 * cxb;
+        int ht = (vert ? GetSystemMetrics(SM_CYVTHUMB) : r.bottom - r.top) - 4 * cyb;
+        CreateCaret(h, (HBITMAP)1, w, ht);
+        place_focus_caret(h);
+        ShowCaret(h);
+        return 0;
+    }
+    case WM_KILLFOCUS:
+        DestroyCaret();
+        return 0;
     case WM_ERASEBKGND: return 1;
     }
     return DefWindowProc(h, m, wp, lp);

@@ -2,7 +2,7 @@
 sleep 600
 key enter
 sleep 500
-shot shots/01-mouse.png
+shotcaret shots/01-mouse.png
 key right
 key right
 key tab

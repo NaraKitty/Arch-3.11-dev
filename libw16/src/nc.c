@@ -243,6 +243,18 @@ static int thumb_pos(W16Scroll *s, int track_len, int thumb)
     return (int)(((long)avail * p + range / 2) / range); /* MulDiv rounding, as measured */
 }
 
+/* where the thumb starts along the bar (as drawn by w16_draw_sb_ctl), -1 when there is none */
+int w16_sb_thumb(const RECT *r, int vert, W16Scroll *s)
+{
+    int len = vert ? r->bottom - r->top : r->right - r->left;
+    int a = vert ? GetSystemMetrics(SM_CYVSCROLL) : GetSystemMetrics(SM_CXHSCROLL);
+    if (len < 2 * a) return -1;
+    int thumb = vert ? GetSystemMetrics(SM_CYVTHUMB) : GetSystemMetrics(SM_CXHTHUMB);
+    int track = len - 2 * a + 2;
+    if (s->max <= s->min || track < thumb + 2) return -1;
+    return a - 1 + thumb_pos(s, track, thumb);
+}
+
 /* parts: 1 = line up, 2 = page up, 3 = thumb, 4 = page down, 5 = line down */
 int w16_sb_hit(const RECT *r, int vert, W16Scroll *s, int x, int y, RECT *part)
 {
