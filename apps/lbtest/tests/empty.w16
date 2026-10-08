@@ -1,5 +1,5 @@
-# lbtest's second set-up (command line "2"): B has 3 items and LBS_DISABLENOSCROLL (its vertical
-# bar stays, both arrows disabled; no extent, so the horizontal bar goes), C is an empty owner-draw
+# lbtest's second set-up (command line "2"): B has 3 items and LBS_DISABLENOSCROLL (seg43:0000 only
+# enables / disables the bars it was created with: both stay, all arrows disabled), C is an empty owner-draw
 # list. USER's behaviour checked (values from the seg35 decode, screenshots checked by eye):
 # - clicking the empty C gives it the focus: its owner gets WM_DRAWITEM itemID -1, ODA_FOCUS, state
 #   ODS_FOCUS | ODS_SELECTED (seg35:085C asks IsSelected for a missing item: -1, "selected"); no
@@ -10,8 +10,9 @@
 #   dropping 2 (each key notifies LBN_SELCHANGE).
 # regress: sh apps/lbtest/tests/lbtest.sh "$TEST" "$OUT" 2
 # ini: LBTEST.INI B vbar=1
-# ini: LBTEST.INI B hbar=0
+# ini: LBTEST.INI B hbar=1
 # ini: LBTEST.INI C count=0
+# ini: LBTEST.INI C vbar=0
 # ini: LBTEST.INI A sel=2,4
 # ini: LBTEST.INI A caret=4
 # ini: LBTEST.INI A anchor=4
